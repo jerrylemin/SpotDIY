@@ -1,6 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { providerLabel } from "../src/services/ipc";
+const invokeMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+
+import {
+  IpcError,
+  getAppStatus,
+  getSettingsSnapshot,
+  providerLabel,
+  setSetting,
+} from "../src/services/ipc";
 
 describe("provider labels", () => {
   it("keeps compact badges distinct from provider names", () => {
@@ -8,5 +18,51 @@ describe("provider labels", () => {
     expect(providerLabel("youtube")).toBe("YT");
     expect(providerLabel("soundcloud")).toBe("SC");
     expect(providerLabel("spotify")).toBe("SP");
+  });
+});
+
+describe("settings IPC contract", () => {
+  it("provides typed browser-preview defaults", async () => {
+    await expect(getSettingsSnapshot()).resolves.toEqual({
+      theme: "dark",
+      downloadsDirectory: null,
+      sourcePreferenceOrder: ["local", "soundcloud", "youtube", "spotify"],
+      firstRun: true,
+      storageMode: "standard",
+    });
+  });
+
+  it("rejects settings writes outside the native runtime", async () => {
+    await expect(setSetting({ key: "theme", value: "light" })).rejects.toBeInstanceOf(IpcError);
+  });
+
+  it("wraps malformed native status responses", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    invokeMock.mockResolvedValueOnce({ runtime: "tauri" });
+
+    try {
+      await expect(getAppStatus()).rejects.toBeInstanceOf(IpcError);
+    } finally {
+      Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+      invokeMock.mockReset();
+    }
+  });
+
+  it("wraps native setting persistence failures", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    invokeMock.mockRejectedValueOnce(new Error("database failure"));
+
+    try {
+      await expect(setSetting({ key: "theme", value: "light" })).rejects.toBeInstanceOf(IpcError);
+    } finally {
+      Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+      invokeMock.mockReset();
+    }
   });
 });

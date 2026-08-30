@@ -1,9 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 
-import type { AppStatus, ProviderKind } from "../types/domain";
+import type { AppStatus, ProviderKind, SettingValue, SettingsSnapshot } from "../types/domain";
 
 const providerKindSchema = z.enum(["local", "youtube", "soundcloud", "spotify"]);
+const sourceCapabilitiesSchema = z.object({
+  search: z.boolean(),
+  playback: z.boolean(),
+  metadata: z.boolean(),
+  artwork: z.boolean(),
+  lyrics: z.boolean(),
+  downloads: z.boolean(),
+  popularity: z.boolean(),
+  releaseDate: z.boolean(),
+  lyricsMetadata: z.boolean(),
+});
 
 const appStatusSchema = z.object({
   version: z.string(),
@@ -18,18 +29,29 @@ const appStatusSchema = z.object({
       label: z.string(),
       configured: z.boolean(),
       available: z.boolean(),
-      capabilities: z.object({
-        search: z.boolean(),
-        playback: z.boolean(),
-        metadata: z.boolean(),
-        artwork: z.boolean(),
-        lyrics: z.boolean(),
-        downloads: z.boolean(),
-      }),
+      capabilities: sourceCapabilitiesSchema,
       detail: z.string(),
     }),
   ),
 });
+
+const themeSchema = z.enum(["dark", "light", "system"]);
+const sourcePreferenceOrderSchema = z
+  .array(providerKindSchema)
+  .length(4)
+  .refine((value) => new Set(value).size === value.length, "Provider preference order cannot contain duplicates.");
+const settingsSnapshotSchema = z.object({
+  theme: themeSchema,
+  downloadsDirectory: z.string().nullable(),
+  sourcePreferenceOrder: sourcePreferenceOrderSchema,
+  firstRun: z.boolean(),
+  storageMode: z.enum(["standard", "portable"]),
+});
+const settingValueSchema = z.discriminatedUnion("key", [
+  z.object({ key: z.literal("theme"), value: themeSchema }),
+  z.object({ key: z.literal("downloadsDirectory"), value: z.string().nullable() }),
+  z.object({ key: z.literal("sourcePreferenceOrder"), value: sourcePreferenceOrderSchema }),
+]);
 
 export class IpcError extends Error {
   public constructor(message: string, public readonly cause?: unknown) {
@@ -59,6 +81,9 @@ function browserPreviewStatus(): AppStatus {
           artwork: true,
           lyrics: true,
           downloads: false,
+          popularity: false,
+          releaseDate: false,
+          lyricsMetadata: true,
         },
         detail: "Add a music folder to begin indexing.",
       },
@@ -74,6 +99,9 @@ function browserPreviewStatus(): AppStatus {
           artwork: true,
           lyrics: false,
           downloads: true,
+          popularity: true,
+          releaseDate: true,
+          lyricsMetadata: false,
         },
         detail: "Provider adapter awaits media-tool verification.",
       },
@@ -89,6 +117,9 @@ function browserPreviewStatus(): AppStatus {
           artwork: true,
           lyrics: false,
           downloads: true,
+          popularity: true,
+          releaseDate: true,
+          lyricsMetadata: false,
         },
         detail: "Provider adapter awaits media-tool verification.",
       },
@@ -104,10 +135,23 @@ function browserPreviewStatus(): AppStatus {
           artwork: true,
           lyrics: false,
           downloads: false,
+          popularity: true,
+          releaseDate: true,
+          lyricsMetadata: false,
         },
         detail: "Connect Client Credentials locally to search the catalog.",
       },
     ],
+  };
+}
+
+function browserPreviewSettings(): SettingsSnapshot {
+  return {
+    theme: "dark",
+    downloadsDirectory: null,
+    sourcePreferenceOrder: ["local", "soundcloud", "youtube", "spotify"],
+    firstRun: true,
+    storageMode: "standard",
   };
 }
 
@@ -125,6 +169,36 @@ export async function getAppStatus(): Promise<AppStatus> {
     return appStatusSchema.parse(response);
   } catch (error) {
     throw new IpcError("SpotDIY could not read its native application status.", error);
+  }
+}
+
+export async function getSettingsSnapshot(): Promise<SettingsSnapshot> {
+  if (!isTauriRuntime()) {
+    return browserPreviewSettings();
+  }
+
+  try {
+    const response = await invoke<unknown>("get_settings_snapshot");
+    return settingsSnapshotSchema.parse(response);
+  } catch (error) {
+    throw new IpcError("SpotDIY could not read its local settings.", error);
+  }
+}
+
+export async function setSetting(setting: SettingValue): Promise<SettingsSnapshot> {
+  try {
+    const parsedSetting = settingValueSchema.parse(setting);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Local settings require the native SpotDIY runtime.");
+    }
+
+    const response = await invoke<unknown>("set_setting", { setting: parsedSetting });
+    return settingsSnapshotSchema.parse(response);
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not persist that local setting.", error);
   }
 }
 

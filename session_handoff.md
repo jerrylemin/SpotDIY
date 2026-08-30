@@ -2,35 +2,31 @@
 
 Date: 2026-08-30
 Branch: `main`
-Bootstrap commit: `403d923cd44bf2ed86325a70bd54712216f99d68` (`chore: bootstrap SpotDIY architecture and development workflow`), followed by bookkeeping commit `9554dc28c14ed0c94be8e0dfc1e3a02c5481ace4` (`docs: record SpotDIY bootstrap milestone`); both are pushed to `origin/main`.
+Origin: `https://github.com/jerrylemin/SpotDIY`
 
 ## Completed
 
-- Confirmed the target directory was empty and initialized `main` with origin `https://github.com/jerrylemin/SpotDIY`.
-- Verified Node/pnpm, Python, FFmpeg, yt-dlp, uv, winget, WebView2, Rust stable MSVC, and Obsidian.
-- Ran the read-only research wave and saved seven provider/tooling reports under `docs/SpotDIY-Vault/Research/`.
-- Created project memory, approved design/plan documentation, initial Tauri/React/Rust shell, custom icon assets, Windows CI, and one frontend contract test.
+- Bootstrap architecture, workflow, Tauri/React shell, typed status contract, CI, project memory, icons, and research were completed in the earlier milestone.
+- Plan 02 unified music domain and SQLite foundation is complete in the current worktree.
+- The native core now has UUID-backed `TrackId`, `ArtistId`, `AlbumId`, and `SourceId`; `ProviderKind`; `UnifiedTrack`; `Artist`; `Album`; `TrackSource`; `LocalFileSource`; `VersionInfo`; and explicit `SourceCapabilities`.
+- SQLite uses bundled rusqlite, WAL, foreign keys, a busy timeout, synchronous FULL, ordered migration 1, schema metadata, and optional FTS5 probing. Standard startup stores `spotdiy.sqlite3` under `%LOCALAPPDATA%\\SpotDIY`.
+- Migration 1 contains `tracks`, `artists`, `track_artists`, `albums`, `track_sources`, `local_files`, `settings_metadata`, and `schema_metadata`. Focused repositories provide aggregate track persistence, artist/source reads, provider identity uniqueness, local metadata, and transaction rollback.
+- Durable settings provide typed theme, downloads directory, source-preference order, first-run, and storage-mode state. Ordinary settings are separated from future secret settings; no credential is stored in SQLite or sent through current IPC.
+- IPC now exposes `get_app_status`, `get_source_capabilities`, `get_settings_snapshot`, and `set_setting`, with explicit TypeScript types and Zod validation.
 
-## Verification so far
+## Verification
 
-- `pnpm typecheck` — passed.
-- `pnpm lint` — passed.
-- `pnpm test` — passed: 1 file, 1 test.
-- `pnpm build` — passed.
-- `cargo fmt --all -- --check` — passed after formatter run.
-- `cargo clippy --all-targets --all-features -- -D warnings` — passed.
-- `cargo test --all-targets` — passed; 0 Rust tests currently defined.
-
-## Additional verification
-
-- `pnpm tauri build` — passed; NSIS installer generated under `src-tauri/target/release/bundle/nsis/`.
-- CodeGraph 1.6.0 initialized and up to date: 37 files, 196 nodes, 370 edges.
-- Graphify 0.8.18 project integration installed with Codex hook.
-
-## Exact next atomic task
-
-Implement the domain/database slice from `docs/superpowers/plans/02-domain-and-database.md`: add SQLite WAL migrations, persisted settings, and typed library status without changing the approved frontend route contracts.
+- Rust: 25 tests passed; fmt check and clippy with warnings denied passed.
+- Frontend: typecheck, lint, 5 Vitest tests, and production build passed.
+- Tauri: x64 release executable and NSIS installer built; packaged launch smoke passed and initialized the standard LocalAppData database.
+- Independent read-only review PASS: no unresolved critical, high, or medium findings after the final source-move guard and current frontend tests.
 
 ## Known limitations
 
-The native shell reports an empty first-run state. Folder selection, indexing, playback, provider search, download tasks, lyrics, and durable settings remain in progress. The native launch smoke test passed; the full visual QA suite remains to be run.
+- Portable startup is intentionally deferred to its later plan. `Database::open(path)` is path-injected now, and persisted portable mode is rejected until deterministic executable-location selection exists.
+- Provider adapters/search, local library indexing, Source Fusion, playback, downloads, lyrics, playlists, queue, import/export, visual QA, and performance work remain later plans.
+- FTS5 is reported as a capability; search indexing is not implemented in Plan 02.
+
+## Exact next atomic task
+
+Plan 03 Local Library: folder selection, recursive incremental indexing, metadata extraction, local source persistence, and filesystem watching. Do not start provider search or playback before the local library seam is established.

@@ -11,8 +11,11 @@ src/                         React/TanStack frontend
   styles/                    SpotDIY visual system
   types/                     Shared frontend domain vocabulary
 src-tauri/                   Tauri 2 Rust application
-  src/domain/                Provider capability vocabulary
-  src/ipc/                   Serialized native DTOs
+  migrations/                Ordered SQLite schema migrations
+  src/domain/                Typed unified music domain model
+  src/db/                    SQLite initialization and focused repositories
+  src/ipc/                   Serialized native DTOs and status commands
+  src/settings/              Typed durable settings repository
   icons/                     Generated Windows/app icon assets
 tests/                       Frontend behavior tests
 docs/superpowers/specs/      Approved design specification
@@ -23,4 +26,4 @@ docs/execution/              Machine/human execution ledger
 public/                      Brand source assets
 ```
 
-The intended Rust service boundaries are `LibraryService`, `SearchService`, `SourceFusionService`, `SourceResolver`, `PlaybackService`, `DownloadService`, `LyricsService`, `PlaylistService`, `QueueService`, `SettingsService`, `BackupService`, `AnalyticsService`, and `MediaToolManager`. Add them only when their slice is implemented; do not create empty façade modules.
+The intended Rust service boundaries are `LibraryService`, `SearchService`, `SourceFusionService`, `SourceResolver`, `PlaybackService`, `DownloadService`, `LyricsService`, `PlaylistService`, `QueueService`, `SettingsService`, `BackupService`, `AnalyticsService`, and `MediaToolManager`. Add them only when their slice is implemented; do not create empty facade modules.

@@ -23,4 +23,17 @@ Passed after the checks above: `pnpm tauri build` (NSIS installer generated) and
 
 Browser preview smoke also passed: Playwright rendered Home and Search, Ctrl+K opened the command palette, command navigation reached Search, typed queries rendered independent provider sections, and the final console contained no errors beyond React development-tools info.
 
-Not yet run: database tests, provider live tests, and the full Playwright visual QA suite.
+At the bootstrap boundary, database tests, provider live tests, and the full Playwright visual QA suite were not yet run; the Plan 02 database tests are recorded below. Provider live tests and full visual QA remain later-plan checks.
+
+## 2026-08-30 — Plan 02 verification
+
+- `cargo fmt --manifest-path src-tauri/Cargo.toml` — applied; `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` — passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` — passed: 25 Rust tests, 0 failures. Coverage includes migration 1, ordering, rollback, WAL/FK, busy-reader backup protection, domain invariants, repository round trips/rollback, preferred-source integrity, settings, and IPC status.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` — passed.
+- `pnpm typecheck` — passed.
+- `pnpm lint` — passed.
+- `pnpm test` — passed: 1 file, 5 tests.
+- `pnpm build` — passed; Vite production bundle generated. Existing Browserslist and Tailwind content warnings remain non-fatal.
+- `pnpm tauri build` with the verified Cargo bin directory inherited in `PATH` — passed; x64 release executable and NSIS installer generated.
+- Packaged launch smoke — passed; release executable remained running through the startup window and initialized `%LOCALAPPDATA%\\SpotDIY\\spotdiy.sqlite3`.
+- Independent Plan 02 review — PASS after the source-move guard and current frontend tests; no unresolved critical, high, or medium findings.

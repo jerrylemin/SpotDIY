@@ -6,8 +6,9 @@ Statuses are only `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, or `COMPLETE`. `COMPL
 |---|---|---|---|---|---|
 | Repository/toolchain bootstrap | 01 | COMPLETE | 403d923 | typecheck, lint, frontend build, Rust fmt/clippy/test, Tauri build | Remote was empty; origin configured safely. |
 | Tauri/React application shell | 01, 11 | IN PROGRESS | 403d923 | Vitest, Vite build, Rust test, Playwright smoke | Routes and truthful empty states exist. |
-| Unified music domain model | 02 | IN PROGRESS | uncommitted | provider badge contract only | Core Rust capability vocabulary exists; Track entity comes next. |
-| SQLite database and migrations | 02 | NOT STARTED | — | — | WAL and rollback backup required. |
+| Unified music domain model | 02 | COMPLETE | Plan 02 milestone | 5 Rust tests, 5 frontend tests | Typed IDs, `UnifiedTrack`, artists/albums, version qualifiers, source capabilities, and provider identity rules are implemented. |
+| SQLite database and migrations | 02 | COMPLETE | Plan 02 milestone | 8 database tests, 5 repository tests | SQLite WAL/FK initialization, ordered migration 1, backup/checkpoint safety, schema constraints, and repository transactions are covered. |
+| Durable application settings | 02 | COMPLETE | Plan 02 milestone | 6 Rust tests, 5 frontend tests | Typed settings snapshot, atomic writes, defaults, first-run state, and ordinary/secret boundary are implemented. |
 | Local library indexing | 03 | NOT STARTED | — | — | Recursive incremental scan and watcher required. |
 | mpv playback backend | 04 | NOT STARTED | — | — | Playback adapter must remain behind PlaybackService. |
 | Provider adapters and search | 05 | NOT STARTED | — | — | Independent partial results; live calls opt-in in CI. |
@@ -20,4 +21,4 @@ Statuses are only `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, or `COMPLETE`. `COMPL
 | Import/export and portable mode | 13 | NOT STARTED | — | — | Transactional `.spotdiy` archive. |
 | Smart features and analytics | 14 | NOT STARTED | — | — | Local-only listening analytics. |
 | Advanced visual exploration | 15 | NOT STARTED | — | — | Music Map, Galaxy, radial menu, Theme Studio. |
-| Quality, performance, release | 16 | IN PROGRESS | 403d923 | CI skeleton, Tauri build, launch smoke | Release build and baseline remain. |
+| Quality, performance, release | 16 | IN PROGRESS | Plan 02 milestone | Rust fmt/clippy/tests, frontend checks, Tauri release build, launch smoke | Broader release, performance, and visual QA remain for later plans. |
