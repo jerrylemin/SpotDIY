@@ -2,7 +2,7 @@
 
 | Milestone | Scope | Status | Evidence |
 |---|---|---|---|
-| M0 — Bootstrap | Repository, toolchain, memory, research, spec, plans, shell, CI | COMPLETE | `verification-log.md`; release build passed. |
+| M0 — Bootstrap | Repository, toolchain, memory, research, spec, plans, shell, CI | COMPLETE | `403d923`; `verification-log.md`; release build passed. |
 | M1 — Domain and storage | Unified track model, SQLite WAL, migrations, settings, typed IPC | NOT STARTED | Plan 02. |
 | M2 — Local listening | Library scan, file metadata, mpv playback, queue | NOT STARTED | Plans 03–04, 08. |
 | M3 — Online sources | Provider adapters, partial search, fusion, resolver | NOT STARTED | Plans 05–06. |

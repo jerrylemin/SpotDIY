@@ -2,7 +2,7 @@
 
 ## Result
 
-The empty SpotDIY repository was initialized on `main`, the approved architecture/spec/plans and project memory were written, and the Tauri/React/Rust shell reached a Windows NSIS installer. Provider adapters, persistence, media playback, and library indexing remain future slices.
+The empty SpotDIY repository was initialized on `main`, the approved architecture/spec/plans and project memory were written, and the Tauri/React/Rust shell reached a Windows NSIS installer. Bootstrap commit `403d923cd44bf2ed86325a70bd54712216f99d68` is pushed to `origin/main`. Provider adapters, persistence, media playback, and library indexing remain future slices.
 
 ## Evidence
 

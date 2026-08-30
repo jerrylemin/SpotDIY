@@ -2,7 +2,7 @@
 
 Date: 2026-08-30
 Branch: `main`
-Latest commit: no commit yet; the remote repository has no branches.
+Bootstrap commit: `403d923cd44bf2ed86325a70bd54712216f99d68` (`chore: bootstrap SpotDIY architecture and development workflow`), pushed to `origin/main`.
 
 ## Completed
 
@@ -33,4 +33,4 @@ Implement the domain/database slice from `docs/superpowers/plans/02-domain-and-d
 
 ## Known limitations
 
-The native shell reports an empty first-run state. Folder selection, indexing, playback, provider search, download tasks, lyrics, and durable settings remain in progress. The native launch smoke test and visual QA remain to be run.
+The native shell reports an empty first-run state. Folder selection, indexing, playback, provider search, download tasks, lyrics, and durable settings remain in progress. The native launch smoke test passed; the full visual QA suite remains to be run.
