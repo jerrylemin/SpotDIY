@@ -37,3 +37,4 @@ At the bootstrap boundary, database tests, provider live tests, and the full Pla
 - `pnpm tauri build` with the verified Cargo bin directory inherited in `PATH` — passed; x64 release executable and NSIS installer generated.
 - Packaged launch smoke — passed; release executable remained running through the startup window and initialized `%LOCALAPPDATA%\\SpotDIY\\spotdiy.sqlite3`.
 - Independent Plan 02 review — PASS after the source-move guard and current frontend tests; no unresolved critical, high, or medium findings.
+- Implementation commit — `2ec431b7fcbf31fbb2f2cd3b092b66ad75e81365` (`feat: add unified music domain and sqlite foundation`); the final documentation follow-up is the delivery tip.

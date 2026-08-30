@@ -15,3 +15,4 @@
 - Integrated focused track/artist/source repositories with transactional aggregate creation, provider identity uniqueness, local-file metadata, and preferred-source integrity checks.
 - Integrated typed ordinary settings persistence and narrow settings IPC; no secret-bearing field or generic SQL command was added.
 - Updated the TypeScript domain vocabulary, Zod IPC validation, execution records, project memory, and ADRs. Plan 03 work was not started.
+- Implementation was committed as `2ec431b7fcbf31fbb2f2cd3b092b66ad75e81365`; a documentation-only follow-up records the final remote verification.

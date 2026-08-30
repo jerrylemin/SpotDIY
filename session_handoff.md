@@ -3,6 +3,7 @@
 Date: 2026-08-30
 Branch: `main`
 Origin: `https://github.com/jerrylemin/SpotDIY`
+Plan 02 implementation commit: `2ec431b7fcbf31fbb2f2cd3b092b66ad75e81365`
 
 ## Completed
 
@@ -20,6 +21,7 @@ Origin: `https://github.com/jerrylemin/SpotDIY`
 - Frontend: typecheck, lint, 5 Vitest tests, and production build passed.
 - Tauri: x64 release executable and NSIS installer built; packaged launch smoke passed and initialized the standard LocalAppData database.
 - Independent read-only review PASS: no unresolved critical, high, or medium findings after the final source-move guard and current frontend tests.
+- The documentation follow-up is the final local commit after this implementation commit; the pushed `origin/main` SHA is recorded in the final delivery report.
 
 ## Known limitations
 
