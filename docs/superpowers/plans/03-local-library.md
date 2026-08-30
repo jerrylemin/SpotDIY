@@ -92,7 +92,7 @@
 - [x] Update `PROJECT_STATE.md`, `feature_progress.md`, `project_structure.md`, `session_handoff.md`, `ARCHITECTURE.md` if boundaries changed, `DECISION_LOG.md`, `TEST_MATRIX.md`, and the execution agent-ledger/integration-log/verification-log with exact evidence.
 - [x] Update the required Obsidian notes when the implementation adds durable Plan 03 knowledge.
 - [x] Review the final diff for secrets, personal absolute paths, database/cache/log/audio artifacts, unrelated edits, stale imports, dead code, and scope expansion.
-- [ ] Commit as `feat: add incremental local library indexing` only after every required gate passes; push only if the authorized workflow permits it.
+- [x] Commit as `feat: add incremental local library indexing` only after every required gate passes; push only if the authorized workflow permits it.
 
 ## Interfaces and acceptance checks
 
