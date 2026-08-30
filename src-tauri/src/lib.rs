@@ -5,6 +5,7 @@ pub mod library;
 pub mod media_tools;
 pub mod playback {
     pub mod backend;
+    pub mod mpv;
 }
 pub mod queue;
 pub mod settings;
