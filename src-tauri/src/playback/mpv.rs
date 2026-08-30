@@ -829,6 +829,7 @@ mod windows_session {
             generation,
             request_rx,
             event_tx,
+            process_control_tx.clone(),
             process_exit_rx.clone(),
             config.position_event_interval,
         ));
@@ -1312,11 +1313,63 @@ mod windows_session {
         }
     }
 
+    pub(super) fn signal_unhealthy_generation_kill(
+        process_control_tx: &mpsc::Sender<ProcessControl>,
+        event_tx: &mpsc::UnboundedSender<StampedSessionEvent>,
+        generation: u64,
+    ) -> Result<(), BackendError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        match process_control_tx.try_send(ProcessControl::Kill {
+            response: response_tx,
+        }) {
+            Ok(()) => {
+                let event_tx = event_tx.clone();
+                tokio::spawn(async move {
+                    let error = match time::timeout(FORCED_REAP_TIMEOUT, response_rx).await {
+                        Ok(Ok(Ok(()))) => None,
+                        Ok(Ok(Err(error))) => Some(error),
+                        Ok(Err(_)) => Some(BackendError::Disconnected),
+                        Err(_) => Some(BackendError::Timeout {
+                            operation: "force kill".to_owned(),
+                        }),
+                    };
+                    if let Some(error) = error {
+                        let _ = event_tx.send(StampedSessionEvent {
+                            generation,
+                            event: SessionEvent::Disconnected(error),
+                        });
+                    }
+                });
+                Ok(())
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                // The capacity-one channel carries only Kill, so a full channel
+                // means termination is already pending for this generation.
+                Ok(())
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(BackendError::Operation {
+                detail: "mpv process termination channel is closed".to_owned(),
+            }),
+        }
+    }
+
+    pub(super) fn terminate_after_write_failure(
+        write_error: BackendError,
+        process_control_tx: &mpsc::Sender<ProcessControl>,
+        event_tx: &mpsc::UnboundedSender<StampedSessionEvent>,
+        generation: u64,
+    ) -> BackendError {
+        signal_unhealthy_generation_kill(process_control_tx, event_tx, generation)
+            .err()
+            .unwrap_or(write_error)
+    }
+
     async fn run_pipe_session(
         client: NamedPipeClient,
         generation: u64,
         mut request_rx: mpsc::Receiver<OutboundRequest>,
         event_tx: mpsc::UnboundedSender<StampedSessionEvent>,
+        process_control_tx: mpsc::Sender<ProcessControl>,
         mut process_exit_rx: watch::Receiver<Option<ProcessExit>>,
         position_event_interval: Duration,
     ) {
@@ -1366,7 +1419,12 @@ mod windows_session {
                     )
                     .await
                     {
-                        disconnect_error = error;
+                        disconnect_error = terminate_after_write_failure(
+                            error,
+                            &process_control_tx,
+                            &event_tx,
+                            generation,
+                        );
                         break;
                     }
                 }
@@ -1476,6 +1534,14 @@ mod windows_session {
 
         use super::*;
 
+        pub(crate) type ProtocolSessionParts = (
+            mpsc::Sender<OutboundRequest>,
+            mpsc::UnboundedReceiver<StampedSessionEvent>,
+            JoinHandle<()>,
+            watch::Sender<Option<ProcessExit>>,
+            mpsc::Receiver<ProcessControl>,
+        );
+
         pub(crate) async fn connected_pair() -> (NamedPipeServer, NamedPipeClient) {
             let pipe_name = fresh_pipe_name();
             let server = ServerOptions::new()
@@ -1490,25 +1556,28 @@ mod windows_session {
         pub(crate) fn start_protocol_session(
             client: NamedPipeClient,
             request_timeout: Duration,
-        ) -> (
-            mpsc::Sender<OutboundRequest>,
-            mpsc::UnboundedReceiver<StampedSessionEvent>,
-            JoinHandle<()>,
-            watch::Sender<Option<ProcessExit>>,
-        ) {
+        ) -> ProtocolSessionParts {
             let (request_tx, request_rx) = mpsc::channel(8);
             let (event_tx, event_rx) = mpsc::unbounded_channel();
+            let (process_control_tx, process_control_rx) = mpsc::channel(1);
             let (process_exit_tx, process_exit_rx) = watch::channel(None);
             let task = tokio::spawn(run_pipe_session(
                 client,
                 7,
                 request_rx,
                 event_tx,
+                process_control_tx,
                 process_exit_rx,
                 Duration::from_millis(250),
             ));
             let _ = request_timeout;
-            (request_tx, event_rx, task, process_exit_tx)
+            (
+                request_tx,
+                event_rx,
+                task,
+                process_exit_tx,
+                process_control_rx,
+            )
         }
 
         pub(crate) fn exact_args(pipe_name: &str) -> Vec<OsString> {
@@ -1672,9 +1741,9 @@ mod tests {
             connected_pair, exact_args, start_protocol_session,
         };
         use crate::playback::mpv::windows_session::{
-            force_process_and_reap, send_request, wait_for_file_loaded_events, write_frame_bounded,
-            write_pending_request, FrameWriteError, ProcessControl, ProcessExit, SessionEvent,
-            StampedSessionEvent,
+            force_process_and_reap, send_request, terminate_after_write_failure,
+            wait_for_file_loaded_events, write_frame_bounded, write_pending_request,
+            FrameWriteError, ProcessControl, ProcessExit, SessionEvent, StampedSessionEvent,
         };
 
         struct PendingWriter;
@@ -1722,7 +1791,7 @@ mod tests {
         #[tokio::test]
         async fn correlates_replies_across_interleaved_events_with_unique_ids() {
             let (server, client) = connected_pair().await;
-            let (request_tx, mut event_rx, task, _process_exit_tx) =
+            let (request_tx, mut event_rx, task, _process_exit_tx, _process_control_rx) =
                 start_protocol_session(client, Duration::from_secs(1));
             let (read_half, mut write_half) = tokio::io::split(server);
             let mut reader = BufReader::new(read_half);
@@ -1804,7 +1873,7 @@ mod tests {
         #[tokio::test]
         async fn eof_disconnects_and_fails_pending_requests() {
             let (mut server, client) = connected_pair().await;
-            let (request_tx, mut event_rx, task, _process_exit_tx) =
+            let (request_tx, mut event_rx, task, _process_exit_tx, _process_control_rx) =
                 start_protocol_session(client, Duration::from_secs(1));
             let request = tokio::spawn({
                 let request_tx = request_tx.clone();
@@ -1840,7 +1909,7 @@ mod tests {
         #[tokio::test]
         async fn requests_time_out_when_the_server_does_not_reply() {
             let (mut server, client) = connected_pair().await;
-            let (request_tx, _event_rx, task, _process_exit_tx) =
+            let (request_tx, _event_rx, task, _process_exit_tx, _process_control_rx) =
                 start_protocol_session(client, Duration::from_millis(50));
             let request = tokio::spawn({
                 let request_tx = request_tx.clone();
@@ -1906,11 +1975,53 @@ mod tests {
                 })
             );
             assert!(pending.is_empty());
+            let write_error = actor_result.unwrap_err();
             assert_eq!(
-                actor_result,
-                Err(BackendError::Timeout {
+                write_error,
+                BackendError::Timeout {
                     operation: "write request".to_owned()
-                })
+                }
+            );
+
+            let (process_control_tx, mut process_control_rx) = tokio::sync::mpsc::channel(1);
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+            assert_eq!(
+                terminate_after_write_failure(write_error, &process_control_tx, &event_tx, 7),
+                BackendError::Timeout {
+                    operation: "write request".to_owned()
+                }
+            );
+            let control = process_control_rx.try_recv().unwrap();
+            let ProcessControl::Kill { response } = control;
+            response
+                .send(Err(BackendError::Operation {
+                    detail: "injected write-path kill failure".to_owned(),
+                }))
+                .unwrap();
+            let event = time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(matches!(
+                event,
+                StampedSessionEvent {
+                    generation: 7,
+                    event: SessionEvent::Disconnected(BackendError::Operation { detail })
+                } if detail == "injected write-path kill failure"
+            ));
+
+            let (closed_control_tx, closed_control_rx) = tokio::sync::mpsc::channel(1);
+            drop(closed_control_rx);
+            assert_eq!(
+                terminate_after_write_failure(
+                    BackendError::Disconnected,
+                    &closed_control_tx,
+                    &event_tx,
+                    7,
+                ),
+                BackendError::Operation {
+                    detail: "mpv process termination channel is closed".to_owned()
+                }
             );
         }
 
