@@ -1,0 +1,47 @@
+# Frontend dependencies and build output
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Rust/Tauri build output
+src-tauri/target/
+src-tauri/gen/
+
+# Local application data and secrets
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+logs/
+cache/
+downloads/
+Data/
+
+# Tooling indexes and local reports
+.codegraph/
+.graphify/
+graphify-out/
+coverage/
+playwright-report/
+test-results/
+.playwright-cli/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local media and generated artifacts
+*.mp3
+*.flac
+*.m4a
+*.wav
+*.ogg
+*.opus
+*.webm
+*.mp4

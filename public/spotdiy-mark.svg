@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">SpotDIY mark</title>
+  <desc id="desc">Three rounded source paths converge into a waveform play mark.</desc>
+  <rect width="256" height="256" rx="64" fill="#17181d"/>
+  <path d="M58 75c33-25 72-25 105 0" fill="none" stroke="#d7ff60" stroke-linecap="round" stroke-width="18"/>
+  <path d="M52 111c36-23 72-23 110 0" fill="none" stroke="#8e7bff" stroke-linecap="round" stroke-width="18"/>
+  <path d="M50 148c30-19 60-19 91-1l-23 12 57 32-5-65-21 12c-37-24-70-24-99-5" fill="none" stroke="#f2f0eb" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+</svg>
