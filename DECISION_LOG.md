@@ -7,3 +7,4 @@
 - [ADR-0005](docs/SpotDIY-Vault/ADRs/ADR-0005-sqlite-migrations.md): embedded ordered SQLite migrations, WAL safety, and the Plan 02 schema boundary.
 - [ADR-0006](docs/SpotDIY-Vault/ADRs/ADR-0006-provider-source-identity.md): typed SpotDIY IDs, provider identity uniqueness, preferred-source integrity, and Spotify metadata-only sources.
 - [ADR-0007](docs/SpotDIY-Vault/ADRs/ADR-0007-settings-storage.md): typed ordinary settings in SQLite with a secure-credential boundary and deferred portable startup.
+- [ADR-0008](docs/SpotDIY-Vault/ADRs/ADR-0008-local-library-identity-and-reconciliation.md): persistent folder ownership, opaque local identity, watcher recovery, and conservative scan reconciliation.

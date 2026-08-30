@@ -38,3 +38,20 @@ At the bootstrap boundary, database tests, provider live tests, and the full Pla
 - Packaged launch smoke — passed; release executable remained running through the startup window and initialized `%LOCALAPPDATA%\\SpotDIY\\spotdiy.sqlite3`.
 - Independent Plan 02 review — PASS after the source-move guard and current frontend tests; no unresolved critical, high, or medium findings.
 - Implementation commit — `2ec431b7fcbf31fbb2f2cd3b092b66ad75e81365` (`feat: add unified music domain and sqlite foundation`); the final documentation follow-up is the delivery tip.
+
+## 2026-08-30 - Plan 03 Local Library final verification
+
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` - passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` - passed: 53 Rust tests, 0 failures.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` - passed.
+- `pnpm test` - passed: 4 files, 18 tests.
+- `pnpm typecheck` - passed.
+- `pnpm lint` - passed.
+- `pnpm build` - passed; existing Browserslist stale-data and Tailwind content warnings remain non-fatal.
+- `pnpm tauri build` - passed; generated `src-tauri/target/release/spotdiy.exe` and `src-tauri/target/release/bundle/nsis/SpotDIY_0.1.0_x64-setup.exe`.
+- Packaged launch smoke - passed; the release executable reported window title `SpotDIY`, stayed alive for five seconds, closed cleanly, and returned exit code 0.
+- Native synthetic-folder smoke - passed against the final release build: 2 supported candidates (1 indexed WAV, 1 corrupt error), partial error retained, restart generation advanced, unchanged rescan preserved identity/fingerprint, watcher create/forced modify/rename/delete/restore reconciled correctly, reveal succeeded, folder removal deleted only library rows, and synthetic media remained.
+- Native smoke fixture cleanup - passed; the exact temporary fixture and persisted test folder were removed, and no `spotdiy` process remained.
+- Mocked-IPC browser smoke - configuration gap recorded: `pnpm exec playwright --version` reports 1.58.0, but `pnpm exec playwright test --list` fails with `unknown command 'test'`; no Playwright browser project/configuration exists in the repository. Native CDP smoke is the corresponding release evidence.
+- Independent read-only review - correctness findings for transient scan errors, watcher recovery, missing-root reactivation, reparse-point policy, and partial-error persistence were fixed and covered by focused tests.
+- `graphify update .` - passed; ignored derived output rebuilt with 1,202 nodes, 1,662 edges, and 109 communities. No generated graph artifacts are staged.

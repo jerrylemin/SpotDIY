@@ -1,5 +1,7 @@
 # Session handoff
 
-The authoritative handoff is the repository-root [session_handoff.md](../../session_handoff.md). Plan 02 is complete at the implementation boundary; the root handoff records the exact delivery commit and remote SHA after push.
+The authoritative handoff is the repository-root [session_handoff.md](../../session_handoff.md). Plan 03 is complete at the implementation boundary; the root handoff records the exact delivery commit and remote SHA after the authorized push.
 
-The next plan is Plan 03 Local Library. Do not begin provider search or playback before the local library and source seams are established.
+Plan 03 provides persistent multi-folder ownership, recursive incremental/reconciliation scans, Lofty metadata and measured quality, streaming SHA-256 evidence, artwork caching, Notify watcher recovery, typed paged Library IPC/UI, source availability/error states, and ownership-validated reveal. Playback controls remain disabled.
+
+The next plan is Plan 04 Playback Engine. Do not begin provider search or Source Fusion before the playback/source boundary is explicitly designed.

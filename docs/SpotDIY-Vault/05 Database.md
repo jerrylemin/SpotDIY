@@ -19,4 +19,29 @@ Known access paths have indexes for normalized titles, updated tracks, provider 
 
 Each pending migration runs in an immediate transaction and advances `user_version` only after success. The full migration list is validated before application. Destructive migrations checkpoint WAL and inspect the busy result before copying the main file, so an active reader cannot produce an incomplete backup. FTS5 is optional and does not alter the initial migration contract.
 
-Future logical tables such as playlists, queue, downloads, lyrics, history, caches, and overrides belong in later migrations. Secrets never belong in SQLite. See [ADR-0005](ADRs/ADR-0005-sqlite-migrations.md).
+## Plan 03 migration 2
+
+Migration 2 leaves migration 1 unchanged and adds `library_folders` with an
+opaque folder ID, canonical display path, case-insensitive normalized path key,
+enabled flag, scan status/generation, scan timestamps/errors, and aggregate
+counts derived from managed local files. It extends `local_files` with nullable
+legacy-compatible folder/path, normalized-key, container, index-status,
+status-detail, last-seen/indexed timestamps and generation, and artwork cache
+references. Folder, generation, page-order, content-fingerprint, and normalized
+path indexes support bounded scans and reads; fingerprints are deliberately not
+unique-constrained.
+
+Migration 2 rewrites path-shaped Plan 02 local provider item IDs to stable
+`legacy-local-*` values. Legacy rows remain intact and outside current managed
+folder/status/page counts. If a selected folder later discovers the same path,
+the scanner promotes that row into folder ownership instead of violating the
+legacy global path uniqueness constraint or creating a duplicate identity.
+
+Library writes keep file I/O outside SQLite transactions and write each track,
+artists, album, source, and local-file aggregate atomically. Confirmed missing
+files update source availability without deleting metadata; removing a managed
+folder deletes only its local source/index rows and safe orphan tracks, never
+the user media path. Migration foreign-key checks run inside the migration
+transaction and again after startup.
+
+Future logical tables such as playlists, queue, downloads, lyrics, history, caches, and overrides belong in later migrations. Secrets never belong in SQLite. See [ADR-0005](ADRs/ADR-0005-sqlite-migrations.md) and [ADR-0008](ADRs/ADR-0008-local-library-identity-and-reconciliation.md).

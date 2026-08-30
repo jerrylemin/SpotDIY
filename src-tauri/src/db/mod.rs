@@ -2,15 +2,16 @@ pub mod repository;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use rusqlite::{Connection, TransactionBehavior};
 use thiserror::Error;
 
 const INITIAL_MIGRATION_SQL: &str = include_str!("../../migrations/0001_initial.sql");
+const LOCAL_LIBRARY_MIGRATION_SQL: &str = include_str!("../../migrations/0002_local_library.sql");
 
-pub const LATEST_SCHEMA_VERSION: u32 = 1;
+pub const LATEST_SCHEMA_VERSION: u32 = 2;
 pub const DATABASE_FILE_NAME: &str = "spotdiy.sqlite3";
 pub const APPLICATION_DATA_DIRECTORY: &str = "SpotDIY";
 
@@ -29,12 +30,20 @@ struct Migration {
     destructive: bool,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "0001_initial",
-    sql: INITIAL_MIGRATION_SQL,
-    destructive: false,
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "0001_initial",
+        sql: INITIAL_MIGRATION_SQL,
+        destructive: false,
+    },
+    Migration {
+        version: 2,
+        name: "0002_local_library",
+        sql: LOCAL_LIBRARY_MIGRATION_SQL,
+        destructive: false,
+    },
+];
 
 #[derive(Debug, Error)]
 pub enum DatabaseError {
@@ -94,8 +103,9 @@ pub enum DatabaseError {
     Query(#[from] rusqlite::Error),
 }
 
+#[derive(Clone)]
 pub struct Database {
-    connection: Mutex<Connection>,
+    connection: Arc<Mutex<Connection>>,
     path: PathBuf,
     fts5_available: bool,
 }
@@ -122,7 +132,7 @@ impl Database {
         let fts5_available = probe_fts5(&connection);
 
         Ok(Self {
-            connection: Mutex::new(connection),
+            connection: Arc::new(Mutex::new(connection)),
             path,
             fts5_available,
         })
@@ -279,6 +289,20 @@ fn run_migrations(
                 name: migration.name,
                 source,
             })?;
+        let foreign_keys_clean = foreign_key_check_is_clean(&transaction).map_err(|source| {
+            DatabaseError::Migration {
+                version: migration.version,
+                name: migration.name,
+                source,
+            }
+        })?;
+        if !foreign_keys_clean {
+            return Err(DatabaseError::Migration {
+                version: migration.version,
+                name: migration.name,
+                source: rusqlite::Error::InvalidQuery,
+            });
+        }
         transaction
             .commit()
             .map_err(|source| DatabaseError::Migration {
@@ -306,29 +330,21 @@ fn validate_migrations(migrations: &[Migration]) -> Result<u32, DatabaseError> {
 }
 
 fn verify_foreign_keys(connection: &Connection) -> Result<(), DatabaseError> {
-    let mut statement = connection
-        .prepare("PRAGMA foreign_key_check")
-        .map_err(|source| DatabaseError::StateQuery {
+    let is_clean =
+        foreign_key_check_is_clean(connection).map_err(|source| DatabaseError::StateQuery {
             operation: "foreign_key_check",
             source,
         })?;
-    let mut rows = statement
-        .query([])
-        .map_err(|source| DatabaseError::StateQuery {
-            operation: "foreign_key_check",
-            source,
-        })?;
-    if rows
-        .next()
-        .map_err(|source| DatabaseError::StateQuery {
-            operation: "foreign_key_check",
-            source,
-        })?
-        .is_some()
-    {
+    if !is_clean {
         return Err(DatabaseError::ForeignKeyCheck);
     }
     Ok(())
+}
+
+fn foreign_key_check_is_clean(connection: &Connection) -> Result<bool, rusqlite::Error> {
+    let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
+    let mut rows = statement.query([])?;
+    Ok(rows.next()?.is_none())
 }
 
 fn probe_fts5(connection: &Connection) -> bool {
@@ -456,6 +472,84 @@ mod tests {
                 .unwrap();
             assert_eq!(exists, 1, "missing table {table}");
         }
+
+        let columns: Vec<String> = database
+            .with_connection(|connection| {
+                let mut statement = connection.prepare("PRAGMA table_info(library_folders)")?;
+                let values = statement
+                    .query_map([], |row| row.get(1))?
+                    .collect::<Result<Vec<_>, _>>();
+                values
+            })
+            .unwrap();
+        assert!(columns.contains(&"scan_generation".to_owned()));
+        assert!(columns.contains(&"last_scan_finished_at".to_owned()));
+        assert!(columns.contains(&"last_scan_error".to_owned()));
+
+        let rejected = database.with_connection(|connection| {
+            connection.execute(
+                "INSERT INTO library_folders (
+                    id, path, normalized_path_key, created_at, updated_at
+                 ) VALUES (NULL, 'C:\\\\Music', 'c:\\\\music', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+        });
+        assert!(rejected.is_err(), "folder IDs must not accept NULL");
+    }
+
+    #[test]
+    fn migration_two_preserves_plan_two_rows_and_rewrites_path_identity() {
+        let path = TempDatabasePath::new("migration-two-legacy");
+        let mut connection = Connection::open(path.path()).unwrap();
+        configure_connection(&connection).unwrap();
+        run_migrations(&mut connection, None, &MIGRATIONS[..1]).unwrap();
+
+        let track_id = uuid::Uuid::new_v4().to_string();
+        let source_id = uuid::Uuid::new_v4().to_string();
+        let legacy_path = r"C:\Music\legacy.flac";
+        connection
+            .execute(
+                "INSERT INTO tracks (id, title, normalized_title, created_at, updated_at)
+                 VALUES (?1, 'Legacy', 'legacy', ?2, ?2)",
+                params![track_id, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO track_sources (
+                    id, track_id, provider_kind, provider_item_id, created_at, updated_at
+                 ) VALUES (?1, ?2, 'local', ?3, ?4, ?4)",
+                params![source_id, track_id, legacy_path, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO local_files (source_id, path, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?3)",
+                params![source_id, legacy_path, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+
+        run_migrations(&mut connection, None, MIGRATIONS).unwrap();
+
+        let provider_item_id: String = connection
+            .query_row(
+                "SELECT provider_item_id FROM track_sources WHERE id = ?1",
+                params![source_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(provider_item_id, legacy_path);
+        assert!(provider_item_id.starts_with("legacy-local-"));
+
+        let local_file_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM local_files", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(local_file_count, 1);
+        let schema_version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(schema_version, 2);
     }
 
     #[test]

@@ -4,11 +4,11 @@
 |---|---|---|
 | Frontend type safety | `pnpm typecheck` | Strict DTO coverage for every IPC command. |
 | Frontend lint | `pnpm lint` | Keep no unused values and hook rules clean. |
-| Frontend behavior | `pnpm test` — 5 tests | Browser-preview defaults, provider labels, native status validation, and settings failure boundaries. |
+| Frontend behavior | `pnpm test` — 4 files, 18 tests | Browser-preview defaults, provider labels, native status/settings validation, library dialog/page/progress behavior, pagination, quality, unavailable rows, removal confirmation, and playback exclusion. |
 | Frontend build | `pnpm build` | Browser production bundle and Tauri build wiring. |
 | Rust formatting | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | Run on every native slice. |
-| Rust quality | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | Add typed error and service checks. |
-| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` — 25 tests | Migration ordering/rollback/backup, WAL/FK, domain invariants, repository round trips/rollback, preferred-source integrity, settings, and IPC status. |
+| Rust quality | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | Passed after Plan 03 scanner/watcher/recovery changes. |
+| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` — 53 tests | Migration 2/legacy promotion, WAL/FK, path/reparse safety, metadata/artwork/fingerprint helpers, recursive scanner, unchanged/forced/rename/missing/restore/ambiguous identity behavior, watcher coalescing/recovery, service paging/reveal, repositories, settings, and IPC status. |
 | Provider contracts | Not started | Mock malformed responses, timeouts, cancellation, rate limits, missing metrics/artwork. |
-| Visual QA | Not started | Playwright mocked-IPC screenshots at approved viewports. |
-| Release | `pnpm tauri build` and packaged launch smoke | x64 release executable and NSIS installer build; executable startup creates the standard LocalAppData database. Full clean install, playback, search, import/export, and restart acceptance remain later. |
+| Visual QA | Browser runner unavailable; native CDP smoke passed | `pnpm exec playwright --version` returns 1.58.0, but `pnpm exec playwright test --list` returns `unknown command 'test'`; no Playwright config/project is present. The packaged native window was exercised through its CDP endpoint. |
+| Release | `pnpm tauri build` and packaged launch smoke | x64 release executable and NSIS installer build; executable startup creates the standard LocalAppData database. Synthetic native smoke also proves restart persistence, watcher changes, reveal validation, folder removal, and media preservation. Full clean install, playback, search, import/export, and visual screenshot QA remain later. |

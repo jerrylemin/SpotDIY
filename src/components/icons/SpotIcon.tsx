@@ -17,7 +17,11 @@ export type SpotIconName =
   | "spark"
   | "chevron"
   | "close"
-  | "arrow";
+  | "arrow"
+  | "refresh"
+  | "trash"
+  | "file"
+  | "alert";
 
 interface SpotIconProps extends SVGProps<SVGSVGElement> {
   name: SpotIconName;
@@ -42,6 +46,10 @@ const paths: Record<SpotIconName, string> = {
   chevron: "m7 9 5 5 5-5",
   close: "m6 6 12 12M18 6 6 18",
   arrow: "M5 12h13m-5-5 5 5-5 5",
+  refresh: "M20 11a8 8 0 0 0-14.9-3M4 5v4h4m-4 3a8 8 0 0 0 14.9 3M20 19v-4h-4",
+  trash: "M5 7h14m-9 4v5m4-5v5M9 7V5h6v2m-9 0 1 13h10l1-13",
+  file: "M6 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 6 20zM14 3.5V8h4",
+  alert: "M12 4 21 20H3zM12 9v5m0 3h.01",
 };
 
 export function SpotIcon({ name, size = 20, strokeWidth = 1.8, ...props }: SpotIconProps) {

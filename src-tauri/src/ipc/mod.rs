@@ -88,6 +88,15 @@ pub fn app_status(version: &'static str, database: &Database) -> Result<AppStatu
     })?;
     let tracks_indexed =
         u64::try_from(tracks_indexed).map_err(|_| StatusError::TrackCount(tracks_indexed))?;
+    let music_folders: Vec<String> = database.with_connection(|connection| {
+        let mut statement = connection.prepare(
+            "SELECT path FROM library_folders WHERE enabled = 1 ORDER BY normalized_path_key COLLATE NOCASE",
+        )?;
+        let values = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>();
+        values
+    })?;
     let settings = SettingsRepository::new(database).get_snapshot()?;
 
     Ok(AppStatus {
@@ -99,7 +108,7 @@ pub fn app_status(version: &'static str, database: &Database) -> Result<AppStatu
         },
         first_run: settings.first_run,
         tracks_indexed,
-        music_folders: Vec::new(),
+        music_folders,
         providers: provider_statuses(),
     })
 }

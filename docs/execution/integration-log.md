@@ -16,3 +16,12 @@
 - Integrated typed ordinary settings persistence and narrow settings IPC; no secret-bearing field or generic SQL command was added.
 - Updated the TypeScript domain vocabulary, Zod IPC validation, execution records, project memory, and ADRs. Plan 03 work was not started.
 - Implementation was committed as `2ec431b7fcbf31fbb2f2cd3b092b66ad75e81365`; a documentation-only follow-up records the final remote verification.
+
+## 2026-08-30 — Plan 03 Local Library
+
+- Added migration `0002_local_library.sql` without changing migration 1. It persists enabled folder roots and extends `local_files` with managed ownership, normalized paths, scan status, observed generations, measured container/artwork fields, and legacy-compatible nullable values. Path-shaped Plan 02 local provider IDs are rewritten during migration; matching legacy rows can be promoted when their selected path is discovered.
+- Added `LibraryService` and focused `folders`, `scanner`, `watcher`, `metadata`, `fingerprint`, and `artwork` modules. Rust owns canonical path/reparse-point checks, recursive no-link traversal, Lofty 0.25.1 extraction, streaming SHA-256, atomic cache writes, transactional aggregate persistence, bounded pages, missing/restore/rename reconciliation, and source-ID reveal validation.
+- Added Notify 8.2.0 watcher registration/recovery, 450 ms coalescing, forced watcher scans, conservative reconciliation for uncertain events, durable partial scan errors, unavailable-root source state, and manual re-registration on rescan.
+- Added Tauri dialog/opener plugins, the narrow folder/scan/status/page/reveal IPC surface, artwork-only asset scope, typed Zod validation, React Query library hooks, progress cleanup, real paged folder/track UI, quality/provenance/error states, and disabled Plan 04 playback controls.
+- Added focused frontend tests and 53 Rust tests covering migration compatibility, path/fingerprint/metadata/artwork helpers, scanner/reconciliation identity, watcher semantics, paging, reveal security, and recovery. `0001_initial.sql` remains unchanged and no user media is mutated.
+- The independent final review requested medium corrections; those were integrated before the final verification pass. Derived Graphify output was updated to 1,202 nodes and 1,662 edges and remains ignored.

@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 
-import { useAppStatus } from "../../hooks/useAppStatus";
+import { useLibraryStatus } from "../../hooks/useLibrary";
 import { type NavItem } from "../../types/domain";
 import { SpotIcon, SpotLogo } from "../icons/SpotIcon";
 
@@ -13,8 +13,8 @@ const navItems: NavItem[] = [
 ];
 
 export function Sidebar() {
-  const status = useAppStatus();
-  const folderCount = status.data?.musicFolders.length ?? 0;
+  const libraryStatus = useLibraryStatus();
+  const folderCount = libraryStatus.data?.folders.length ?? 0;
 
   return (
     <aside className="sidebar">
@@ -46,7 +46,7 @@ export function Sidebar() {
       <div className="library-rail-card">
         <div className="library-rail-heading">
           <span className="mini-kicker">LOCAL INDEX</span>
-          <span className="index-count">{status.data?.tracksIndexed ?? 0}</span>
+          <span className="index-count">{libraryStatus.data?.indexedTrackCount ?? 0}</span>
         </div>
         <strong>{folderCount === 0 ? "No folders yet" : `${folderCount} folder${folderCount === 1 ? "" : "s"} connected`}</strong>
         <p>{folderCount === 0 ? "Your music stays on your machine." : "Scanning stays incremental."}</p>

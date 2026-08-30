@@ -7,8 +7,8 @@ use thiserror::Error;
 use url::Url;
 
 use crate::domain::{
-    Album, AlbumId, Artist, ArtistId, LocalFileSource, ProviderKind, SourceId, TrackId,
-    TrackSource, UnifiedTrack, VersionInfo, VersionQualifier,
+    Album, AlbumId, Artist, ArtistId, LibraryFolderId, LocalFileIndexStatus, LocalFileSource,
+    ProviderKind, SourceId, TrackId, TrackSource, UnifiedTrack, VersionInfo, VersionQualifier,
 };
 
 use super::{Database, DatabaseError};
@@ -199,8 +199,12 @@ impl<'database> TrackRepository<'database> {
                 transaction.execute(
                     "INSERT INTO local_files (
                         source_id, path, file_size_bytes, modified_at, content_fingerprint,
-                        codec, bitrate_kbps, sample_rate_hz, bit_depth, created_at, updated_at
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                        codec, bitrate_kbps, sample_rate_hz, bit_depth, created_at, updated_at,
+                        library_folder_id, normalized_path_key, container, index_status,
+                        status_detail, last_seen_at, last_indexed_at, last_seen_generation,
+                        artwork_cache_key, artwork_mime_type
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                              ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
                     params![
                         local_file.source_id.to_string(),
                         local_file.path.to_string_lossy().into_owned(),
@@ -225,6 +229,19 @@ impl<'database> TrackRepository<'database> {
                             .transpose()?,
                         timestamp(source.created_at),
                         timestamp(source.updated_at),
+                        local_file.library_folder_id.map(|value| value.to_string()),
+                        local_file.normalized_path_key,
+                        local_file.container,
+                        local_file_index_status(local_file.index_status),
+                        local_file.status_detail,
+                        local_file.last_seen_at.map(timestamp),
+                        local_file.last_indexed_at.map(timestamp),
+                        numeric_i64(
+                            local_file.last_seen_generation,
+                            "local_file.last_seen_generation",
+                        )?,
+                        local_file.artwork_cache_key,
+                        local_file.artwork_mime_type,
                     ],
                 )?;
             }
@@ -496,7 +513,10 @@ fn load_local_file(
     let local_file = connection
         .query_row(
             "SELECT source_id, path, file_size_bytes, modified_at, content_fingerprint, codec,
-                    bitrate_kbps, sample_rate_hz, bit_depth
+                    bitrate_kbps, sample_rate_hz, bit_depth, library_folder_id,
+                    normalized_path_key, container, index_status, status_detail,
+                    last_seen_at, last_indexed_at, last_seen_generation,
+                    artwork_cache_key, artwork_mime_type
              FROM local_files WHERE source_id = ?1",
             params![source_id.to_string()],
             map_local_file_row_raw,
@@ -566,6 +586,16 @@ struct RawLocalFileRow {
     bitrate_kbps: Option<i64>,
     sample_rate_hz: Option<i64>,
     bit_depth: Option<i64>,
+    library_folder_id: Option<String>,
+    normalized_path_key: Option<String>,
+    container: Option<String>,
+    index_status: String,
+    status_detail: Option<String>,
+    last_seen_at: Option<String>,
+    last_indexed_at: Option<String>,
+    last_seen_generation: i64,
+    artwork_cache_key: Option<String>,
+    artwork_mime_type: Option<String>,
 }
 
 fn map_track_row_raw(row: &Row<'_>) -> rusqlite::Result<RawTrackRow> {
@@ -735,6 +765,16 @@ fn map_local_file_row_raw(row: &Row<'_>) -> rusqlite::Result<RawLocalFileRow> {
         bitrate_kbps: row.get(6)?,
         sample_rate_hz: row.get(7)?,
         bit_depth: row.get(8)?,
+        library_folder_id: row.get(9)?,
+        normalized_path_key: row.get(10)?,
+        container: row.get(11)?,
+        index_status: row.get(12)?,
+        status_detail: row.get(13)?,
+        last_seen_at: row.get(14)?,
+        last_indexed_at: row.get(15)?,
+        last_seen_generation: row.get(16)?,
+        artwork_cache_key: row.get(17)?,
+        artwork_mime_type: row.get(18)?,
     })
 }
 
@@ -742,12 +782,18 @@ fn parse_local_file_row(row: RawLocalFileRow) -> Result<LocalFileSource, Reposit
     Ok(LocalFileSource {
         source_id: parse_id(&row.source_id, "local_files.source_id")?,
         path: PathBuf::from(row.path),
+        library_folder_id: row
+            .library_folder_id
+            .map(|value| parse_id(&value, "local_files.library_folder_id"))
+            .transpose()?,
+        normalized_path_key: row.normalized_path_key,
         file_size_bytes: optional_u64(row.file_size_bytes, "local_files.file_size_bytes")?,
         modified_at: row
             .modified_at
             .map(|value| parse_timestamp(&value, "local_files.modified_at"))
             .transpose()?,
         content_fingerprint: row.content_fingerprint,
+        container: row.container,
         codec: row.codec,
         bitrate_kbps: optional_u64(row.bitrate_kbps, "local_files.bitrate_kbps")?,
         sample_rate_hz: optional_u64(row.sample_rate_hz, "local_files.sample_rate_hz")?,
@@ -755,6 +801,23 @@ fn parse_local_file_row(row: RawLocalFileRow) -> Result<LocalFileSource, Reposit
             .bit_depth
             .map(|value| optional_u16(value, "local_files.bit_depth"))
             .transpose()?,
+        index_status: parse_local_file_index_status(&row.index_status)?,
+        status_detail: row.status_detail,
+        last_seen_at: row
+            .last_seen_at
+            .map(|value| parse_timestamp(&value, "local_files.last_seen_at"))
+            .transpose()?,
+        last_indexed_at: row
+            .last_indexed_at
+            .map(|value| parse_timestamp(&value, "local_files.last_indexed_at"))
+            .transpose()?,
+        last_seen_generation: optional_u64(
+            Some(row.last_seen_generation),
+            "local_files.last_seen_generation",
+        )?
+        .unwrap_or_default(),
+        artwork_cache_key: row.artwork_cache_key,
+        artwork_mime_type: row.artwork_mime_type,
     })
 }
 
@@ -793,6 +856,34 @@ impl FromId for AlbumId {
 impl FromId for SourceId {
     fn parse(value: &str) -> Result<Self, uuid::Error> {
         SourceId::parse_str(value)
+    }
+}
+
+impl FromId for LibraryFolderId {
+    fn parse(value: &str) -> Result<Self, uuid::Error> {
+        LibraryFolderId::parse_str(value)
+    }
+}
+
+fn local_file_index_status(value: LocalFileIndexStatus) -> &'static str {
+    match value {
+        LocalFileIndexStatus::Pending => "pending",
+        LocalFileIndexStatus::Indexed => "indexed",
+        LocalFileIndexStatus::Missing => "missing",
+        LocalFileIndexStatus::Error => "error",
+    }
+}
+
+fn parse_local_file_index_status(value: &str) -> Result<LocalFileIndexStatus, RepositoryError> {
+    match value {
+        "pending" => Ok(LocalFileIndexStatus::Pending),
+        "indexed" => Ok(LocalFileIndexStatus::Indexed),
+        "missing" => Ok(LocalFileIndexStatus::Missing),
+        "error" => Ok(LocalFileIndexStatus::Error),
+        value => Err(RepositoryError::InvalidValue {
+            field: "local_files.index_status",
+            value: value.to_owned(),
+        }),
     }
 }
 

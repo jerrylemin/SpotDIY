@@ -87,6 +87,8 @@ typed_id!(TrackId);
 typed_id!(ArtistId);
 typed_id!(AlbumId);
 typed_id!(SourceId);
+typed_id!(LibraryFolderId);
+typed_id!(ArtworkId);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -236,6 +238,167 @@ pub struct Album {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LibraryFolderStatus {
+    #[default]
+    Idle,
+    Queued,
+    Scanning,
+    Complete,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LocalFileIndexStatus {
+    #[default]
+    Pending,
+    Indexed,
+    Missing,
+    Error,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryFolder {
+    pub id: LibraryFolderId,
+    pub path: PathBuf,
+    pub normalized_path_key: String,
+    pub enabled: bool,
+    pub status: LibraryFolderStatus,
+    pub scan_generation: u64,
+    pub last_scan_started_at: Option<DateTime<Utc>>,
+    pub last_scan_finished_at: Option<DateTime<Utc>>,
+    pub last_scan_error: Option<String>,
+    pub file_count: u64,
+    pub indexed_track_count: u64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanSummary {
+    pub directories_visited: u64,
+    pub candidates: u64,
+    pub unchanged_skipped: u64,
+    pub new_files: u64,
+    pub changed_files: u64,
+    pub renamed_files: u64,
+    pub missing_files: u64,
+    pub unsupported_skipped: u64,
+    pub metadata_failures: u64,
+    pub artwork_failures: u64,
+    pub database_failures: u64,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanProgress {
+    pub folder_id: LibraryFolderId,
+    pub status: LibraryFolderStatus,
+    pub current_file: Option<PathBuf>,
+    pub processed: u64,
+    pub candidates: u64,
+    pub summary: Option<ScanSummary>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LibrarySort {
+    #[default]
+    Title,
+    Artist,
+    DateAdded,
+    DateModified,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPageRequest {
+    #[serde(default)]
+    pub page: u32,
+    #[serde(default = "default_page_size")]
+    pub page_size: u32,
+    #[serde(default)]
+    pub sort: LibrarySort,
+    #[serde(default)]
+    pub descending: bool,
+    pub folder_id: Option<LibraryFolderId>,
+}
+
+impl Default for LibraryPageRequest {
+    fn default() -> Self {
+        Self {
+            page: 0,
+            page_size: default_page_size(),
+            sort: LibrarySort::default(),
+            descending: false,
+            folder_id: None,
+        }
+    }
+}
+
+fn default_page_size() -> u32 {
+    50
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryTrack {
+    pub track_id: TrackId,
+    pub source_id: SourceId,
+    pub folder_id: LibraryFolderId,
+    pub title: String,
+    pub artists: Vec<String>,
+    pub album: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub path: PathBuf,
+    pub available: bool,
+    pub availability_detail: Option<String>,
+    pub index_status: LocalFileIndexStatus,
+    pub status_detail: Option<String>,
+    pub file_size_bytes: Option<u64>,
+    pub modified_at: Option<DateTime<Utc>>,
+    pub codec: Option<String>,
+    pub container: Option<String>,
+    pub bitrate_kbps: Option<u64>,
+    pub sample_rate_hz: Option<u64>,
+    pub bit_depth: Option<u16>,
+    pub content_fingerprint: Option<String>,
+    pub artwork_cache_key: Option<String>,
+    pub artwork_mime_type: Option<String>,
+    pub artwork_path: Option<PathBuf>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPage {
+    pub items: Vec<LibraryTrack>,
+    pub page: u32,
+    pub page_size: u32,
+    pub total: u64,
+    pub has_next: bool,
+    pub sort: LibrarySort,
+    pub descending: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryStatus {
+    pub folders: Vec<LibraryFolder>,
+    pub indexed_track_count: u64,
+    pub available_track_count: u64,
+    pub is_scanning: bool,
+}
+
 impl Album {
     pub fn new(id: AlbumId, title: impl Into<String>) -> Result<Self, DomainError> {
         let title = title.into();
@@ -258,13 +421,23 @@ impl Album {
 pub struct LocalFileSource {
     pub source_id: SourceId,
     pub path: PathBuf,
+    pub library_folder_id: Option<LibraryFolderId>,
+    pub normalized_path_key: Option<String>,
     pub file_size_bytes: Option<u64>,
     pub modified_at: Option<DateTime<Utc>>,
     pub content_fingerprint: Option<String>,
+    pub container: Option<String>,
     pub codec: Option<String>,
     pub bitrate_kbps: Option<u64>,
     pub sample_rate_hz: Option<u64>,
     pub bit_depth: Option<u16>,
+    pub index_status: LocalFileIndexStatus,
+    pub status_detail: Option<String>,
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub last_indexed_at: Option<DateTime<Utc>>,
+    pub last_seen_generation: u64,
+    pub artwork_cache_key: Option<String>,
+    pub artwork_mime_type: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -329,7 +502,22 @@ impl TrackSource {
         path: PathBuf,
         capabilities: SourceCapabilities,
     ) -> Result<Self, DomainError> {
-        let provider_item_id = path.to_string_lossy().into_owned();
+        Self::new_local_with_provider_item_id(
+            id,
+            track_id,
+            path,
+            Uuid::new_v4().to_string(),
+            capabilities,
+        )
+    }
+
+    pub fn new_local_with_provider_item_id(
+        id: SourceId,
+        track_id: TrackId,
+        path: PathBuf,
+        provider_item_id: impl Into<String>,
+        capabilities: SourceCapabilities,
+    ) -> Result<Self, DomainError> {
         let mut source = Self::new(
             id,
             track_id,
@@ -340,13 +528,23 @@ impl TrackSource {
         source.local_file = Some(LocalFileSource {
             source_id: id,
             path,
+            library_folder_id: None,
+            normalized_path_key: None,
             file_size_bytes: None,
             modified_at: None,
             content_fingerprint: None,
+            container: None,
             codec: None,
             bitrate_kbps: None,
             sample_rate_hz: None,
             bit_depth: None,
+            index_status: LocalFileIndexStatus::Pending,
+            status_detail: None,
+            last_seen_at: None,
+            last_indexed_at: None,
+            last_seen_generation: 0,
+            artwork_cache_key: None,
+            artwork_mime_type: None,
         });
         Ok(source)
     }
