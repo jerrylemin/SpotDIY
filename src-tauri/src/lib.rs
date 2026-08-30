@@ -2,6 +2,11 @@ pub mod db;
 pub mod domain;
 pub mod ipc;
 pub mod library;
+pub mod media_tools;
+pub mod playback {
+    pub mod backend;
+}
+pub mod queue;
 pub mod settings;
 
 use db::{standard_database_path, Database};

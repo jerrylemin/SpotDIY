@@ -37,6 +37,9 @@ test-results/
 Thumbs.db
 
 # Local media and generated artifacts
+.tools/
+mpv-*.7z
+mpv-*.zip
 *.mp3
 *.flac
 *.m4a
