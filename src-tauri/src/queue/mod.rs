@@ -73,6 +73,7 @@ pub struct TransientQueue {
     entries: Vec<QueueEntry>,
     current_index: Option<usize>,
     traversal_order: Vec<usize>,
+    play_next_order: Vec<QueueEntryId>,
     shuffle_enabled: bool,
     next_insertion_order: u64,
 }
@@ -84,6 +85,7 @@ impl TransientQueue {
 
     pub fn play_now(&mut self, entry: QueueEntry) {
         self.entries.clear();
+        self.play_next_order.clear();
         self.entries.push(entry);
         self.current_index = Some(0);
         self.next_insertion_order = self.entries[0].insertion_order.saturating_add(1);
@@ -102,33 +104,17 @@ impl TransientQueue {
         self.next_insertion_order = self
             .next_insertion_order
             .max(entry.insertion_order.saturating_add(1));
+        let entry_id = entry.entry_id;
         self.entries.push(entry);
+        self.play_next_order.insert(0, entry_id);
         self.rebuild_traversal_order();
-
-        if let Some(current_index) = self.current_index {
-            let inserted_index = self.entries.len() - 1;
-            let current_position = self
-                .traversal_order
-                .iter()
-                .position(|&index| index == current_index)
-                .expect("current queue entry must be in traversal order");
-            self.traversal_order.remove(
-                self.traversal_order
-                    .iter()
-                    .position(|&index| index == inserted_index)
-                    .expect("inserted queue entry must be in traversal order"),
-            );
-            self.traversal_order
-                .insert(current_position + 1, inserted_index);
-        } else {
-            self.current_index = None;
-        }
     }
 
     pub fn clear(&mut self) {
         self.entries.clear();
         self.current_index = None;
         self.traversal_order.clear();
+        self.play_next_order.clear();
     }
 
     pub fn set_shuffle(&mut self, enabled: bool) {
@@ -161,6 +147,8 @@ impl TransientQueue {
 
         if let Some(index) = next_index {
             self.current_index = Some(index);
+            self.play_next_order
+                .retain(|entry_id| *entry_id != self.entries[index].entry_id);
         }
         next_index
     }
@@ -210,6 +198,29 @@ impl TransientQueue {
                     .then_with(|| left.cmp(&right))
             });
         }
+
+        let current_index = self.current_index;
+        let prioritized_indices = self
+            .play_next_order
+            .iter()
+            .filter_map(|entry_id| {
+                self.entries
+                    .iter()
+                    .position(|entry| entry.entry_id == *entry_id)
+            })
+            .filter(|&index| Some(index) != current_index)
+            .collect::<Vec<_>>();
+        self.traversal_order
+            .retain(|index| !prioritized_indices.contains(index));
+
+        let insertion_position = current_index
+            .and_then(|index| self.traversal_order.iter().position(|&item| item == index))
+            .map(|position| position + 1)
+            .unwrap_or(0);
+        for (offset, index) in prioritized_indices.into_iter().enumerate() {
+            self.traversal_order
+                .insert(insertion_position + offset, index);
+        }
     }
 }
 
@@ -230,11 +241,13 @@ mod tests {
         let first = entry(1);
         let second = entry(2);
         let third = entry(3);
+        let fourth = entry(4);
         let mut queue = TransientQueue::new();
 
         queue.play_now(first.clone());
         queue.append(third.clone());
         queue.insert_next(second.clone());
+        queue.append(fourth.clone());
 
         assert_eq!(
             queue
@@ -242,7 +255,7 @@ mod tests {
                 .iter()
                 .map(|entry| entry.insertion_order)
                 .collect::<Vec<_>>(),
-            vec![1, 3, 2]
+            vec![1, 3, 2, 4]
         );
         assert_eq!(
             queue.current_entry().map(|entry| entry.entry_id),
@@ -253,21 +266,32 @@ mod tests {
             queue.current_entry().map(|entry| entry.entry_id),
             Some(second.entry_id)
         );
+        assert_eq!(queue.next_index(RepeatMode::Off), Some(1));
+        assert_eq!(
+            queue.current_entry().map(|entry| entry.entry_id),
+            Some(third.entry_id)
+        );
     }
 
     #[test]
-    fn shuffle_retains_current_entry_and_repeat_all_wraps() {
+    fn shuffle_retains_current_entry_and_preserves_repeated_play_next() {
         let entries = [entry(1), entry(2), entry(3)];
+        let appended = entry(4);
         let mut queue = TransientQueue::new();
         queue.play_now(entries[0].clone());
-        queue.append(entries[1].clone());
-        queue.append(entries[2].clone());
+        queue.insert_next(entries[1].clone());
+        queue.insert_next(entries[2].clone());
+        queue.append(appended);
         let current_id = queue.current_entry().unwrap().entry_id;
 
         queue.set_shuffle(true);
 
         assert!(queue.is_shuffle_enabled());
         assert_eq!(queue.current_entry().unwrap().entry_id, current_id);
+        assert_eq!(queue.next_index(RepeatMode::Off), Some(2));
+        assert_eq!(queue.current_entry().unwrap().entry_id, entries[2].entry_id);
+        assert_eq!(queue.next_index(RepeatMode::Off), Some(1));
+        assert_eq!(queue.current_entry().unwrap().entry_id, entries[1].entry_id);
         while queue.next_index(RepeatMode::Off).is_some() {}
         assert_eq!(
             queue.next_index(RepeatMode::All),

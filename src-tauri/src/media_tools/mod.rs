@@ -78,17 +78,7 @@ impl MediaToolManager {
 
         if !path.is_file() {
             self.mpv_path = None;
-            self.health = MediaToolHealth {
-                status: MediaToolStatus::Missing,
-                version: None,
-                detail: Some(format!(
-                    "mpv executable was not found at {}",
-                    path.display()
-                )),
-                recovery_action: Some(
-                    "Install mpv or set SPOTDIY_MPV_PATH to an mpv executable".to_owned(),
-                ),
-            };
+            self.health = missing_health("mpv executable was not found");
             return self.health.clone();
         }
 
@@ -142,11 +132,11 @@ fn executable_names() -> &'static [&'static str] {
 fn inspect_mpv(path: &Path) -> MediaToolHealth {
     let output = match Command::new(path).arg("--version").output() {
         Ok(output) => output,
-        Err(error) => {
+        Err(_error) => {
             return MediaToolHealth {
                 status: MediaToolStatus::Broken,
                 version: None,
-                detail: Some(format!("could not run mpv: {error}")),
+                detail: Some("mpv could not be started".to_owned()),
                 recovery_action: Some("Check the mpv executable and its permissions".to_owned()),
             };
         }
@@ -158,7 +148,7 @@ fn inspect_mpv(path: &Path) -> MediaToolHealth {
         return MediaToolHealth {
             status: MediaToolStatus::Broken,
             version,
-            detail: Some(command_failure_detail(&output)),
+            detail: Some("mpv --version failed".to_owned()),
             recovery_action: Some("Install a working mpv release".to_owned()),
         };
     }
@@ -173,15 +163,6 @@ fn inspect_mpv(path: &Path) -> MediaToolHealth {
     };
 
     health_for_version(version)
-}
-
-fn command_failure_detail(output: &std::process::Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    if stderr.is_empty() {
-        format!("mpv --version exited with status {}", output.status)
-    } else {
-        format!("mpv --version failed: {stderr}")
-    }
 }
 
 fn missing_health(detail: &str) -> MediaToolHealth {
@@ -249,7 +230,16 @@ mod tests {
         let manager = MediaToolManager::with_override(path);
 
         assert_eq!(manager.health().status, MediaToolStatus::Missing);
-        assert!(manager.health().detail.is_some());
+        assert_eq!(
+            manager.health().detail.as_deref(),
+            Some("mpv executable was not found")
+        );
+        assert!(!manager
+            .health()
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains(r"C:\SpotDIY\mpv.exe"));
         assert_eq!(manager.mpv_path(), None);
     }
 
