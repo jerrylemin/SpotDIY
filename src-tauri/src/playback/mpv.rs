@@ -15,6 +15,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const LOAD_TIMEOUT: Duration = Duration::from_secs(15);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+const FORCED_REAP_TIMEOUT: Duration = Duration::from_millis(500);
+const TASK_JOIN_TIMEOUT: Duration = Duration::from_millis(250);
 const POSITION_EVENT_INTERVAL: Duration = Duration::from_millis(250);
 
 const OBSERVED_PROPERTIES: &[(i64, &str)] = &[
@@ -680,22 +682,26 @@ mod windows_session {
     pub(super) struct OutboundRequest {
         operation: &'static str,
         command: Vec<Value>,
-        timeout: Duration,
+        deadline: Instant,
         response: oneshot::Sender<Result<Value, BackendError>>,
     }
 
-    struct PendingRequest {
+    pub(super) struct PendingRequest {
         operation: &'static str,
         deadline: Instant,
         response: oneshot::Sender<Result<Value, BackendError>>,
     }
 
     #[derive(Clone, Debug)]
-    pub(super) struct ProcessExit;
+    pub(super) struct ProcessExit {
+        result: Result<(), BackendError>,
+    }
 
-    #[derive(Clone, Copy, Debug)]
+    #[derive(Debug)]
     pub(super) enum ProcessControl {
-        Kill,
+        Kill {
+            response: oneshot::Sender<Result<(), BackendError>>,
+        },
     }
 
     #[derive(Debug)]
@@ -798,16 +804,21 @@ mod windows_session {
 
         let (process_control_tx, process_control_rx) = mpsc::channel(1);
         let (process_exit_tx, mut process_exit_rx) = watch::channel(None);
-        let process_task = tokio::spawn(monitor_child(child, process_control_rx, process_exit_tx));
+        let mut process_task =
+            tokio::spawn(monitor_child(child, process_control_rx, process_exit_tx));
 
         let client =
             match connect_pipe(&pipe_name, config.connect_timeout, &mut process_exit_rx).await {
                 Ok(client) => client,
                 Err(error) => {
-                    let _ = process_control_tx.send(ProcessControl::Kill).await;
-                    let _ = wait_for_process_exit(&mut process_exit_rx).await;
-                    let _ = process_task.await;
-                    return Err(error);
+                    let cleanup = force_process_and_reap(
+                        &process_control_tx,
+                        &mut process_exit_rx,
+                        &mut process_task,
+                        FORCED_REAP_TIMEOUT,
+                    )
+                    .await;
+                    return cleanup.and(Err(error));
                 }
             };
 
@@ -860,8 +871,9 @@ mod windows_session {
         .await;
 
         if let Err(error) = handshake {
-            force_and_reap(&mut session).await;
-            return Err(error);
+            return force_and_reap(&mut session, FORCED_REAP_TIMEOUT)
+                .await
+                .and(Err(error));
         }
         Ok(session)
     }
@@ -873,12 +885,13 @@ mod windows_session {
         timeout: Duration,
     ) -> Result<Value, BackendError> {
         let (response_tx, response_rx) = oneshot::channel();
+        let deadline = Instant::now() + timeout;
         time::timeout(
             timeout,
             request_tx.send(OutboundRequest {
                 operation,
                 command,
-                timeout,
+                deadline,
                 response: response_tx,
             }),
         )
@@ -935,54 +948,95 @@ mod windows_session {
     ) -> Result<(), BackendError> {
         let deadline = Instant::now() + shutdown_timeout;
         let quit_timeout = request_timeout.min(shutdown_timeout);
-        let _ = send_request(
-            &session.request_tx,
-            "quit",
-            vec![json!("quit")],
-            quit_timeout,
+        let _ = time::timeout(
+            deadline.saturating_duration_since(Instant::now()),
+            send_request(
+                &session.request_tx,
+                "quit",
+                vec![json!("quit")],
+                quit_timeout,
+            ),
         )
         .await;
 
         let remaining = deadline.saturating_duration_since(Instant::now());
-        let exited = if session.process_exit_rx.borrow().is_some() {
-            true
+        let graceful_exit = if session.process_exit_rx.borrow().is_some() {
+            wait_for_process_exit(&mut session.process_exit_rx).await
         } else if remaining.is_zero() {
-            false
+            Err(BackendError::Timeout {
+                operation: "shutdown".to_owned(),
+            })
         } else {
-            time::timeout(
+            match time::timeout(
                 remaining,
                 wait_for_process_exit(&mut session.process_exit_rx),
             )
             .await
-            .is_ok()
+            {
+                Ok(result) => result,
+                Err(_) => Err(BackendError::Timeout {
+                    operation: "shutdown".to_owned(),
+                }),
+            }
         };
-        if !exited {
-            session
-                .process_control_tx
-                .send(ProcessControl::Kill)
+
+        let process_result = match graceful_exit {
+            Ok(()) => {
+                join_task_bounded(
+                    &mut session.process_task,
+                    TASK_JOIN_TIMEOUT,
+                    "process monitor join",
+                )
                 .await
-                .map_err(|_| BackendError::Disconnected)?;
-            wait_for_process_exit(&mut session.process_exit_rx).await?;
-        }
+            }
+            Err(BackendError::Timeout { .. }) => {
+                force_process_and_reap(
+                    &session.process_control_tx,
+                    &mut session.process_exit_rx,
+                    &mut session.process_task,
+                    FORCED_REAP_TIMEOUT,
+                )
+                .await
+            }
+            Err(error) => {
+                let cleanup = abort_and_join_task(
+                    &mut session.process_task,
+                    TASK_JOIN_TIMEOUT,
+                    "process monitor abort",
+                )
+                .await;
+                cleanup.and(Err(error))
+            }
+        };
 
         drop(session.request_tx);
-        if time::timeout(Duration::from_millis(500), &mut session.pipe_task)
-            .await
-            .is_err()
-        {
-            session.pipe_task.abort();
-            let _ = session.pipe_task.await;
-        }
-        let _ = session.process_task.await;
-        Ok(())
+        let pipe_result = join_task_bounded(
+            &mut session.pipe_task,
+            TASK_JOIN_TIMEOUT,
+            "pipe session join",
+        )
+        .await;
+        process_result.and(pipe_result)
     }
 
-    async fn force_and_reap(session: &mut Session) {
-        let _ = session.process_control_tx.send(ProcessControl::Kill).await;
-        let _ = wait_for_process_exit(&mut session.process_exit_rx).await;
-        session.pipe_task.abort();
-        let _ = (&mut session.pipe_task).await;
-        let _ = (&mut session.process_task).await;
+    pub(super) async fn force_and_reap(
+        session: &mut Session,
+        reap_timeout: Duration,
+    ) -> Result<(), BackendError> {
+        let process_result = force_process_and_reap(
+            &session.process_control_tx,
+            &mut session.process_exit_rx,
+            &mut session.process_task,
+            reap_timeout,
+        )
+        .await;
+        let pipe_result = abort_and_join_task(
+            &mut session.pipe_task,
+            TASK_JOIN_TIMEOUT,
+            "pipe session abort",
+        )
+        .await;
+        process_result.and(pipe_result)
     }
 
     async fn monitor_child(
@@ -990,16 +1044,35 @@ mod windows_session {
         mut control_rx: mpsc::Receiver<ProcessControl>,
         exit_tx: watch::Sender<Option<ProcessExit>>,
     ) {
-        tokio::select! {
-            _ = child.wait() => {}
+        let result = tokio::select! {
+            status = child.wait() => status
+                .map(|_| ())
+                .map_err(|_| BackendError::Operation {
+                    detail: "mpv process wait failed".to_owned(),
+                }),
             control = control_rx.recv() => {
-                if matches!(control, Some(ProcessControl::Kill)) {
-                    let _ = child.start_kill();
-                    let _ = child.wait().await;
+                let response = control.map(|ProcessControl::Kill { response }| response);
+                let kill_result = child.start_kill().map_err(|_| BackendError::Operation {
+                    detail: "mpv process termination failed".to_owned(),
+                });
+                if let Some(response) = response {
+                    let _ = response.send(kill_result.clone());
+                }
+                match kill_result {
+                    Ok(()) => match time::timeout(FORCED_REAP_TIMEOUT, child.wait()).await {
+                        Ok(Ok(_)) => Ok(()),
+                        Ok(Err(_)) => Err(BackendError::Operation {
+                            detail: "mpv process reap failed".to_owned(),
+                        }),
+                        Err(_) => Err(BackendError::Timeout {
+                            operation: "force reap".to_owned(),
+                        }),
+                    },
+                    Err(error) => Err(error),
                 }
             }
-        }
-        let _ = exit_tx.send(Some(ProcessExit));
+        };
+        let _ = exit_tx.send(Some(ProcessExit { result }));
     }
 
     async fn wait_for_process_exit(
@@ -1011,7 +1084,125 @@ mod windows_session {
                 .await
                 .map_err(|_| BackendError::Disconnected)?;
         }
-        Ok(())
+        process_exit_rx
+            .borrow()
+            .as_ref()
+            .map(|exit| exit.result.clone())
+            .unwrap_or(Err(BackendError::Disconnected))
+    }
+
+    pub(super) async fn force_process_and_reap(
+        process_control_tx: &mpsc::Sender<ProcessControl>,
+        process_exit_rx: &mut watch::Receiver<Option<ProcessExit>>,
+        process_task: &mut JoinHandle<()>,
+        reap_timeout: Duration,
+    ) -> Result<(), BackendError> {
+        if process_exit_rx.borrow().is_some() {
+            let exit_result = wait_for_process_exit(process_exit_rx).await;
+            let join_result =
+                join_task_bounded(process_task, TASK_JOIN_TIMEOUT, "process monitor join").await;
+            return exit_result.and(join_result);
+        }
+
+        let deadline = Instant::now() + reap_timeout;
+        let (response_tx, response_rx) = oneshot::channel();
+        let send_result = time::timeout(
+            deadline.saturating_duration_since(Instant::now()),
+            process_control_tx.send(ProcessControl::Kill {
+                response: response_tx,
+            }),
+        )
+        .await;
+        let kill_result = match send_result {
+            Ok(Ok(())) => {
+                match time::timeout(
+                    deadline.saturating_duration_since(Instant::now()),
+                    response_rx,
+                )
+                .await
+                {
+                    Ok(Ok(result)) => result,
+                    Ok(Err(_)) => Err(BackendError::Disconnected),
+                    Err(_) => Err(BackendError::Timeout {
+                        operation: "force kill".to_owned(),
+                    }),
+                }
+            }
+            Ok(Err(_)) => Err(BackendError::Disconnected),
+            Err(_) => Err(BackendError::Timeout {
+                operation: "force kill".to_owned(),
+            }),
+        };
+
+        if let Err(error) = kill_result {
+            if process_exit_rx.borrow().is_some() {
+                let exit_result = wait_for_process_exit(process_exit_rx).await;
+                let join_result =
+                    join_task_bounded(process_task, TASK_JOIN_TIMEOUT, "process monitor join")
+                        .await;
+                return exit_result.and(join_result);
+            }
+            let cleanup =
+                abort_and_join_task(process_task, TASK_JOIN_TIMEOUT, "process monitor abort").await;
+            return cleanup.and(Err(error));
+        }
+
+        let exit_result = match time::timeout(
+            deadline.saturating_duration_since(Instant::now()),
+            wait_for_process_exit(process_exit_rx),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(BackendError::Timeout {
+                operation: "force reap".to_owned(),
+            }),
+        };
+        if let Err(error) = exit_result {
+            let cleanup =
+                abort_and_join_task(process_task, TASK_JOIN_TIMEOUT, "process monitor abort").await;
+            return cleanup.and(Err(error));
+        }
+
+        join_task_bounded(process_task, TASK_JOIN_TIMEOUT, "process monitor join").await
+    }
+
+    async fn join_task_bounded(
+        task: &mut JoinHandle<()>,
+        timeout: Duration,
+        operation: &'static str,
+    ) -> Result<(), BackendError> {
+        match time::timeout(timeout, &mut *task).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) if error.is_cancelled() => Ok(()),
+            Ok(Err(_)) => Err(BackendError::Operation {
+                detail: format!("{operation} failed"),
+            }),
+            Err(_) => {
+                let cleanup = abort_and_join_task(task, timeout, operation).await;
+                cleanup.and(Err(BackendError::Timeout {
+                    operation: operation.to_owned(),
+                }))
+            }
+        }
+    }
+
+    async fn abort_and_join_task(
+        task: &mut JoinHandle<()>,
+        timeout: Duration,
+        operation: &'static str,
+    ) -> Result<(), BackendError> {
+        task.abort();
+        match time::timeout(timeout, &mut *task).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) if error.is_cancelled() => Ok(()),
+            Ok(Err(_)) => Err(BackendError::Operation {
+                detail: format!("{operation} failed"),
+            }),
+            Err(_) => Err(BackendError::Timeout {
+                operation: operation.to_owned(),
+            }),
+        }
     }
 
     async fn connect_pipe(
@@ -1059,6 +1250,68 @@ mod windows_session {
         error.kind() == ErrorKind::NotFound || error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32)
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(super) enum FrameWriteError {
+        Disconnected,
+        Timeout,
+    }
+
+    pub(super) async fn write_frame_bounded<W: tokio::io::AsyncWrite + Unpin>(
+        writer: &mut W,
+        frame: &[u8],
+        deadline: Instant,
+    ) -> Result<(), FrameWriteError> {
+        match time::timeout(
+            deadline.saturating_duration_since(Instant::now()),
+            writer.write_all(frame),
+        )
+        .await
+        {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(_)) => Err(FrameWriteError::Disconnected),
+            Err(_) => Err(FrameWriteError::Timeout),
+        }
+    }
+
+    pub(super) async fn write_pending_request<W: tokio::io::AsyncWrite + Unpin>(
+        writer: &mut W,
+        pending: &mut HashMap<i64, PendingRequest>,
+        request_id: i64,
+        frame: &[u8],
+        operation: &'static str,
+        deadline: Instant,
+        response: oneshot::Sender<Result<Value, BackendError>>,
+    ) -> Result<(), BackendError> {
+        pending.insert(
+            request_id,
+            PendingRequest {
+                operation,
+                deadline,
+                response,
+            },
+        );
+        match write_frame_bounded(writer, frame, deadline).await {
+            Ok(()) => Ok(()),
+            Err(FrameWriteError::Disconnected) => {
+                if let Some(request) = pending.remove(&request_id) {
+                    let _ = request.response.send(Err(BackendError::Disconnected));
+                }
+                Err(BackendError::Disconnected)
+            }
+            Err(FrameWriteError::Timeout) => {
+                if let Some(request) = pending.remove(&request_id) {
+                    let operation = request.operation.to_owned();
+                    let _ = request
+                        .response
+                        .send(Err(BackendError::Timeout { operation }));
+                }
+                Err(BackendError::Timeout {
+                    operation: "write request".to_owned(),
+                })
+            }
+        }
+    }
+
     async fn run_pipe_session(
         client: NamedPipeClient,
         generation: u64,
@@ -1088,21 +1341,32 @@ mod windows_session {
                     let Some(request) = request else {
                         break;
                     };
+                    let OutboundRequest {
+                        operation,
+                        command,
+                        deadline,
+                        response,
+                    } = request;
                     let request_id = request_ids.take();
-                    let frame = match serialize_request(request.command, request_id) {
+                    let frame = match serialize_request(command, request_id) {
                         Ok(frame) => frame,
                         Err(error) => {
-                            let _ = request.response.send(Err(error));
+                            let _ = response.send(Err(error));
                             continue;
                         }
                     };
-                    pending.insert(request_id, PendingRequest {
-                        operation: request.operation,
-                        deadline: Instant::now() + request.timeout,
-                        response: request.response,
-                    });
-                    if writer.write_all(&frame).await.is_err() {
-                        disconnect_error = BackendError::Disconnected;
+                    if let Err(error) = write_pending_request(
+                        &mut writer,
+                        &mut pending,
+                        request_id,
+                        &frame,
+                        operation,
+                        deadline,
+                        response,
+                    )
+                    .await
+                    {
+                        disconnect_error = error;
                         break;
                     }
                 }
@@ -1393,9 +1657,14 @@ mod tests {
 
     #[cfg(windows)]
     mod windows_protocol {
+        use std::collections::HashMap;
         use std::ffi::OsString;
+        use std::future::pending;
+        use std::io;
+        use std::pin::Pin;
+        use std::task::{Context, Poll};
 
-        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
         use tokio::time;
 
         use super::*;
@@ -1403,8 +1672,36 @@ mod tests {
             connected_pair, exact_args, start_protocol_session,
         };
         use crate::playback::mpv::windows_session::{
-            send_request, wait_for_file_loaded_events, SessionEvent, StampedSessionEvent,
+            force_process_and_reap, send_request, wait_for_file_loaded_events, write_frame_bounded,
+            write_pending_request, FrameWriteError, ProcessControl, ProcessExit, SessionEvent,
+            StampedSessionEvent,
         };
+
+        struct PendingWriter;
+
+        impl AsyncWrite for PendingWriter {
+            fn poll_write(
+                self: Pin<&mut Self>,
+                _context: &mut Context<'_>,
+                _buffer: &[u8],
+            ) -> Poll<io::Result<usize>> {
+                Poll::Pending
+            }
+
+            fn poll_flush(
+                self: Pin<&mut Self>,
+                _context: &mut Context<'_>,
+            ) -> Poll<io::Result<()>> {
+                Poll::Ready(Ok(()))
+            }
+
+            fn poll_shutdown(
+                self: Pin<&mut Self>,
+                _context: &mut Context<'_>,
+            ) -> Poll<io::Result<()>> {
+                Poll::Ready(Ok(()))
+            }
+        }
 
         #[test]
         fn launch_arguments_are_exact_and_structured() {
@@ -1571,6 +1868,124 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
+        }
+
+        #[tokio::test]
+        async fn blocked_pipe_writes_stop_at_the_request_deadline() {
+            let mut writer = PendingWriter;
+            let started = time::Instant::now();
+            let frame_result = time::timeout(
+                Duration::from_secs(1),
+                write_frame_bounded(
+                    &mut writer,
+                    b"frame",
+                    time::Instant::now() + Duration::from_millis(30),
+                ),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(frame_result, Err(FrameWriteError::Timeout));
+            assert!(started.elapsed() < Duration::from_millis(500));
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            let mut pending = HashMap::new();
+            let actor_result = write_pending_request(
+                &mut writer,
+                &mut pending,
+                41,
+                b"frame",
+                "stalled write",
+                time::Instant::now() + Duration::from_millis(30),
+                response_tx,
+            )
+            .await;
+            assert_eq!(
+                response_rx.await.unwrap(),
+                Err(BackendError::Timeout {
+                    operation: "stalled write".to_owned()
+                })
+            );
+            assert!(pending.is_empty());
+            assert_eq!(
+                actor_result,
+                Err(BackendError::Timeout {
+                    operation: "write request".to_owned()
+                })
+            );
+        }
+
+        #[tokio::test]
+        async fn forced_reap_timeout_aborts_and_joins_the_process_monitor() {
+            let (process_control_tx, mut process_control_rx) = tokio::sync::mpsc::channel(1);
+            let (process_exit_tx, mut process_exit_rx) =
+                tokio::sync::watch::channel::<Option<ProcessExit>>(None);
+            let mut process_task = tokio::spawn(async move {
+                if let Some(ProcessControl::Kill { response }) = process_control_rx.recv().await {
+                    response.send(Ok(())).unwrap();
+                    let _keep_exit_channel_open = process_exit_tx;
+                    pending::<()>().await;
+                }
+            });
+            let started = time::Instant::now();
+
+            let result = time::timeout(
+                Duration::from_secs(1),
+                force_process_and_reap(
+                    &process_control_tx,
+                    &mut process_exit_rx,
+                    &mut process_task,
+                    Duration::from_millis(30),
+                ),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(
+                result,
+                Err(BackendError::Timeout {
+                    operation: "force reap".to_owned()
+                })
+            );
+            assert!(started.elapsed() < Duration::from_millis(500));
+            assert!(process_task.is_finished());
+        }
+
+        #[tokio::test]
+        async fn force_kill_failure_is_returned_after_bounded_monitor_cleanup() {
+            let (process_control_tx, mut process_control_rx) = tokio::sync::mpsc::channel(1);
+            let (process_exit_tx, mut process_exit_rx) =
+                tokio::sync::watch::channel::<Option<ProcessExit>>(None);
+            let mut process_task = tokio::spawn(async move {
+                if let Some(ProcessControl::Kill { response }) = process_control_rx.recv().await {
+                    response
+                        .send(Err(BackendError::Operation {
+                            detail: "injected start_kill failure".to_owned(),
+                        }))
+                        .unwrap();
+                    let _keep_exit_channel_open = process_exit_tx;
+                    pending::<()>().await;
+                }
+            });
+
+            let result = time::timeout(
+                Duration::from_secs(1),
+                force_process_and_reap(
+                    &process_control_tx,
+                    &mut process_exit_rx,
+                    &mut process_task,
+                    Duration::from_millis(30),
+                ),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(
+                result,
+                Err(BackendError::Operation {
+                    detail: "injected start_kill failure".to_owned()
+                })
+            );
+            assert!(process_task.is_finished());
         }
 
         #[tokio::test]
