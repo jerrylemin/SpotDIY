@@ -2,7 +2,7 @@
 
 Date: 2026-08-30
 Branch: `main`
-Bootstrap commit: `403d923cd44bf2ed86325a70bd54712216f99d68` (`chore: bootstrap SpotDIY architecture and development workflow`), pushed to `origin/main`.
+Bootstrap commit: `403d923cd44bf2ed86325a70bd54712216f99d68` (`chore: bootstrap SpotDIY architecture and development workflow`), followed by bookkeeping commit `9554dc28c14ed0c94be8e0dfc1e3a02c5481ace4` (`docs: record SpotDIY bootstrap milestone`); both are pushed to `origin/main`.
 
 ## Completed
 
