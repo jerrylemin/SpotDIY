@@ -19,6 +19,7 @@ import {
   useRescanLibraryFolder,
   useRevealLocalFile,
 } from "../hooks/useLibrary";
+import { usePlayback } from "../hooks/usePlayback";
 import type {
   LibraryFolder,
   LibraryFolderId,
@@ -45,8 +46,10 @@ function actionError(...errors: unknown[]): string | null {
 
 export function LibraryPage() {
   const nativeRuntime = isTauriRuntime();
+  const e2ePlaybackPreview = !nativeRuntime && import.meta.env.DEV && import.meta.env.VITE_SPOTDIY_E2E === "1";
   const status = useLibraryStatus();
   const progress = useLibraryProgress();
+  const playback = usePlayback();
   const [folderFilter, setFolderFilter] = useState<LibraryFolderId | null>(null);
   const [sort, setSort] = useState<LibrarySort>("title");
   const [descending, setDescending] = useState(false);
@@ -94,6 +97,8 @@ export function LibraryPage() {
     rescanAll.error,
     revealFile.error,
   );
+  const playbackEnabled = nativeRuntime || e2ePlaybackPreview;
+  const playbackErrorMessage = playback.bridgeError ?? playback.snapshot.error?.summary ?? null;
 
   const addFolder = async () => {
     if (!nativeRuntime || busy) {
@@ -167,6 +172,13 @@ export function LibraryPage() {
         <div className="library-alert library-alert-error" role="alert">
           <SpotIcon name="alert" size={16} />
           <span>{visibleActionError}</span>
+        </div>
+      ) : null}
+
+      {playbackErrorMessage && pageHasItems ? (
+        <div className="library-alert library-alert-warning" role="status">
+          <SpotIcon name="alert" size={16} />
+          <span>{playbackErrorMessage}</span>
         </div>
       ) : null}
 
@@ -250,7 +262,13 @@ export function LibraryPage() {
                 <span className="eyebrow">INDEXED TRACKS</span>
                 <h2 id="indexed-tracks-heading">Your local collection</h2>
               </div>
-              <span className="section-note">{status.data?.availableTrackCount ?? 0} available to play when playback is enabled</span>
+              <span className="section-note">
+                {nativeRuntime
+                  ? `${status.data?.availableTrackCount ?? 0} available to play now`
+                  : e2ePlaybackPreview
+                    ? "Synthetic playback fixtures are active for browser E2E coverage"
+                    : "Playback remains available in the native SpotDIY app"}
+              </span>
             </div>
             <div className="library-controls" aria-label="Library controls">
               <label>
@@ -293,7 +311,20 @@ export function LibraryPage() {
             ) : pageHasItems ? (
               <>
                 <div className="library-track-list">
-                  {pageData?.items.map((track) => <LibraryTrackRow key={track.sourceId} onReveal={reveal} revealPending={revealFile.isPending} track={track} />)}
+                  {pageData?.items.map((track) => (
+                    <LibraryTrackRow
+                      current={playback.snapshot.currentTrackId === track.trackId}
+                      key={track.sourceId}
+                      onAddToQueue={(row) => { void playback.addToQueue(row.trackId, row.sourceId); }}
+                      onPlayNext={(row) => { void playback.playNext(row.trackId, row.sourceId); }}
+                      onPlayNow={(row) => { void playback.playNow(row.trackId, row.sourceId); }}
+                      onReveal={reveal}
+                      playbackEnabled={playbackEnabled}
+                      playbackPending={playback.pending}
+                      revealPending={revealFile.isPending}
+                      track={track}
+                    />
+                  ))}
                 </div>
                 {libraryPage.isFetching ? <span className="library-refreshing" role="status">Updating library results…</span> : null}
               </>

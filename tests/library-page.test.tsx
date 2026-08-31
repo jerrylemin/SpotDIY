@@ -12,6 +12,58 @@ const removeMutation = vi.hoisted(() => ({ isPending: false, error: null as unkn
 const rescanMutation = vi.hoisted(() => ({ isPending: false, error: null as unknown, mutate: vi.fn() }));
 const rescanAllMutation = vi.hoisted(() => ({ isPending: false, error: null as unknown, mutate: vi.fn() }));
 const revealMutation = vi.hoisted(() => ({ isPending: false, error: null as unknown, mutate: vi.fn() }));
+const playbackResult = vi.hoisted(() => ({
+  snapshot: {
+    revision: 0,
+    phase: "idle",
+    currentQueueEntryId: null,
+    currentTrackId: null,
+    currentSourceId: null,
+    title: null,
+    artists: [],
+    album: null,
+    artworkPath: null,
+    sources: [],
+    positionMs: 0,
+    durationMs: null,
+    volumePercent: 100,
+    muted: false,
+    repeatMode: "off",
+    shuffleEnabled: false,
+    queueLength: 0,
+    queueIndex: null,
+    selectedAudioDevice: "auto",
+    backendHealth: { ready: false, connected: false, detail: null, recoveryAction: null },
+    recovering: false,
+    error: null,
+  },
+  audioDevices: [],
+  hydrated: true,
+  initializing: false,
+  audioDevicesLoading: false,
+  bridgeError: null as string | null,
+  pending: false,
+  refreshSnapshot: vi.fn(),
+  refreshDevices: vi.fn(),
+  playNow: vi.fn(),
+  addToQueue: vi.fn(),
+  playNext: vi.fn(),
+  togglePlayPause: vi.fn(),
+  nextTrack: vi.fn(),
+  previousTrack: vi.fn(),
+  seekPlayback: vi.fn(),
+  setVolume: vi.fn(),
+  setMuted: vi.fn(),
+  toggleMuted: vi.fn(),
+  cycleRepeatMode: vi.fn(),
+  setShuffleEnabled: vi.fn(),
+  toggleShuffle: vi.fn(),
+  setAudioDevice: vi.fn(),
+  switchSource: vi.fn(),
+  retryPlaybackBackend: vi.fn(),
+  clearQueue: vi.fn(),
+  warmAudioDevices: vi.fn(),
+}));
 
 vi.mock("../src/services/ipc", () => ({
   isTauriRuntime: nativeRuntimeMock,
@@ -28,6 +80,9 @@ vi.mock("../src/hooks/useLibrary", () => ({
   useRescanLibraryFolder: () => rescanMutation,
   useRescanAllLibraryFolders: () => rescanAllMutation,
   useRevealLocalFile: () => revealMutation,
+}));
+vi.mock("../src/hooks/usePlayback", () => ({
+  usePlayback: () => playbackResult,
 }));
 
 import { LibraryPage } from "../src/pages/LibraryPage";
@@ -125,6 +180,26 @@ afterEach(() => {
   rescanMutation.mutate.mockReset();
   rescanAllMutation.mutate.mockReset();
   revealMutation.mutate.mockReset();
+  playbackResult.refreshSnapshot.mockReset();
+  playbackResult.refreshDevices.mockReset();
+  playbackResult.playNow.mockReset();
+  playbackResult.addToQueue.mockReset();
+  playbackResult.playNext.mockReset();
+  playbackResult.togglePlayPause.mockReset();
+  playbackResult.nextTrack.mockReset();
+  playbackResult.previousTrack.mockReset();
+  playbackResult.seekPlayback.mockReset();
+  playbackResult.setVolume.mockReset();
+  playbackResult.setMuted.mockReset();
+  playbackResult.toggleMuted.mockReset();
+  playbackResult.cycleRepeatMode.mockReset();
+  playbackResult.setShuffleEnabled.mockReset();
+  playbackResult.toggleShuffle.mockReset();
+  playbackResult.setAudioDevice.mockReset();
+  playbackResult.switchSource.mockReset();
+  playbackResult.retryPlaybackBackend.mockReset();
+  playbackResult.clearQueue.mockReset();
+  playbackResult.warmAudioDevices.mockReset();
   statusResult.refetch.mockReset();
   vi.restoreAllMocks();
 });
@@ -166,7 +241,7 @@ describe("LibraryPage", () => {
     expect(screen.getByText("44.1 kHz")).toBeInTheDocument();
     expect(screen.getByText("16-bit")).toBeInTheDocument();
     expect(screen.getByText("3:05")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Play Night Drive" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Play now Night Drive" })).toBeEnabled();
     expect(screen.getByTestId("library-track-track-1").querySelector("img")).toBeNull();
   });
 
@@ -208,6 +283,7 @@ describe("LibraryPage", () => {
 
     expect(screen.getByText("Unavailable")).toBeInTheDocument();
     expect(screen.getByText("File was not found during the last scan")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /play now/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /open file location/i })).toBeDisabled();
   });
 

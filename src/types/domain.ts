@@ -5,6 +5,7 @@ export type AlbumId = string & { readonly __brand: "AlbumId" };
 export type SourceId = string & { readonly __brand: "SourceId" };
 export type LibraryFolderId = string & { readonly __brand: "LibraryFolderId" };
 export type ArtworkId = string & { readonly __brand: "ArtworkId" };
+export type QueueEntryId = string & { readonly __brand: "QueueEntryId" };
 
 export type RouteId =
   | "home"
@@ -245,6 +246,109 @@ export interface LibraryPage {
   hasNext: boolean;
   sort: LibrarySort;
   descending: boolean;
+}
+
+export type PlaybackPhase =
+  | "idle"
+  | "loading"
+  | "playing"
+  | "paused"
+  | "seeking"
+  | "ended"
+  | "recovering"
+  | "failed"
+  | "shuttingDown";
+
+export type RepeatMode = "off" | "one" | "all";
+
+export type PlaybackErrorCode =
+  | "toolMissing"
+  | "toolBroken"
+  | "spawnFailed"
+  | "ipcConnectTimeout"
+  | "ipcDisconnected"
+  | "protocolError"
+  | "requestTimeout"
+  | "trackNotFound"
+  | "sourceNotFound"
+  | "sourceMismatch"
+  | "sourceUnavailable"
+  | "sourceNotPlayable"
+  | "sourceSwitchFailed"
+  | "localFileMissing"
+  | "loadFailed"
+  | "seekFailed"
+  | "deviceUnavailable"
+  | "queueEmpty"
+  | "invalidState"
+  | "backendUnavailable"
+  | "backendDisconnected"
+  | "backendTimeout"
+  | "backendProtocol"
+  | "backendOperation"
+  | "libraryOperation"
+  | "controllerBusy"
+  | "controllerUnavailable"
+  | "recoveryRetrying"
+  | "recoveryExhausted"
+  | "shuttingDown";
+
+export interface PlaybackErrorDto {
+  code: PlaybackErrorCode;
+  summary: string;
+  retryable: boolean;
+}
+
+export interface PlaybackBackendHealth {
+  ready: boolean;
+  connected: boolean;
+  detail: string | null;
+  recoveryAction: string | null;
+}
+
+export interface AudioDevice {
+  name: string;
+  description: string;
+  selected: boolean;
+}
+
+export type PlaybackAudioDevice = AudioDevice;
+
+export interface PlaybackSourceOption {
+  sourceId: SourceId;
+  provider: ProviderKind;
+  label: string;
+  available: boolean;
+}
+
+export interface TrackPlaybackRequest {
+  trackId: TrackId;
+  sourceId: SourceId | null;
+}
+
+export interface PlaybackSnapshot {
+  revision: number;
+  phase: PlaybackPhase;
+  currentQueueEntryId: QueueEntryId | null;
+  currentTrackId: TrackId | null;
+  currentSourceId: SourceId | null;
+  title: string | null;
+  artists: string[];
+  album: string | null;
+  artworkPath: string | null;
+  sources: PlaybackSourceOption[];
+  positionMs: number;
+  durationMs: number | null;
+  volumePercent: number;
+  muted: boolean;
+  repeatMode: RepeatMode;
+  shuffleEnabled: boolean;
+  queueLength: number;
+  queueIndex: number | null;
+  selectedAudioDevice: string;
+  backendHealth: PlaybackBackendHealth;
+  recovering: boolean;
+  error: PlaybackErrorDto | null;
 }
 
 export interface NavItem {

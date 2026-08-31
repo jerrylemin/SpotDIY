@@ -16,17 +16,18 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::db::repository::{RepositoryError, SourceRepository};
 use crate::db::{Database, DatabaseError};
 use crate::domain::{
     AlbumId, ArtistId, LibraryFolder, LibraryFolderId, LibraryFolderStatus, LibraryPage,
     LibraryPageRequest, LibrarySort, LibraryStatus, LibraryTrack, LocalFileIndexStatus,
-    ScanProgress, ScanSummary, SourceId, TrackId,
+    ProviderKind, ScanProgress, ScanSummary, SourceId, TrackId,
 };
 
 use self::artwork::{ArtworkCache, ArtworkCacheEntry, ArtworkError};
 use self::folders::{
-    is_path_within, normalize_file_path, validate_new_folders, FolderPathError,
-    NormalizedFolderPath,
+    is_path_within, normalize_file_path, normalize_folder_path, validate_new_folders,
+    FolderPathError, NormalizedFolderPath,
 };
 use self::metadata::ExtractedMetadata;
 
@@ -44,6 +45,8 @@ pub enum LibraryError {
     Database(#[from] DatabaseError),
     #[error("SQLite operation failed: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("repository operation failed: {0}")]
+    Repository(#[from] RepositoryError),
     #[error("invalid stored library value for {field}: {value}")]
     InvalidStoredValue { field: &'static str, value: String },
     #[error("library folder {0} was not found")]
@@ -60,6 +63,18 @@ pub enum LibraryError {
     Metadata(#[from] metadata::MetadataError),
     #[error("watcher failed: {0}")]
     Watcher(String),
+    #[error("playback source {source_id} was not found")]
+    SourceNotFound { source_id: SourceId },
+    #[error(
+        "playback source {source_id} belongs to track {actual_track_id}, not {expected_track_id}"
+    )]
+    SourceMismatch {
+        source_id: SourceId,
+        expected_track_id: TrackId,
+        actual_track_id: TrackId,
+    },
+    #[error("playback source {source_id} is unavailable: {detail}")]
+    SourceUnavailable { source_id: SourceId, detail: String },
 }
 
 #[derive(Clone, Debug)]
@@ -138,6 +153,10 @@ impl LibraryService {
 
     pub fn list_folders(&self) -> Result<Vec<LibraryFolder>, LibraryError> {
         list_folders(&self.database)
+    }
+
+    pub(crate) fn database(&self) -> &Database {
+        &self.database
     }
 
     pub fn add_folders(&self, paths: Vec<PathBuf>) -> Result<Vec<LibraryFolder>, LibraryError> {
@@ -505,6 +524,116 @@ impl LibraryService {
             });
         }
         Ok(display_path)
+    }
+
+    pub fn resolve_playback_path(
+        &self,
+        track_id: TrackId,
+        source_id: SourceId,
+    ) -> Result<PathBuf, LibraryError> {
+        let source = SourceRepository::new(&self.database)
+            .get(source_id)?
+            .ok_or(LibraryError::SourceNotFound { source_id })?;
+        if source.track_id != track_id {
+            return Err(LibraryError::SourceMismatch {
+                source_id,
+                expected_track_id: track_id,
+                actual_track_id: source.track_id,
+            });
+        }
+        if source.provider_kind != ProviderKind::Local {
+            return Err(playback_source_unavailable(
+                source_id,
+                "source is not local",
+            ));
+        }
+        if !source.capabilities.playback {
+            return Err(playback_source_unavailable(
+                source_id,
+                "source does not advertise playback capability",
+            ));
+        }
+        if !source.available {
+            return Err(playback_source_unavailable(
+                source_id,
+                source
+                    .availability_detail
+                    .as_deref()
+                    .unwrap_or("source is marked unavailable"),
+            ));
+        }
+
+        let local_file = source.local_file.ok_or_else(|| {
+            playback_source_unavailable(source_id, "source has no managed local file")
+        })?;
+        if local_file.source_id != source_id {
+            return Err(playback_source_unavailable(
+                source_id,
+                "local file identity does not match the source",
+            ));
+        }
+        if local_file.index_status != LocalFileIndexStatus::Indexed {
+            return Err(playback_source_unavailable(
+                source_id,
+                "local file is not indexed and available",
+            ));
+        }
+        let folder_id = local_file.library_folder_id.ok_or_else(|| {
+            playback_source_unavailable(source_id, "local file has no managed folder")
+        })?;
+        let stored_path_key = local_file.normalized_path_key.ok_or_else(|| {
+            playback_source_unavailable(source_id, "local file has no normalized path")
+        })?;
+
+        let folder: Option<(String, String)> = self.database.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT path, normalized_path_key
+                     FROM library_folders
+                     WHERE id = ?1 AND enabled = 1",
+                    params![folder_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+        })?;
+        let Some((folder_path, folder_path_key)) = folder else {
+            return Err(playback_source_unavailable(
+                source_id,
+                "owning library folder is disabled or missing",
+            ));
+        };
+        if !is_path_within(&folder_path_key, &stored_path_key) {
+            return Err(playback_source_unavailable(
+                source_id,
+                "stored local path is outside its managed folder",
+            ));
+        }
+
+        let current_folder = normalize_folder_path(&folder_path).map_err(|_| {
+            playback_source_unavailable(source_id, "owning library folder is unavailable")
+        })?;
+        if current_folder.normalized_path_key != folder_path_key {
+            return Err(playback_source_unavailable(
+                source_id,
+                "owning library folder no longer matches its stored path",
+            ));
+        }
+
+        let (current_path, current_path_key) =
+            normalize_file_path(&local_file.path).map_err(|_| {
+                playback_source_unavailable(source_id, "local file is missing or unavailable")
+            })?;
+        if current_path_key != stored_path_key
+            || !is_path_within(&folder_path_key, &current_path_key)
+            || !is_path_within(&current_folder.normalized_path_key, &current_path_key)
+        {
+            return Err(playback_source_unavailable(
+                source_id,
+                "current local path does not match its indexed path",
+            ));
+        }
+
+        Ok(current_path)
     }
 
     pub(crate) fn folder_for_scan(
@@ -1018,6 +1147,13 @@ impl LibraryService {
             Ok(())
         })?;
         Ok(())
+    }
+}
+
+fn playback_source_unavailable(source_id: SourceId, detail: impl Into<String>) -> LibraryError {
+    LibraryError::SourceUnavailable {
+        source_id,
+        detail: detail.into(),
     }
 }
 
@@ -2320,6 +2456,179 @@ mod tests {
             .unwrap();
 
         assert!(service.reveal_path(source_id).is_err());
+    }
+
+    #[test]
+    fn playback_path_resolves_only_an_indexed_available_managed_local_source() {
+        let fixture = indexed_playback_fixture("library-playback-valid");
+
+        assert_eq!(
+            fixture
+                .service
+                .resolve_playback_path(fixture.track_id, fixture.source_id)
+                .unwrap(),
+            fixture.path
+        );
+
+        let error = fixture
+            .service
+            .resolve_playback_path(TrackId::new(), fixture.source_id)
+            .unwrap_err();
+        assert!(matches!(error, LibraryError::SourceMismatch { .. }));
+
+        let error = fixture
+            .service
+            .resolve_playback_path(fixture.track_id, SourceId::new())
+            .unwrap_err();
+        assert!(matches!(error, LibraryError::SourceNotFound { .. }));
+    }
+
+    #[test]
+    fn playback_path_rejects_capability_availability_and_folder_boundary_failures() {
+        let fixture = indexed_playback_fixture("library-playback-policy");
+
+        for statement in [
+            "UPDATE track_sources SET available = 0 WHERE id = ?1",
+            "UPDATE track_sources SET available = 1, can_playback = 0 WHERE id = ?1",
+            "UPDATE track_sources SET can_playback = 1, provider_kind = 'youtube' WHERE id = ?1",
+        ] {
+            fixture
+                .database
+                .with_connection(|connection| {
+                    connection.execute(statement, params![fixture.source_id.to_string()])?;
+                    Ok(())
+                })
+                .unwrap();
+            let error = fixture
+                .service
+                .resolve_playback_path(fixture.track_id, fixture.source_id)
+                .unwrap_err();
+            assert!(matches!(error, LibraryError::SourceUnavailable { .. }));
+        }
+
+        fixture
+            .database
+            .with_connection(|connection| {
+                connection.execute(
+                    "UPDATE track_sources SET provider_kind = 'local' WHERE id = ?1",
+                    params![fixture.source_id.to_string()],
+                )?;
+                connection.execute(
+                    "UPDATE library_folders SET enabled = 0 WHERE id = ?1",
+                    params![fixture.folder_id.to_string()],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let error = fixture
+            .service
+            .resolve_playback_path(fixture.track_id, fixture.source_id)
+            .unwrap_err();
+        assert!(matches!(error, LibraryError::SourceUnavailable { .. }));
+
+        fixture
+            .database
+            .with_connection(|connection| {
+                connection.execute(
+                    "UPDATE library_folders SET enabled = 1 WHERE id = ?1",
+                    params![fixture.folder_id.to_string()],
+                )?;
+                connection.execute(
+                    "UPDATE local_files SET normalized_path_key = ?1 WHERE source_id = ?2",
+                    params![r"c:\outside\track.wav", fixture.source_id.to_string()],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let error = fixture
+            .service
+            .resolve_playback_path(fixture.track_id, fixture.source_id)
+            .unwrap_err();
+        assert!(matches!(error, LibraryError::SourceUnavailable { .. }));
+    }
+
+    #[test]
+    fn playback_path_rechecks_the_file_without_mutating_library_records() {
+        let fixture = indexed_playback_fixture("library-playback-no-mutation");
+        let before: (i64, String, String) = fixture
+            .database
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT ts.available, lf.index_status, ts.updated_at
+                     FROM track_sources ts
+                     INNER JOIN local_files lf ON lf.source_id = ts.id
+                     WHERE ts.id = ?1",
+                    params![fixture.source_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+            })
+            .unwrap();
+        fs::remove_file(&fixture.path).unwrap();
+
+        let error = fixture
+            .service
+            .resolve_playback_path(fixture.track_id, fixture.source_id)
+            .unwrap_err();
+        assert!(matches!(error, LibraryError::SourceUnavailable { .. }));
+
+        let after: (i64, String, String) = fixture
+            .database
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT ts.available, lf.index_status, ts.updated_at
+                     FROM track_sources ts
+                     INNER JOIN local_files lf ON lf.source_id = ts.id
+                     WHERE ts.id = ?1",
+                    params![fixture.source_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+            })
+            .unwrap();
+        assert_eq!(after, before);
+    }
+
+    struct IndexedPlaybackFixture {
+        _directory: tempfile::TempDir,
+        _artwork: tempfile::TempDir,
+        _database_path: TempDatabasePath,
+        database: Database,
+        service: LibraryService,
+        track_id: TrackId,
+        source_id: SourceId,
+        folder_id: LibraryFolderId,
+        path: PathBuf,
+    }
+
+    fn indexed_playback_fixture(label: &str) -> IndexedPlaybackFixture {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("playback.wav");
+        fs::write(&path, minimal_wav()).unwrap();
+        let database_path = TempDatabasePath::new(label);
+        let database = Database::open(database_path.path()).unwrap();
+        let artwork = tempfile::tempdir().unwrap();
+        let service = LibraryService::new(database.clone(), artwork.path()).unwrap();
+        let folder = service
+            .add_folders(vec![directory.path().to_path_buf()])
+            .unwrap()
+            .remove(0);
+        service.scan_folder_now(folder.id, false, None).unwrap();
+        let track = service
+            .page(LibraryPageRequest::default())
+            .unwrap()
+            .items
+            .remove(0);
+
+        IndexedPlaybackFixture {
+            _directory: directory,
+            _artwork: artwork,
+            _database_path: database_path,
+            database,
+            service,
+            track_id: track.track_id,
+            source_id: track.source_id,
+            folder_id: folder.id,
+            path: track.path,
+        }
     }
 
     fn minimal_wav() -> Vec<u8> {

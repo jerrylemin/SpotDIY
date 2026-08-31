@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -7,17 +8,21 @@ use serde_json::{json, Value};
 use crate::media_tools::{MediaToolManager, MediaToolStatus};
 
 use super::backend::{
-    AudioDevice, BackendError, BackendEvent, BackendHealth, EndFileReason, PlaybackBackend,
+    AudioDevice, BackendCommand, BackendError, BackendEvent, BackendHealth, EndFileReason,
+    PlaybackBackend,
 };
+use super::protocol::{parse_frame as parse_protocol_frame, ProtocolFrame, RequestIdGenerator};
+use super::{PlaybackError, PlaybackErrorCode};
 
-const MAX_FRAME_BYTES: usize = 64 * 1024;
+pub(crate) use super::protocol::MAX_FRAME_BYTES;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
-const LOAD_TIMEOUT: Duration = Duration::from_secs(15);
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+const LOAD_TIMEOUT: Duration = Duration::from_secs(10);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 const FORCED_REAP_TIMEOUT: Duration = Duration::from_millis(500);
 const TASK_JOIN_TIMEOUT: Duration = Duration::from_millis(250);
 const POSITION_EVENT_INTERVAL: Duration = Duration::from_millis(250);
+const BACKEND_COMMAND_CAPACITY: usize = 64;
 
 const OBSERVED_PROPERTIES: &[(i64, &str)] = &[
     (1, "pause"),
@@ -26,9 +31,6 @@ const OBSERVED_PROPERTIES: &[(i64, &str)] = &[
     (4, "volume"),
     (5, "mute"),
     (6, "seeking"),
-    (7, "eof-reached"),
-    (8, "audio-device"),
-    (9, "audio-device-list"),
 ];
 
 #[derive(Clone)]
@@ -57,6 +59,7 @@ pub struct MpvBackend {
     manager: MediaToolManager,
     health: BackendHealth,
     buffered_events: VecDeque<BackendEvent>,
+    pending_commands: Mutex<VecDeque<BackendCommand>>,
     next_generation: u64,
     config: SessionConfig,
     #[cfg(windows)]
@@ -80,6 +83,7 @@ impl MpvBackend {
             manager,
             health,
             buffered_events: VecDeque::new(),
+            pending_commands: Mutex::new(VecDeque::new()),
             next_generation: 0,
             config: SessionConfig::default(),
             #[cfg(windows)]
@@ -138,18 +142,16 @@ impl MpvBackend {
             match stamped.event {
                 SessionEvent::Backend(event) => self.buffered_events.push_back(event),
                 SessionEvent::FileLoaded => {
-                    self.buffered_events
-                        .push_back(BackendEvent::FileLoaded { duration_ms: None });
+                    self.buffered_events.push_back(BackendEvent::FileLoaded);
                 }
-                SessionEvent::Disconnected(error) => {
+                SessionEvent::Disconnected(_error) => {
                     self.health = BackendHealth {
                         ready: false,
                         connected: false,
                         detail: Some("the mpv session disconnected".to_owned()),
                         recovery_action: Some("Retry the playback backend".to_owned()),
                     };
-                    self.buffered_events
-                        .push_back(BackendEvent::Error { error });
+                    self.buffered_events.push_back(BackendEvent::Disconnected);
                 }
             }
         }
@@ -157,6 +159,25 @@ impl MpvBackend {
 }
 
 impl PlaybackBackend for MpvBackend {
+    fn send(&self, command: BackendCommand) -> Result<(), PlaybackError> {
+        let mut pending = self.pending_commands.lock().map_err(|_| {
+            PlaybackError::new(
+                PlaybackErrorCode::BackendOperation,
+                "the mpv command queue lock is poisoned",
+                true,
+            )
+        })?;
+        if pending.len() >= BACKEND_COMMAND_CAPACITY {
+            return Err(PlaybackError::new(
+                PlaybackErrorCode::ControllerBusy,
+                "the mpv command queue is full",
+                true,
+            ));
+        }
+        pending.push_back(command);
+        Ok(())
+    }
+
     fn start(&mut self) -> Result<(), BackendError> {
         #[cfg(not(windows))]
         {
@@ -197,7 +218,6 @@ impl PlaybackBackend for MpvBackend {
             let executable = self
                 .manager
                 .mpv_path()
-                .map(Path::to_path_buf)
                 .ok_or_else(|| BackendError::Unavailable {
                     detail: "mpv is not available".to_owned(),
                 })?;
@@ -218,6 +238,7 @@ impl PlaybackBackend for MpvBackend {
                         detail: None,
                         recovery_action: None,
                     };
+                    self.buffered_events.push_back(BackendEvent::Ready);
                     Ok(())
                 }
                 Err(error) => {
@@ -276,7 +297,8 @@ impl PlaybackBackend for MpvBackend {
                 .and_then(|value| value.as_f64())
                 .and_then(seconds_to_millis);
             self.buffered_events
-                .push_back(BackendEvent::FileLoaded { duration_ms });
+                .push_back(BackendEvent::DurationChanged(duration_ms));
+            self.buffered_events.push_back(BackendEvent::FileLoaded);
             Ok(())
         }
     }
@@ -371,7 +393,14 @@ impl PlaybackBackend for MpvBackend {
                 "list audio devices",
                 vec![json!("get_property"), json!("audio-device-list")],
             )?;
-            parse_audio_devices(&value)
+            let selected = self
+                .request(
+                    "read selected audio device",
+                    vec![json!("get_property"), json!("audio-device")],
+                )?
+                .as_str()
+                .map(str::to_owned);
+            parse_audio_devices_with_selected(&value, selected.as_deref())
         }
         #[cfg(not(windows))]
         Err(BackendError::NotStarted)
@@ -405,7 +434,7 @@ impl PlaybackBackend for MpvBackend {
         Err(BackendError::NotStarted)
     }
 
-    fn shutdown(&mut self) -> Result<(), BackendError> {
+    fn shutdown(&mut self) -> Result<(), super::PlaybackError> {
         #[cfg(windows)]
         {
             let result = if let Some(session) = self.session.take() {
@@ -414,7 +443,8 @@ impl PlaybackBackend for MpvBackend {
                     .as_ref()
                     .ok_or_else(|| BackendError::Unavailable {
                         detail: "the mpv async runtime could not be initialized".to_owned(),
-                    })?;
+                    })
+                    .map_err(super::playback_error_from_backend)?;
                 runtime.block_on(shutdown_session(
                     session,
                     self.config.request_timeout,
@@ -425,7 +455,7 @@ impl PlaybackBackend for MpvBackend {
             };
             self.buffered_events.clear();
             self.health = stopped_health(&self.manager);
-            result
+            result.map_err(super::playback_error_from_backend)
         }
         #[cfg(not(windows))]
         {
@@ -440,9 +470,53 @@ impl PlaybackBackend for MpvBackend {
     }
 
     fn poll_events(&mut self) -> Vec<BackendEvent> {
+        self.process_pending_commands();
         #[cfg(windows)]
         self.drain_session_events();
         self.buffered_events.drain(..).collect()
+    }
+}
+
+impl MpvBackend {
+    fn process_pending_commands(&mut self) {
+        let commands = self
+            .pending_commands
+            .lock()
+            .map(|mut pending| pending.drain(..).collect::<Vec<_>>())
+            .unwrap_or_default();
+        for command in commands {
+            let result = match command {
+                BackendCommand::Load { path, start_paused } => {
+                    self.load(&path)
+                        .and_then(|()| if start_paused { self.pause() } else { Ok(()) })
+                }
+                BackendCommand::SetPaused(paused) => {
+                    if paused {
+                        self.pause()
+                    } else {
+                        self.resume()
+                    }
+                }
+                BackendCommand::SeekAbsoluteMs(position_ms) => self.seek(position_ms),
+                BackendCommand::SetVolume(volume_percent) => self.set_volume(volume_percent),
+                BackendCommand::SetMuted(muted) => self.set_muted(muted),
+                BackendCommand::QueryAudioDevices => self.list_audio_devices().map(|devices| {
+                    self.buffered_events
+                        .push_back(BackendEvent::AudioDevices(devices));
+                }),
+                BackendCommand::SelectAudioDevice(name) => self.set_audio_device(&name),
+                BackendCommand::Stop => self.stop(),
+                BackendCommand::Shutdown => {
+                    return {
+                        let _ = PlaybackBackend::shutdown(self);
+                    }
+                }
+            };
+            if let Err(error) = result {
+                self.buffered_events
+                    .push_back(BackendEvent::ProtocolError(error.to_string()));
+            }
+        }
     }
 }
 
@@ -488,55 +562,30 @@ enum IncomingFrame {
 }
 
 fn serialize_request(command: Vec<Value>, request_id: i64) -> Result<Vec<u8>, BackendError> {
-    if command.is_empty() {
-        return Err(protocol_error("an empty command cannot be serialized"));
-    }
-    let mut frame = serde_json::to_vec(&json!({
-        "command": command,
-        "request_id": request_id,
-    }))
-    .map_err(|_| protocol_error("a request could not be serialized"))?;
-    frame.push(b'\n');
-    Ok(frame)
+    super::protocol::serialize_request(command, request_id)
 }
 
 fn parse_frame(frame: &[u8]) -> Result<IncomingFrame, BackendError> {
-    if frame.len() > MAX_FRAME_BYTES {
-        return Err(protocol_error("an mpv frame exceeded the size limit"));
-    }
-    let value: Value =
-        serde_json::from_slice(frame).map_err(|_| protocol_error("mpv sent malformed JSON"))?;
-    let object = value
-        .as_object()
-        .ok_or_else(|| protocol_error("mpv sent a non-object frame"))?;
-
-    if let Some(request_id) = object.get("request_id") {
-        let request_id = request_id
-            .as_i64()
-            .ok_or_else(|| protocol_error("mpv sent an invalid request id"))?;
-        let error = object
-            .get("error")
-            .and_then(Value::as_str)
-            .ok_or_else(|| protocol_error("mpv sent a reply without an error status"))?
-            .to_owned();
-        return Ok(IncomingFrame::Reply {
-            request_id,
-            error,
-            data: object.get("data").cloned().unwrap_or(Value::Null),
-        });
-    }
-
-    let event = object
-        .get("event")
-        .and_then(Value::as_str)
-        .ok_or_else(|| protocol_error("mpv sent an unclassified frame"))?;
-    match event {
-        "property-change" => Ok(parse_property_change(&value)?
-            .map(IncomingFrame::Event)
-            .unwrap_or(IncomingFrame::Ignored)),
-        "file-loaded" => Ok(IncomingFrame::FileLoaded),
-        "end-file" => Ok(IncomingFrame::Event(parse_end_file(&value)?)),
-        _ => Ok(IncomingFrame::Ignored),
+    match parse_protocol_frame(frame)? {
+        ProtocolFrame::Reply(reply) => Ok(IncomingFrame::Reply {
+            request_id: reply.request_id,
+            error: reply.error,
+            data: reply.data.unwrap_or(Value::Null),
+        }),
+        ProtocolFrame::Event(event) => match event.event.as_str() {
+            "property-change" => {
+                let value = json!({"name": event.name, "data": event.data});
+                Ok(parse_property_change(&value)?
+                    .map(IncomingFrame::Event)
+                    .unwrap_or(IncomingFrame::Ignored))
+            }
+            "file-loaded" => Ok(IncomingFrame::FileLoaded),
+            "end-file" => {
+                let value = json!({"reason": event.reason});
+                Ok(IncomingFrame::Event(parse_end_file(&value)?))
+            }
+            _ => Ok(IncomingFrame::Ignored),
+        },
     }
 }
 
@@ -546,44 +595,64 @@ fn parse_property_change(value: &Value) -> Result<Option<BackendEvent>, BackendE
         .and_then(Value::as_str)
         .ok_or_else(|| protocol_error("a property event did not include a name"))?;
     let data = value.get("data").unwrap_or(&Value::Null);
-    if data.is_null() && name != "audio-device" && name != "audio-device-list" {
+    if data.is_null() && name != "audio-device" && name != "audio-device-list" && name != "duration"
+    {
         return Ok(None);
     }
 
     match name {
         "pause" => data
             .as_bool()
-            .map(|paused| Some(BackendEvent::Pause { paused }))
+            .map(|paused| Some(BackendEvent::PauseChanged(paused)))
             .ok_or_else(|| protocol_error("pause was not a boolean")),
         "time-pos" => data
             .as_f64()
             .and_then(seconds_to_millis)
-            .map(|position_ms| Some(BackendEvent::Position { position_ms }))
+            .map(|position_ms| Some(BackendEvent::PositionChanged(position_ms)))
             .ok_or_else(|| protocol_error("time-pos was not a valid number")),
         "seeking" => data
             .as_bool()
-            .map(|seeking| Some(BackendEvent::Seeking { seeking }))
+            .map(|seeking| Some(BackendEvent::SeekingChanged(seeking)))
             .ok_or_else(|| protocol_error("seeking was not a boolean")),
+        "duration" => {
+            if data.is_null() {
+                Ok(Some(BackendEvent::DurationChanged(None)))
+            } else {
+                data.as_f64()
+                    .and_then(seconds_to_millis)
+                    .map(|duration_ms| Some(BackendEvent::DurationChanged(Some(duration_ms))))
+                    .ok_or_else(|| protocol_error("duration was not a valid number"))
+            }
+        }
+        "volume" => data
+            .as_f64()
+            .filter(|volume| volume.is_finite())
+            .map(|volume| {
+                Some(BackendEvent::VolumeChanged(
+                    volume.clamp(0.0, 100.0).round() as u8,
+                ))
+            })
+            .ok_or_else(|| protocol_error("volume was not a valid number")),
+        "mute" => data
+            .as_bool()
+            .map(|muted| Some(BackendEvent::MuteChanged(muted)))
+            .ok_or_else(|| protocol_error("mute was not a boolean")),
         "audio-device" => {
             let name = if data.is_null() {
-                None
+                "auto".to_owned()
             } else {
-                Some(
-                    data.as_str()
-                        .ok_or_else(|| protocol_error("audio-device was not a string"))?
-                        .to_owned(),
-                )
+                data.as_str()
+                    .ok_or_else(|| protocol_error("audio-device was not a string"))?
+                    .to_owned()
             };
-            Ok(Some(BackendEvent::AudioDevice { name }))
+            Ok(Some(BackendEvent::AudioDeviceChanged(name)))
         }
-        "audio-device-list" => Ok(Some(BackendEvent::AudioDeviceList {
-            devices: if data.is_null() {
-                Vec::new()
-            } else {
-                parse_audio_devices(data)?
-            },
-        })),
-        "duration" | "volume" | "mute" | "eof-reached" => Ok(None),
+        "audio-device-list" => Ok(Some(BackendEvent::AudioDevices(if data.is_null() {
+            Vec::new()
+        } else {
+            parse_audio_devices(data)?
+        }))),
+        "eof-reached" => Ok(None),
         _ => Ok(None),
     }
 }
@@ -597,10 +666,17 @@ fn parse_end_file(value: &Value) -> Result<BackendEvent, BackendError> {
         Some("redirect") => EndFileReason::Redirect,
         Some(_) | None => EndFileReason::Unknown,
     };
-    Ok(BackendEvent::EndFile { reason })
+    Ok(BackendEvent::EndFile(reason))
 }
 
 fn parse_audio_devices(value: &Value) -> Result<Vec<AudioDevice>, BackendError> {
+    parse_audio_devices_with_selected(value, None)
+}
+
+fn parse_audio_devices_with_selected(
+    value: &Value,
+    selected_name: Option<&str>,
+) -> Result<Vec<AudioDevice>, BackendError> {
     let entries = value
         .as_array()
         .ok_or_else(|| protocol_error("audio-device-list was not an array"))?;
@@ -621,20 +697,24 @@ fn parse_audio_devices(value: &Value) -> Result<Vec<AudioDevice>, BackendError> 
                     ));
                 }
             };
+            let selected = entry
+                .get("selected")
+                .and_then(Value::as_bool)
+                .unwrap_or_else(|| selected_name == Some(name.as_str()));
             Ok(AudioDevice {
-                is_default: name == "auto",
                 name,
-                description,
+                description: description.unwrap_or_default(),
+                selected,
             })
         })
         .collect()
 }
 
 fn seconds_to_millis(seconds: f64) -> Option<u64> {
-    if !seconds.is_finite() || seconds < 0.0 {
+    if !seconds.is_finite() {
         return None;
     }
-    let millis = (seconds * 1_000.0).round();
+    let millis = (seconds.max(0.0) * 1_000.0).round();
     if millis >= u64::MAX as f64 {
         Some(u64::MAX)
     } else {
@@ -694,7 +774,8 @@ mod windows_session {
 
     #[derive(Clone, Debug)]
     pub(super) struct ProcessExit {
-        result: Result<(), BackendError>,
+        pub(super) result: Result<(), BackendError>,
+        pub(super) code: Option<i32>,
     }
 
     #[derive(Debug)]
@@ -717,26 +798,6 @@ mod windows_session {
         pub(super) event: SessionEvent,
     }
 
-    struct RequestIds {
-        next: i64,
-    }
-
-    impl RequestIds {
-        fn new() -> Self {
-            Self { next: 1 }
-        }
-
-        fn take(&mut self) -> i64 {
-            let current = self.next;
-            self.next = if self.next == i64::MAX {
-                1
-            } else {
-                self.next + 1
-            };
-            current
-        }
-    }
-
     struct BoundedFrameReader<R> {
         reader: R,
         buffer: Vec<u8>,
@@ -753,7 +814,7 @@ mod windows_session {
         async fn next_frame(&mut self) -> Result<Option<Vec<u8>>, BackendError> {
             loop {
                 if let Some(newline) = self.buffer.iter().position(|byte| *byte == b'\n') {
-                    if newline > MAX_FRAME_BYTES {
+                    if newline >= MAX_FRAME_BYTES {
                         return Err(protocol_error("an mpv frame exceeded the size limit"));
                     }
                     let mut frame: Vec<u8> = self.buffer.drain(..=newline).collect();
@@ -1045,12 +1106,13 @@ mod windows_session {
         mut control_rx: mpsc::Receiver<ProcessControl>,
         exit_tx: watch::Sender<Option<ProcessExit>>,
     ) {
-        let result = tokio::select! {
-            status = child.wait() => status
-                .map(|_| ())
-                .map_err(|_| BackendError::Operation {
+        let (result, code) = tokio::select! {
+            status = child.wait() => match status {
+                Ok(status) => (Ok(()), status.code()),
+                Err(_) => (Err(BackendError::Operation {
                     detail: "mpv process wait failed".to_owned(),
-                }),
+                }), None),
+            },
             control = control_rx.recv() => {
                 let response = control.map(|ProcessControl::Kill { response }| response);
                 let kill_result = child.start_kill().map_err(|_| BackendError::Operation {
@@ -1061,19 +1123,19 @@ mod windows_session {
                 }
                 match kill_result {
                     Ok(()) => match time::timeout(FORCED_REAP_TIMEOUT, child.wait()).await {
-                        Ok(Ok(_)) => Ok(()),
-                        Ok(Err(_)) => Err(BackendError::Operation {
+                        Ok(Ok(status)) => (Ok(()), status.code()),
+                        Ok(Err(_)) => (Err(BackendError::Operation {
                             detail: "mpv process reap failed".to_owned(),
-                        }),
-                        Err(_) => Err(BackendError::Timeout {
+                        }), None),
+                        Err(_) => (Err(BackendError::Timeout {
                             operation: "force reap".to_owned(),
-                        }),
+                        }), None),
                     },
-                    Err(error) => Err(error),
+                    Err(error) => (Err(error), None),
                 }
             }
         };
-        let _ = exit_tx.send(Some(ProcessExit { result }));
+        let _ = exit_tx.send(Some(ProcessExit { result, code }));
     }
 
     async fn wait_for_process_exit(
@@ -1212,6 +1274,7 @@ mod windows_session {
         process_exit_rx: &mut watch::Receiver<Option<ProcessExit>>,
     ) -> Result<NamedPipeClient, BackendError> {
         let deadline = Instant::now() + timeout;
+        let mut retry_delay = Duration::from_millis(50);
         loop {
             if process_exit_rx.borrow().is_some() {
                 return Err(BackendError::Operation {
@@ -1233,7 +1296,7 @@ mod windows_session {
                     operation: "connect".to_owned(),
                 });
             }
-            let delay = remaining.min(Duration::from_millis(25));
+            let delay = remaining.min(retry_delay);
             tokio::select! {
                 _ = time::sleep(delay) => {}
                 changed = process_exit_rx.changed() => {
@@ -1244,6 +1307,7 @@ mod windows_session {
                     }
                 }
             }
+            retry_delay = (retry_delay + Duration::from_millis(50)).min(Duration::from_millis(250));
         }
     }
 
@@ -1376,7 +1440,7 @@ mod windows_session {
         let (reader, mut writer) = tokio::io::split(client);
         let mut frame_reader = BoundedFrameReader::new(reader);
         let mut pending = HashMap::<i64, PendingRequest>::new();
-        let mut request_ids = RequestIds::new();
+        let request_ids = RequestIdGenerator::new();
         let mut ticker = time::interval(Duration::from_millis(10));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut last_position_event: Option<Instant> = None;
@@ -1385,8 +1449,19 @@ mod windows_session {
         loop {
             tokio::select! {
                 changed = process_exit_rx.changed() => {
-                    if changed.is_err() || process_exit_rx.borrow().is_some() {
+                    if changed.is_err() {
                         disconnect_error = BackendError::Disconnected;
+                        break;
+                    }
+                    if let Some(exit) = process_exit_rx.borrow().clone() {
+                        let _ = event_tx.send(StampedSessionEvent {
+                            generation,
+                            event: SessionEvent::Backend(BackendEvent::ProcessExited {
+                                expected: false,
+                                code: exit.code,
+                            }),
+                        });
+                        disconnect_error = exit.result.err().unwrap_or(BackendError::Disconnected);
                         break;
                     }
                 }
@@ -1400,7 +1475,7 @@ mod windows_session {
                         deadline,
                         response,
                     } = request;
-                    let request_id = request_ids.take();
+                    let request_id = request_ids.next_id();
                     let frame = match serialize_request(command, request_id) {
                         Ok(frame) => frame,
                         Err(error) => {
@@ -1454,7 +1529,7 @@ mod windows_session {
                             }
                         }
                         Ok(IncomingFrame::Event(event)) => {
-                            let emit = if matches!(event, BackendEvent::Position { .. }) {
+                            let emit = if matches!(event, BackendEvent::PositionChanged(_)) {
                                 let now = Instant::now();
                                 let allowed = last_position_event
                                     .map(|last| now.duration_since(last) >= position_event_interval)
@@ -1521,10 +1596,10 @@ mod windows_session {
         vec![
             "--no-config".into(),
             "--idle=yes".into(),
-            "--keep-open=no".into(),
-            format!("--input-ipc-server={pipe_name}").into(),
             "--terminal=no".into(),
-            "--audio-device=auto".into(),
+            "--input-terminal=no".into(),
+            "--audio-display=no".into(),
+            format!("--input-ipc-server={pipe_name}").into(),
         ]
     }
 
@@ -1629,15 +1704,19 @@ mod tests {
     }
 
     #[test]
-    fn replies_require_signed_request_ids() {
+    fn replies_require_positive_request_ids() {
         assert!(matches!(
             parse_frame(br#"{"request_id":9223372036854775808,"error":"success"}"#),
             Err(BackendError::Protocol { .. })
         ));
+        assert!(matches!(
+            parse_frame(br#"{"request_id":-7,"error":"success","data":true}"#),
+            Err(BackendError::Protocol { .. })
+        ));
         assert_eq!(
-            parse_frame(br#"{"request_id":-7,"error":"success","data":true}"#).unwrap(),
+            parse_frame(br#"{"request_id":7,"error":"success","data":true}"#).unwrap(),
             IncomingFrame::Reply {
-                request_id: -7,
+                request_id: 7,
                 error: "success".to_owned(),
                 data: json!(true),
             }
@@ -1648,21 +1727,19 @@ mod tests {
     fn property_events_convert_to_typed_product_events() {
         assert_eq!(
             parse_property_change(&json!({"name":"pause","data":true})).unwrap(),
-            Some(BackendEvent::Pause { paused: true })
+            Some(BackendEvent::PauseChanged(true))
         );
         assert_eq!(
             parse_property_change(&json!({"name":"time-pos","data":1.234})).unwrap(),
-            Some(BackendEvent::Position { position_ms: 1_234 })
+            Some(BackendEvent::PositionChanged(1_234))
         );
         assert_eq!(
             parse_property_change(&json!({"name":"seeking","data":false})).unwrap(),
-            Some(BackendEvent::Seeking { seeking: false })
+            Some(BackendEvent::SeekingChanged(false))
         );
         assert_eq!(
             parse_property_change(&json!({"name":"audio-device","data":"auto"})).unwrap(),
-            Some(BackendEvent::AudioDevice {
-                name: Some("auto".to_owned())
-            })
+            Some(BackendEvent::AudioDeviceChanged("auto".to_owned()))
         );
     }
 
@@ -1678,15 +1755,11 @@ mod tests {
         );
         assert_eq!(
             parse_frame(br#"{"event":"end-file","reason":"eof"}"#).unwrap(),
-            IncomingFrame::Event(BackendEvent::EndFile {
-                reason: EndFileReason::Eof
-            })
+            IncomingFrame::Event(BackendEvent::EndFile(EndFileReason::Eof))
         );
         assert_eq!(
             parse_end_file(&json!({"reason":"stop"})).unwrap(),
-            BackendEvent::EndFile {
-                reason: EndFileReason::Stop
-            }
+            BackendEvent::EndFile(EndFileReason::Stop)
         );
     }
 
@@ -1699,10 +1772,21 @@ mod tests {
         .unwrap();
 
         assert_eq!(devices.len(), 2);
-        assert!(devices[0].is_default);
-        assert!(!devices[1].is_default);
+        assert_eq!(devices[0].name, "auto");
+        assert!(!devices[0].selected);
+        assert!(!devices[1].selected);
+        let selected_devices = parse_audio_devices_with_selected(
+            &json!([
+                {"name":"auto","description":"Default output"},
+                {"name":"wasapi/device","description":"Speakers"}
+            ]),
+            Some("wasapi/device"),
+        )
+        .unwrap();
+        assert!(!selected_devices[0].selected);
+        assert!(selected_devices[1].selected);
         assert_eq!(seconds_to_millis(2.345), Some(2_345));
-        assert_eq!(seconds_to_millis(-1.0), None);
+        assert_eq!(seconds_to_millis(-1.0), Some(0));
         assert_eq!(seconds_to_millis(f64::NAN), None);
     }
 
@@ -1717,9 +1801,6 @@ mod tests {
                 (4, "volume"),
                 (5, "mute"),
                 (6, "seeking"),
-                (7, "eof-reached"),
-                (8, "audio-device"),
-                (9, "audio-device-list"),
             ]
         );
     }
@@ -1780,10 +1861,10 @@ mod tests {
                 vec![
                     OsString::from("--no-config"),
                     OsString::from("--idle=yes"),
-                    OsString::from("--keep-open=no"),
-                    OsString::from(format!("--input-ipc-server={pipe_name}")),
                     OsString::from("--terminal=no"),
-                    OsString::from("--audio-device=auto"),
+                    OsString::from("--input-terminal=no"),
+                    OsString::from("--audio-display=no"),
+                    OsString::from(format!("--input-ipc-server={pipe_name}")),
                 ]
             );
         }
@@ -1829,7 +1910,7 @@ mod tests {
                 .unwrap();
             assert!(matches!(
                 event.event,
-                SessionEvent::Backend(BackendEvent::Pause { paused: true })
+                SessionEvent::Backend(BackendEvent::PauseChanged(true))
             ));
 
             let second_request = tokio::spawn({
@@ -1900,6 +1981,46 @@ mod tests {
                 event.event,
                 SessionEvent::Disconnected(BackendError::Disconnected)
             ));
+            time::timeout(Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn process_exit_is_emitted_with_generation_and_exit_code() {
+            let (_server, client) = connected_pair().await;
+            let (request_tx, mut event_rx, task, process_exit_tx, _process_control_rx) =
+                start_protocol_session(client, Duration::from_secs(1));
+            process_exit_tx
+                .send(Some(ProcessExit {
+                    result: Ok(()),
+                    code: Some(17),
+                }))
+                .unwrap();
+
+            let exited = time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(exited.generation, 7);
+            assert!(matches!(
+                exited.event,
+                SessionEvent::Backend(BackendEvent::ProcessExited {
+                    expected: false,
+                    code: Some(17),
+                })
+            ));
+
+            let disconnected = time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(matches!(
+                disconnected.event,
+                SessionEvent::Disconnected(BackendError::Disconnected)
+            ));
+            drop(request_tx);
             time::timeout(Duration::from_secs(1), task)
                 .await
                 .unwrap()
@@ -2105,7 +2226,7 @@ mod tests {
             event_tx
                 .send(StampedSessionEvent {
                     generation: 7,
-                    event: SessionEvent::Backend(BackendEvent::Pause { paused: false }),
+                    event: SessionEvent::Backend(BackendEvent::PauseChanged(false)),
                 })
                 .unwrap();
             event_tx
@@ -2125,7 +2246,7 @@ mod tests {
                 wait_for_file_loaded_events(7, &mut event_rx, Duration::from_secs(1))
                     .await
                     .unwrap(),
-                vec![BackendEvent::Pause { paused: false }]
+                vec![BackendEvent::PauseChanged(false)]
             );
         }
     }

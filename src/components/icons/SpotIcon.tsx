@@ -21,7 +21,12 @@ export type SpotIconName =
   | "refresh"
   | "trash"
   | "file"
-  | "alert";
+  | "alert"
+  | "volume"
+  | "mute"
+  | "shuffle"
+  | "repeat"
+  | "device";
 
 interface SpotIconProps extends SVGProps<SVGSVGElement> {
   name: SpotIconName;
@@ -50,6 +55,11 @@ const paths: Record<SpotIconName, string> = {
   trash: "M5 7h14m-9 4v5m4-5v5M9 7V5h6v2m-9 0 1 13h10l1-13",
   file: "M6 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 6 20zM14 3.5V8h4",
   alert: "M12 4 21 20H3zM12 9v5m0 3h.01",
+  volume: "M5 10v4h3l4 4V6L8 10zm11.5 2a4.5 4.5 0 0 0-2.5-4m0 8a4.5 4.5 0 0 0 2.5-4",
+  mute: "M5 10v4h3l4 4V6L8 10zm9-2 5 8m0-8-5 8",
+  shuffle: "M16 4h4v4m0 12h-4v-4M4 7h3c2.5 0 4.1.7 5.4 2.7L17 16c1.1 1.5 2 2 3 2m0-12c-1 0-1.9.5-3 2l-1.6 2.2M4 17h3c2.5 0 4.1-.7 5.4-2.7L14 12",
+  repeat: "M17 17H7a3 3 0 0 1-3-3V9m0 0 3 3M4 9l-3 3M7 7h10a3 3 0 0 1 3 3v5m0 0-3-3m3 3 3-3",
+  device: "M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5v7A1.5 1.5 0 0 1 17.5 15H13l-2 4-2-4H6.5A1.5 1.5 0 0 1 5 13.5z",
 };
 
 export function SpotIcon({ name, size = 20, strokeWidth = 1.8, ...props }: SpotIconProps) {

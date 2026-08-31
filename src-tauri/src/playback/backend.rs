@@ -1,30 +1,45 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::{ProviderKind, SourceId};
+pub use super::types::{
+    AudioDevice, PlaybackBackendHealth, PlaybackError, PlaybackErrorCode, PlaybackSourceOption,
+};
+pub type BackendHealth = PlaybackBackendHealth;
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BackendHealth {
-    pub ready: bool,
-    pub connected: bool,
-    pub detail: Option<String>,
-    pub recovery_action: Option<String>,
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum BackendCommand {
+    Load { path: PathBuf, start_paused: bool },
+    SetPaused(bool),
+    SeekAbsoluteMs(u64),
+    SetVolume(u8),
+    SetMuted(bool),
+    QueryAudioDevices,
+    SelectAudioDevice(String),
+    Stop,
+    Shutdown,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
 pub enum BackendEvent {
-    FileLoaded { duration_ms: Option<u64> },
-    Position { position_ms: u64 },
-    Pause { paused: bool },
-    Seeking { seeking: bool },
-    EndFile { reason: EndFileReason },
-    AudioDevice { name: Option<String> },
-    AudioDeviceList { devices: Vec<AudioDevice> },
-    Error { error: BackendError },
+    Ready,
+    FileLoaded,
+    PauseChanged(bool),
+    PositionChanged(u64),
+    DurationChanged(Option<u64>),
+    SeekingChanged(bool),
+    VolumeChanged(u8),
+    MuteChanged(bool),
+    AudioDevices(Vec<AudioDevice>),
+    AudioDeviceChanged(String),
+    EndFile(EndFileReason),
+    Disconnected,
+    ProcessExited { expected: bool, code: Option<i32> },
+    ProtocolError(String),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -36,23 +51,6 @@ pub enum EndFileReason {
     Error,
     Redirect,
     Unknown,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AudioDevice {
-    pub name: String,
-    pub description: Option<String>,
-    pub is_default: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlaybackSourceOption {
-    pub source_id: SourceId,
-    pub provider: ProviderKind,
-    pub label: String,
-    pub available: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Error, Eq, PartialEq, Serialize)]
@@ -72,7 +70,23 @@ pub enum BackendError {
     Operation { detail: String },
 }
 
-pub trait PlaybackBackend: Send {
+pub struct PlaybackBackendSession {
+    pub backend: Arc<dyn PlaybackBackend>,
+    pub events: tokio::sync::mpsc::Receiver<BackendEvent>,
+}
+
+/// Product-level backend contract. The synchronous legacy methods remain on
+/// the trait as the controller's compatibility seam; implementations enqueue
+/// their actual work onto asynchronous workers.
+pub trait PlaybackBackend: Send + Sync {
+    fn send(&self, _command: BackendCommand) -> Result<(), PlaybackError> {
+        Err(PlaybackError::new(
+            PlaybackErrorCode::BackendOperation,
+            "this backend does not expose the command enqueue seam",
+            false,
+        ))
+    }
+
     fn start(&mut self) -> Result<(), BackendError>;
     fn load(&mut self, path: &Path) -> Result<(), BackendError>;
     fn pause(&mut self) -> Result<(), BackendError>;
@@ -83,8 +97,8 @@ pub trait PlaybackBackend: Send {
     fn list_audio_devices(&mut self) -> Result<Vec<AudioDevice>, BackendError>;
     fn set_audio_device(&mut self, name: &str) -> Result<(), BackendError>;
     fn stop(&mut self) -> Result<(), BackendError>;
-    fn shutdown(&mut self) -> Result<(), BackendError>;
-    fn health(&self) -> BackendHealth;
+    fn shutdown(&mut self) -> Result<(), PlaybackError>;
+    fn health(&self) -> PlaybackBackendHealth;
     fn poll_events(&mut self) -> Vec<BackendEvent>;
 }
 
@@ -97,21 +111,19 @@ mod tests {
     fn dto_serialization_is_camel_case_and_path_free() {
         let device = AudioDevice {
             name: "auto".to_owned(),
-            description: Some("Default output".to_owned()),
-            is_default: true,
+            description: "Default output".to_owned(),
+            selected: true,
         };
         let source = PlaybackSourceOption {
             source_id: SourceId::new(),
-            provider: ProviderKind::Local,
+            provider: crate::domain::ProviderKind::Local,
             label: "LOCAL".to_owned(),
             available: true,
         };
-        let event = BackendEvent::AudioDeviceList {
-            devices: vec![device],
-        };
+        let event = BackendEvent::AudioDevices(vec![device]);
         let json = serde_json::to_value((&event, &source)).unwrap();
 
-        assert_eq!(json[0]["type"], "audioDeviceList");
+        assert_eq!(json[0]["type"], "audioDevices");
         assert_eq!(json[1]["sourceId"], source.source_id.to_string());
         assert!(json.to_string().find("path").is_none());
     }

@@ -10,6 +10,12 @@ interface LibraryTrackRowProps {
   track: LibraryTrack;
   revealPending: boolean;
   onReveal: (sourceId: SourceId) => void;
+  onPlayNow: (track: LibraryTrack) => void;
+  onPlayNext: (track: LibraryTrack) => void;
+  onAddToQueue: (track: LibraryTrack) => void;
+  playbackPending: boolean;
+  playbackEnabled: boolean;
+  current: boolean;
 }
 
 function formatDuration(durationMs: number | null): string | null {
@@ -54,7 +60,17 @@ function statusLabel(track: LibraryTrack): string {
   }
 }
 
-export function LibraryTrackRow({ track, revealPending, onReveal }: LibraryTrackRowProps) {
+export function LibraryTrackRow({
+  track,
+  revealPending,
+  onReveal,
+  onPlayNow,
+  onPlayNext,
+  onAddToQueue,
+  playbackPending,
+  playbackEnabled,
+  current,
+}: LibraryTrackRowProps) {
   const artworkSource = isTauriRuntime() && track.artworkPath
     ? convertFileSrc(track.artworkPath, "asset")
     : null;
@@ -65,12 +81,13 @@ export function LibraryTrackRow({ track, revealPending, onReveal }: LibraryTrack
   }, [artworkSource]);
 
   const detail = track.availabilityDetail ?? track.statusDetail;
-  const canReveal = track.available && track.indexStatus !== "missing";
+  const canReveal = isTauriRuntime() && track.available && track.indexStatus !== "missing";
+  const canPlay = playbackEnabled && track.available && track.indexStatus === "indexed";
   const facts = qualityFacts(track);
 
   return (
     <article
-      className={`library-track-row library-track-${track.indexStatus}${track.available ? "" : " library-track-unavailable"}`}
+      className={`library-track-row library-track-${track.indexStatus}${track.available ? "" : " library-track-unavailable"}${current ? " library-track-current" : ""}`}
       data-testid={`library-track-${track.trackId}`}
     >
       <div className="library-track-art" aria-hidden="true">
@@ -95,13 +112,34 @@ export function LibraryTrackRow({ track, revealPending, onReveal }: LibraryTrack
       </div>
       <div className="library-track-actions">
         <button
-          aria-label={`Play ${track.title}`}
+          aria-label={`Play now ${track.title}`}
           className="player-play-button library-track-play"
-          disabled
-          title="Playback arrives in Plan 04"
+          disabled={!canPlay || playbackPending}
+          onClick={() => onPlayNow(track)}
+          title={canPlay ? "Replace the queue and start this track now" : "This track cannot be played right now"}
           type="button"
         >
           <SpotIcon name="play" size={14} />
+        </button>
+        <button
+          aria-label={`Play next ${track.title}`}
+          className="button button-quiet button-small"
+          disabled={!canPlay || playbackPending}
+          onClick={() => onPlayNext(track)}
+          type="button"
+        >
+          <SpotIcon name="next" size={14} />
+          Play next
+        </button>
+        <button
+          aria-label={`Add ${track.title} to queue`}
+          className="button button-quiet button-small"
+          disabled={!canPlay || playbackPending}
+          onClick={() => onAddToQueue(track)}
+          type="button"
+        >
+          <SpotIcon name="queue" size={14} />
+          Add to queue
         </button>
         <button
           aria-label={`Open file location for ${track.title}`}
