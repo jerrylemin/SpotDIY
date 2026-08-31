@@ -123,7 +123,11 @@ describe("playback state events", () => {
       return () => undefined;
     });
     const received: PlaybackSnapshot[] = [];
-    const unsubscribe = await subscribeToPlaybackState((next) => received.push(next));
+    const errors: Error[] = [];
+    const unsubscribe = await subscribeToPlaybackState(
+      (next) => received.push(next),
+      (error) => errors.push(error),
+    );
 
     eventHandler?.({ payload: { ...snapshot, revision: 8 } });
     eventHandler?.({ payload: { ...snapshot, revision: 9, error: { code: "protocolError", summary: "bad frame", retryable: true } } });
@@ -131,6 +135,8 @@ describe("playback state events", () => {
 
     expect(received).toHaveLength(2);
     expect(received.at(-1)?.revision).toBe(9);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("invalid playback state event");
     unsubscribe();
 
     usePlayerStore.getState().setSnapshot(snapshot);

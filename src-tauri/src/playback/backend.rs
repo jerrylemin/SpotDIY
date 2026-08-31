@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,19 @@ pub enum BackendEvent {
     Disconnected,
     ProcessExited { expected: bool, code: Option<i32> },
     ProtocolError(String),
+    Failure(PlaybackError),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GenerationStampedBackendEvent {
+    pub generation: u64,
+    pub event: BackendEvent,
+}
+
+impl GenerationStampedBackendEvent {
+    pub fn new(generation: u64, event: BackendEvent) -> Self {
+        Self { generation, event }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -72,34 +85,15 @@ pub enum BackendError {
 
 pub struct PlaybackBackendSession {
     pub backend: Arc<dyn PlaybackBackend>,
-    pub events: tokio::sync::mpsc::Receiver<BackendEvent>,
+    pub events: tokio::sync::mpsc::Receiver<GenerationStampedBackendEvent>,
 }
 
-/// Product-level backend contract. The synchronous legacy methods remain on
-/// the trait as the controller's compatibility seam; implementations enqueue
-/// their actual work onto asynchronous workers.
+/// Product-level command-enqueue contract. Implementations keep request/reply
+/// work behind their bounded worker and never expose mpv protocol details.
 pub trait PlaybackBackend: Send + Sync {
-    fn send(&self, _command: BackendCommand) -> Result<(), PlaybackError> {
-        Err(PlaybackError::new(
-            PlaybackErrorCode::BackendOperation,
-            "this backend does not expose the command enqueue seam",
-            false,
-        ))
-    }
-
-    fn start(&mut self) -> Result<(), BackendError>;
-    fn load(&mut self, path: &Path) -> Result<(), BackendError>;
-    fn pause(&mut self) -> Result<(), BackendError>;
-    fn resume(&mut self) -> Result<(), BackendError>;
-    fn seek(&mut self, position_ms: u64) -> Result<(), BackendError>;
-    fn set_volume(&mut self, volume_percent: u8) -> Result<(), BackendError>;
-    fn set_muted(&mut self, muted: bool) -> Result<(), BackendError>;
-    fn list_audio_devices(&mut self) -> Result<Vec<AudioDevice>, BackendError>;
-    fn set_audio_device(&mut self, name: &str) -> Result<(), BackendError>;
-    fn stop(&mut self) -> Result<(), BackendError>;
-    fn shutdown(&mut self) -> Result<(), PlaybackError>;
+    fn send(&self, command: BackendCommand) -> Result<(), PlaybackError>;
     fn health(&self) -> PlaybackBackendHealth;
-    fn poll_events(&mut self) -> Vec<BackendEvent>;
+    fn shutdown(&self) -> Result<(), PlaybackError>;
 }
 
 #[cfg(test)]
@@ -126,6 +120,14 @@ mod tests {
         assert_eq!(json[0]["type"], "audioDevices");
         assert_eq!(json[1]["sourceId"], source.source_id.to_string());
         assert!(json.to_string().find("path").is_none());
+    }
+
+    #[test]
+    fn backend_event_envelopes_preserve_generation_identity() {
+        let event = GenerationStampedBackendEvent::new(7, BackendEvent::FileLoaded);
+
+        assert_eq!(event.generation, 7);
+        assert_eq!(event.event, BackendEvent::FileLoaded);
     }
 
     #[test]

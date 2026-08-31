@@ -196,21 +196,11 @@ const playbackErrorCodeSchema = z.enum([
   "sourceMismatch",
   "sourceUnavailable",
   "sourceNotPlayable",
-  "sourceSwitchFailed",
   "localFileMissing",
   "loadFailed",
   "seekFailed",
   "deviceUnavailable",
   "queueEmpty",
-  "invalidState",
-  "backendUnavailable",
-  "backendDisconnected",
-  "backendTimeout",
-  "backendProtocol",
-  "backendOperation",
-  "libraryOperation",
-  "controllerBusy",
-  "controllerUnavailable",
   "recoveryRetrying",
   "recoveryExhausted",
   "shuttingDown",
@@ -311,6 +301,7 @@ export const LIBRARY_PROGRESS_EVENT = "library://scan-progress";
 export const PLAYBACK_STATE_EVENT = "playback://state";
 
 type PlaybackSnapshotListener = (snapshot: PlaybackSnapshot) => void;
+type PlaybackSnapshotErrorListener = (error: IpcError) => void;
 
 const playbackErrorSummary: Record<PlaybackErrorCode, string> = {
   toolMissing: "mpv is not available on this machine.",
@@ -325,21 +316,11 @@ const playbackErrorSummary: Record<PlaybackErrorCode, string> = {
   sourceMismatch: "That source does not belong to the requested track.",
   sourceUnavailable: "That source is currently unavailable.",
   sourceNotPlayable: "That source cannot be played by SpotDIY.",
-  sourceSwitchFailed: "SpotDIY could not switch playback sources.",
   localFileMissing: "The local file is missing or unavailable.",
   loadFailed: "SpotDIY could not load that track.",
   seekFailed: "SpotDIY could not seek within the current track.",
   deviceUnavailable: "That audio device is unavailable.",
   queueEmpty: "The playback queue is empty.",
-  invalidState: "That control is unavailable right now.",
-  backendUnavailable: "The playback backend is unavailable.",
-  backendDisconnected: "The playback backend disconnected.",
-  backendTimeout: "The playback backend timed out.",
-  backendProtocol: "The playback backend returned an invalid response.",
-  backendOperation: "The playback backend rejected that operation.",
-  libraryOperation: "SpotDIY could not resolve that local source.",
-  controllerBusy: "Playback is busy. Try again in a moment.",
-  controllerUnavailable: "Playback is temporarily unavailable.",
   recoveryRetrying: "SpotDIY is retrying the playback backend.",
   recoveryExhausted: "Playback recovery is exhausted.",
   shuttingDown: "SpotDIY is shutting down playback.",
@@ -468,11 +449,14 @@ interface PlaybackE2EAdapterState {
   snapshot: PlaybackSnapshot;
   canonicalQueue: TrackPlaybackRequest[];
   activeQueue: TrackPlaybackRequest[];
+  canonicalQueueIds: QueueEntryId[];
+  activeQueueIds: QueueEntryId[];
   currentIndex: number | null;
   listeners: Set<PlaybackSnapshotListener>;
   positionTimer: number | null;
   transitionTimer: number | null;
   nextRevision: number;
+  nextQueueEntryId: number;
 }
 
 const e2eAdapterState: PlaybackE2EAdapterState = {
@@ -484,6 +468,9 @@ const e2eAdapterState: PlaybackE2EAdapterState = {
   positionTimer: null,
   transitionTimer: null,
   nextRevision: 1,
+  canonicalQueueIds: [],
+  activeQueueIds: [],
+  nextQueueEntryId: 1,
 };
 
 function e2ePlaybackScenario(): "default" | "toolMissing" | "recovering" | "failed" {
@@ -511,13 +498,29 @@ function createPlaybackError(code: PlaybackErrorCode, detail: string | null, ret
   };
 }
 
+function nextE2EQueueEntryId(): QueueEntryId {
+  return `queue-entry-e2e-${e2eAdapterState.nextQueueEntryId++}` as QueueEntryId;
+}
+
+function e2eAlternateSourceId(track: LibraryTrack): SourceId {
+  return `${track.sourceId}-alternate` as SourceId;
+}
+
 function trackToPlaybackSources(track: LibraryTrack): PlaybackSourceOption[] {
-  return [{
-    sourceId: track.sourceId,
-    provider: "local",
-    label: "LOCAL",
-    available: track.available,
-  }];
+  return [
+    {
+      sourceId: track.sourceId,
+      provider: "local",
+      label: "LOCAL",
+      available: track.available,
+    },
+    {
+      sourceId: e2eAlternateSourceId(track),
+      provider: "youtube",
+      label: "YT",
+      available: true,
+    },
+  ];
 }
 
 function makePlaybackSnapshotForTrack(track: LibraryTrack, overrides: Partial<PlaybackSnapshot> = {}): PlaybackSnapshot {
@@ -578,25 +581,47 @@ function rebuildE2EActiveQueue() {
   const current = e2eAdapterState.currentIndex === null
     ? null
     : e2eAdapterState.activeQueue[e2eAdapterState.currentIndex] ?? null;
-  const currentCanonicalIndex = current
-    ? e2eAdapterState.canonicalQueue.findIndex((entry) => playbackRequestKey(entry) === playbackRequestKey(current))
-    : -1;
+  const currentEntryId = e2eAdapterState.currentIndex === null
+    ? null
+    : e2eAdapterState.activeQueueIds[e2eAdapterState.currentIndex] ?? null;
+  const currentCanonicalIndex = currentEntryId === null
+    ? current
+      ? e2eAdapterState.canonicalQueue.findIndex((entry) => playbackRequestKey(entry) === playbackRequestKey(current))
+      : -1
+    : e2eAdapterState.canonicalQueueIds.indexOf(currentEntryId);
   if (!e2eAdapterState.snapshot.shuffleEnabled || e2eAdapterState.canonicalQueue.length <= 2) {
     e2eAdapterState.activeQueue = [...e2eAdapterState.canonicalQueue];
-    if (current) {
+    e2eAdapterState.activeQueueIds = [...e2eAdapterState.canonicalQueueIds];
+    if (currentEntryId !== null) {
+      e2eAdapterState.currentIndex = e2eAdapterState.activeQueueIds.indexOf(currentEntryId);
+    } else if (current) {
       e2eAdapterState.currentIndex = e2eAdapterState.activeQueue.findIndex((entry) => playbackRequestKey(entry) === playbackRequestKey(current));
     }
     return;
   }
 
-  const head = currentCanonicalIndex < 0 ? [] : e2eAdapterState.canonicalQueue.slice(0, currentCanonicalIndex + 1);
-  const tail = currentCanonicalIndex < 0
-    ? [...e2eAdapterState.canonicalQueue]
-    : [...e2eAdapterState.canonicalQueue.slice(currentCanonicalIndex + 1)];
-  tail.sort((left, right) => `${right.trackId}:${right.sourceId ?? ""}`.localeCompare(`${left.trackId}:${left.sourceId ?? ""}`));
-  e2eAdapterState.activeQueue = [...head, ...tail];
+  const splitIndex = currentCanonicalIndex < 0
+    ? e2eAdapterState.canonicalQueue.length
+    : currentCanonicalIndex + 1;
+  const headPairs = e2eAdapterState.canonicalQueue
+    .slice(0, splitIndex)
+    .map((request, index) => ({
+      request,
+      id: e2eAdapterState.canonicalQueueIds[index],
+    }));
+  const tailPairs = e2eAdapterState.canonicalQueue
+    .slice(splitIndex)
+    .map((request, index) => ({
+      request,
+      id: e2eAdapterState.canonicalQueueIds[splitIndex + index],
+    }));
+  tailPairs.sort((left, right) => playbackRequestKey(right.request).localeCompare(playbackRequestKey(left.request)));
+  e2eAdapterState.activeQueue = [...headPairs, ...tailPairs].map(({ request }) => request);
+  e2eAdapterState.activeQueueIds = [...headPairs, ...tailPairs].map(({ id }) => id);
   if (current) {
-    e2eAdapterState.currentIndex = e2eAdapterState.activeQueue.findIndex((entry) => playbackRequestKey(entry) === playbackRequestKey(current));
+    e2eAdapterState.currentIndex = currentEntryId === null
+      ? e2eAdapterState.activeQueue.findIndex((entry) => playbackRequestKey(entry) === playbackRequestKey(current))
+      : e2eAdapterState.activeQueueIds.indexOf(currentEntryId);
   }
 }
 
@@ -605,8 +630,11 @@ function seedE2EPlaybackState() {
   selectE2EDevice("auto");
   e2eAdapterState.canonicalQueue = [];
   e2eAdapterState.activeQueue = [];
+  e2eAdapterState.canonicalQueueIds = [];
+  e2eAdapterState.activeQueueIds = [];
   e2eAdapterState.currentIndex = null;
   e2eAdapterState.nextRevision = 1;
+  e2eAdapterState.nextQueueEntryId = 1;
 
   const scenario = e2ePlaybackScenario();
   if (scenario === "toolMissing") {
@@ -628,7 +656,9 @@ function seedE2EPlaybackState() {
   if (scenario === "recovering") {
     const track = e2eLibraryTracks[0];
     e2eAdapterState.canonicalQueue = [{ trackId: track.trackId, sourceId: track.sourceId }];
+    e2eAdapterState.canonicalQueueIds = [nextE2EQueueEntryId()];
     e2eAdapterState.activeQueue = [...e2eAdapterState.canonicalQueue];
+    e2eAdapterState.activeQueueIds = [...e2eAdapterState.canonicalQueueIds];
     e2eAdapterState.currentIndex = 0;
     setE2ESnapshot(makePlaybackSnapshotForTrack(track, {
       phase: "recovering",
@@ -646,7 +676,9 @@ function seedE2EPlaybackState() {
   if (scenario === "failed") {
     const track = e2eLibraryTracks[0];
     e2eAdapterState.canonicalQueue = [{ trackId: track.trackId, sourceId: track.sourceId }];
+    e2eAdapterState.canonicalQueueIds = [nextE2EQueueEntryId()];
     e2eAdapterState.activeQueue = [...e2eAdapterState.canonicalQueue];
+    e2eAdapterState.activeQueueIds = [...e2eAdapterState.canonicalQueueIds];
     e2eAdapterState.currentIndex = 0;
     setE2ESnapshot(makePlaybackSnapshotForTrack(track, {
       phase: "failed",
@@ -733,7 +765,15 @@ function queueSnapshotForCurrentTrack(phase: PlaybackPhase, positionMs: number):
     });
   }
 
+  const currentRequest = e2eAdapterState.currentIndex === null
+    ? null
+    : e2eAdapterState.activeQueue[e2eAdapterState.currentIndex] ?? null;
+  const currentQueueEntryId = e2eAdapterState.currentIndex === null
+    ? null
+    : e2eAdapterState.activeQueueIds[e2eAdapterState.currentIndex] ?? null;
   return makePlaybackSnapshotForTrack(track, {
+    currentQueueEntryId,
+    currentSourceId: currentRequest?.sourceId ?? track.sourceId,
     phase,
     positionMs,
     queueLength: e2eAdapterState.activeQueue.length,
@@ -770,7 +810,7 @@ function resolveE2EPlaybackRequest(request: TrackPlaybackRequest): LibraryTrack 
   if (!track) {
     throw new IpcError("SpotDIY could not find that playback track in the E2E adapter.");
   }
-  if (request.sourceId !== null && request.sourceId !== track.sourceId) {
+  if (request.sourceId !== null && !trackToPlaybackSources(track).some((source) => source.sourceId === request.sourceId)) {
     throw new IpcError("SpotDIY could not find the requested playback source in the E2E adapter.");
   }
   return track;
@@ -1260,7 +1300,9 @@ function e2eAppendTrack(request: TrackPlaybackRequest, insertNext: boolean): Pla
 
   if (e2eAdapterState.canonicalQueue.length === 0) {
     e2eAdapterState.canonicalQueue = [request];
+    e2eAdapterState.canonicalQueueIds = [nextE2EQueueEntryId()];
     e2eAdapterState.activeQueue = [request];
+    e2eAdapterState.activeQueueIds = [...e2eAdapterState.canonicalQueueIds];
     e2eAdapterState.currentIndex = null;
     return e2eQueueSnapshot();
   }
@@ -1274,6 +1316,7 @@ function e2eAppendTrack(request: TrackPlaybackRequest, insertNext: boolean): Pla
     ? currentCanonicalIndex < 0 ? 0 : currentCanonicalIndex + 1
     : e2eAdapterState.canonicalQueue.length;
   e2eAdapterState.canonicalQueue.splice(insertionIndex, 0, request);
+  e2eAdapterState.canonicalQueueIds.splice(insertionIndex, 0, nextE2EQueueEntryId());
   rebuildE2EActiveQueue();
   return e2eQueueSnapshot();
 }
@@ -1303,7 +1346,9 @@ export async function playTrack(request: TrackPlaybackRequest): Promise<Playback
     if (isPlaybackE2EAdapterEnabled()) {
       const track = resolveE2EPlaybackRequest(parsedRequest);
       e2eAdapterState.canonicalQueue = [parsedRequest];
+      e2eAdapterState.canonicalQueueIds = [nextE2EQueueEntryId()];
       e2eAdapterState.activeQueue = [parsedRequest];
+      e2eAdapterState.activeQueueIds = [...e2eAdapterState.canonicalQueueIds];
       e2eAdapterState.currentIndex = 0;
       return scheduleE2ELoad(0, false, 0) ?? makePlaybackSnapshotForTrack(track, { phase: "loading" });
     }
@@ -1549,12 +1594,28 @@ export async function switchPlaybackSource(request: { trackId: TrackId; sourceId
     const parsedRequest = playbackSourceRequestSchema.parse(request);
     if (isPlaybackE2EAdapterEnabled()) {
       const track = resolveE2EPlaybackRequest(parsedRequest);
+      ensureE2EPlaybackState();
+      const currentIndex = e2eAdapterState.currentIndex;
+      const currentRequest = currentIndex === null
+        ? null
+        : e2eAdapterState.activeQueue[currentIndex] ?? null;
+      const currentEntryId = currentIndex === null
+        ? null
+        : e2eAdapterState.activeQueueIds[currentIndex] ?? null;
+      if (currentIndex === null || currentRequest === null || currentRequest.trackId !== parsedRequest.trackId) {
+        throw new IpcError("Playback source switching requires the current track.");
+      }
       const priorPosition = e2eAdapterState.snapshot.positionMs;
       const paused = e2eAdapterState.snapshot.phase === "paused";
-      e2eAdapterState.canonicalQueue = [parsedRequest];
-      e2eAdapterState.activeQueue = [parsedRequest];
-      e2eAdapterState.currentIndex = 0;
-      return scheduleE2ELoad(0, paused, Math.min(priorPosition, track.durationMs ?? priorPosition));
+      const canonicalIndex = currentEntryId === null
+        ? e2eAdapterState.canonicalQueue.findIndex((entry) => playbackRequestKey(entry) === playbackRequestKey(currentRequest))
+        : e2eAdapterState.canonicalQueueIds.indexOf(currentEntryId);
+      if (canonicalIndex < 0) {
+        throw new IpcError("Playback source switching could not find the current queue entry.");
+      }
+      e2eAdapterState.canonicalQueue[canonicalIndex] = parsedRequest;
+      e2eAdapterState.activeQueue[currentIndex] = parsedRequest;
+      return scheduleE2ELoad(currentIndex, paused, Math.min(priorPosition, track.durationMs ?? priorPosition));
     }
     if (!isTauriRuntime()) {
       throw new IpcError("Playback source switching requires the native SpotDIY runtime.");
@@ -1625,6 +1686,8 @@ export async function clearPlaybackQueue(): Promise<PlaybackSnapshot> {
     clearE2ETimers();
     e2eAdapterState.canonicalQueue = [];
     e2eAdapterState.activeQueue = [];
+    e2eAdapterState.canonicalQueueIds = [];
+    e2eAdapterState.activeQueueIds = [];
     e2eAdapterState.currentIndex = null;
     return setE2ESnapshot(withNextRevision(e2eAdapterState.snapshot, {
       ...emptyPlaybackSnapshot(),
@@ -1642,7 +1705,10 @@ export async function clearPlaybackQueue(): Promise<PlaybackSnapshot> {
   return invokePlayback("clear_playback_queue", undefined, parsePlaybackSnapshot, "SpotDIY could not clear the playback queue.");
 }
 
-export async function subscribeToPlaybackState(listener: PlaybackSnapshotListener): Promise<() => void> {
+export async function subscribeToPlaybackState(
+  listener: PlaybackSnapshotListener,
+  onError?: PlaybackSnapshotErrorListener,
+): Promise<() => void> {
   if (isPlaybackE2EAdapterEnabled()) {
     ensureE2EPlaybackState();
     e2eAdapterState.listeners.add(listener);
@@ -1662,8 +1728,10 @@ export async function subscribeToPlaybackState(listener: PlaybackSnapshotListene
     return await listen<unknown>(PLAYBACK_STATE_EVENT, (event) => {
       try {
         listener(parsePlaybackSnapshot(event.payload));
-      } catch {
-        // Native events are untrusted input; invalid playback events must not break the UI.
+      } catch (error) {
+        // Native events are untrusted input; report validation failures without
+        // allowing malformed state to reach the store or crash React.
+        onError?.(new IpcError("SpotDIY received an invalid playback state event.", error));
       }
     });
   } catch (error) {

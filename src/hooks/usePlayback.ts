@@ -53,16 +53,33 @@ async function refreshPlaybackSnapshot() {
 
 async function ensurePlaybackBridge() {
   if (bridgeInitialization) {
-    return bridgeInitialization;
+    await bridgeInitialization;
+    // The last consumer can unmount after subscribe() succeeds but before the
+    // initial snapshot finishes. If a new consumer mounted during that window,
+    // releasePlaybackBridge() removed the first subscription while this shared
+    // initialization promise was still in flight. Re-establish it before
+    // returning to the active consumer.
+    if (bridgeConsumers > 0 && bridgeUnsubscribe === null) {
+      await ensurePlaybackBridge();
+    }
+    return;
   }
 
   bridgeInitialization = (async () => {
-    await refreshPlaybackSnapshot();
-    if (!bridgeUnsubscribe) {
-      bridgeUnsubscribe = await subscribeToPlaybackState((snapshot) => {
+    const unsubscribe = await subscribeToPlaybackState(
+      (snapshot) => {
         usePlayerStore.getState().setSnapshot(snapshot);
-      });
+      },
+      (error) => {
+        usePlayerStore.getState().setBridgeError(error.message);
+      },
+    );
+    if (bridgeConsumers === 0) {
+      unsubscribe();
+      return;
     }
+    bridgeUnsubscribe = unsubscribe;
+    await refreshPlaybackSnapshot();
   })()
     .catch((error) => {
       usePlayerStore.getState().setBridgeError(errorMessage(error, "SpotDIY could not subscribe to playback updates."));

@@ -5,9 +5,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use spotdiy_lib::media_tools::MediaToolManager;
-use spotdiy_lib::playback::backend::BackendEvent;
+use spotdiy_lib::playback::backend::{BackendCommand, BackendEvent};
 use spotdiy_lib::playback::mpv::MpvBackend;
-use spotdiy_lib::playback::PlaybackBackend;
+use spotdiy_lib::playback::PlaybackBackendSession;
 
 #[test]
 fn real_mpv_synthetic_wav_smoke() {
@@ -40,61 +40,82 @@ fn real_mpv_synthetic_wav_smoke() {
         status.executable.is_some(),
         "mpv validation failed: {status:?}"
     );
-    let mut backend = MpvBackend::new(manager);
-    backend
-        .start()
-        .expect("mpv should start and complete its IPC health handshake");
+    let PlaybackBackendSession {
+        backend,
+        mut events,
+    } = MpvBackend::start(manager, 1);
 
     backend
-        .load(&media_path)
-        .expect("mpv should load the synthetic WAV");
-    let loaded_events = backend.poll_events();
-    assert!(loaded_events
-        .iter()
-        .any(|event| matches!(event, BackendEvent::FileLoaded)));
-    assert!(loaded_events.iter().any(
-        |event| matches!(event, BackendEvent::DurationChanged(Some(duration)) if *duration > 0)
-    ));
+        .send(BackendCommand::Load {
+            path: media_path,
+            start_paused: false,
+        })
+        .expect("mpv should accept the synthetic WAV load");
+    assert!(
+        wait_for_event(&mut events, Duration::from_secs(3), |event| {
+            matches!(event, BackendEvent::FileLoaded)
+        })
+        .is_some()
+    );
+    assert!(
+        wait_for_event(&mut events, Duration::from_secs(1), |event| {
+            matches!(event, BackendEvent::DurationChanged(Some(duration)) if *duration > 0)
+        })
+        .is_some()
+    );
 
     let position = wait_for_event(
-        &mut backend,
+        &mut events,
         Duration::from_secs(3),
         |event| matches!(event, BackendEvent::PositionChanged(position) if *position > 0),
     );
     assert!(matches!(position, Some(BackendEvent::PositionChanged(value)) if value > 0));
 
-    backend.pause().expect("pause should be accepted");
+    backend
+        .send(BackendCommand::SetPaused(true))
+        .expect("pause should be accepted");
     assert!(
-        wait_for_event(&mut backend, Duration::from_secs(2), |event| {
+        wait_for_event(&mut events, Duration::from_secs(2), |event| {
             matches!(event, BackendEvent::PauseChanged(true))
         })
         .is_some()
     );
-    backend.resume().expect("resume should be accepted");
+    backend
+        .send(BackendCommand::SetPaused(false))
+        .expect("resume should be accepted");
     assert!(
-        wait_for_event(&mut backend, Duration::from_secs(2), |event| {
+        wait_for_event(&mut events, Duration::from_secs(2), |event| {
             matches!(event, BackendEvent::PauseChanged(false))
         })
         .is_some()
     );
 
-    backend.seek(500).expect("absolute seek should be accepted");
-    backend.set_volume(42).expect("volume should be accepted");
-    backend.set_muted(true).expect("mute should be accepted");
-    let devices = backend
-        .list_audio_devices()
-        .expect("mpv should answer the audio-device-list request");
-    assert!(
-        !devices.is_empty(),
-        "mpv should expose at least its auto device"
-    );
-    backend.set_muted(false).expect("unmute should be accepted");
+    backend
+        .send(BackendCommand::SeekAbsoluteMs(500))
+        .expect("absolute seek should be accepted");
+    backend
+        .send(BackendCommand::SetVolume(42))
+        .expect("volume should be accepted");
+    backend
+        .send(BackendCommand::SetMuted(true))
+        .expect("mute should be accepted");
+    backend
+        .send(BackendCommand::QueryAudioDevices)
+        .expect("mpv should accept the audio-device-list request");
+    let devices = wait_for_event(&mut events, Duration::from_secs(2), |event| {
+        matches!(event, BackendEvent::AudioDevices(_))
+    })
+    .expect("mpv should answer the audio-device-list request");
+    assert!(matches!(devices, BackendEvent::AudioDevices(ref devices) if !devices.is_empty()));
+    backend
+        .send(BackendCommand::SetMuted(false))
+        .expect("unmute should be accepted");
 
     backend
-        .resume()
+        .send(BackendCommand::SetPaused(false))
         .expect("the synthetic track should be playing for EOF");
     assert!(
-        wait_for_event(&mut backend, Duration::from_secs(8), |event| {
+        wait_for_event(&mut events, Duration::from_secs(8), |event| {
             matches!(
                 event,
                 BackendEvent::EndFile(spotdiy_lib::playback::EndFileReason::Eof)
@@ -107,18 +128,17 @@ fn real_mpv_synthetic_wav_smoke() {
 }
 
 fn wait_for_event(
-    backend: &mut MpvBackend,
+    events: &mut tokio::sync::mpsc::Receiver<spotdiy_lib::playback::GenerationStampedBackendEvent>,
     timeout: Duration,
     predicate: impl Fn(&BackendEvent) -> bool,
 ) -> Option<BackendEvent> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if let Some(event) = backend
-            .poll_events()
-            .into_iter()
-            .find(|event| predicate(event))
-        {
-            return Some(event);
+        match events.try_recv() {
+            Ok(event) if predicate(&event.event) => return Some(event.event),
+            Ok(_) => {}
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => return None,
         }
         thread::sleep(Duration::from_millis(25));
     }

@@ -115,4 +115,38 @@ test.describe("playback engine browser contract", () => {
     await page.getByRole("button", { name: "Retry Player Engine", exact: true }).click();
     await expect(page.getByText("Paused", { exact: true })).toBeVisible();
   });
+
+  test("preserves queue identity while switching the current E2E playback source", async ({ page }) => {
+    await openLibrary(page);
+
+    const states = await page.evaluate(async () => {
+      const ipc = await import("/src/services/ipc.ts");
+      const trackRequest = (trackId: string, sourceId: string) => ({
+        trackId: trackId as Parameters<typeof ipc.playTrack>[0]["trackId"],
+        sourceId: sourceId as Parameters<typeof ipc.playTrack>[0]["sourceId"],
+      });
+
+      await ipc.playTrack(trackRequest("track-e2e-1", "source-e2e-1"));
+      await ipc.enqueueTrack(trackRequest("track-e2e-2", "source-e2e-2"));
+      await ipc.enqueueTrack(trackRequest("track-e2e-1", "source-e2e-1"));
+      await ipc.nextTrack();
+      await new Promise((resolve) => window.setTimeout(resolve, 160));
+      const before = await ipc.getPlaybackSnapshot();
+
+      await ipc.switchPlaybackSource({
+        trackId: "track-e2e-2" as Parameters<typeof ipc.switchPlaybackSource>[0]["trackId"],
+        sourceId: "source-e2e-2-alternate" as Parameters<typeof ipc.switchPlaybackSource>[0]["sourceId"],
+      });
+      await new Promise((resolve) => window.setTimeout(resolve, 160));
+      const after = await ipc.getPlaybackSnapshot();
+      return { before, after };
+    });
+
+    expect(states.after.queueLength).toBe(states.before.queueLength);
+    expect(states.after.queueIndex).toBe(states.before.queueIndex);
+    expect(states.after.currentQueueEntryId).toBe(states.before.currentQueueEntryId);
+    expect(states.after.currentTrackId).toBe(states.before.currentTrackId);
+    expect(states.after.currentSourceId).toBe("source-e2e-2-alternate");
+    expect(states.after.currentSourceId).not.toBe(states.before.currentSourceId);
+  });
 });

@@ -21,7 +21,8 @@ use crate::library::{LibraryError, LibraryService};
 use crate::media_tools::MediaToolManager;
 
 pub use self::backend::{
-    BackendCommand, BackendEvent, EndFileReason, PlaybackBackend, PlaybackBackendSession,
+    BackendCommand, BackendEvent, EndFileReason, GenerationStampedBackendEvent, PlaybackBackend,
+    PlaybackBackendSession,
 };
 pub use self::types::{
     AudioDevice, PlaybackBackendHealth, PlaybackError, PlaybackErrorCode, PlaybackErrorDto,
@@ -40,7 +41,7 @@ const COMMAND_SEND_TIMEOUT: Duration = Duration::from_millis(250);
 const COMMAND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
 const CONTROLLER_TICK: Duration = Duration::from_millis(5);
 const PENDING_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
-const CONTROLLER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const CONTROLLER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 const RECOVERY_BACKOFF: [Duration; 3] = [
     Duration::from_millis(250),
     Duration::from_millis(750),
@@ -49,7 +50,7 @@ const RECOVERY_BACKOFF: [Duration; 3] = [
 const MAX_RECOVERY_ATTEMPTS: usize = 3;
 
 pub type SnapshotSink = Arc<dyn Fn(PlaybackSnapshot) + Send + Sync>;
-type BackendFactory = Arc<dyn Fn() -> Box<dyn PlaybackBackend> + Send + Sync>;
+type BackendFactory = Arc<dyn Fn(u64) -> PlaybackBackendSession + Send + Sync>;
 
 pub struct PlaybackService {
     command_tx: tokio_mpsc::Sender<Command>,
@@ -76,7 +77,7 @@ impl PlaybackService {
         let backend_manager = manager.clone();
         Self::new_with_backend_factory(
             library,
-            move || Box::new(MpvBackend::new(backend_manager.clone())),
+            move |generation| MpvBackend::start(backend_manager.clone(), generation),
             sink,
         )
     }
@@ -87,7 +88,7 @@ impl PlaybackService {
         sink: SnapshotSink,
     ) -> Self
     where
-        F: Fn() -> Box<dyn PlaybackBackend> + Send + Sync + 'static,
+        F: Fn(u64) -> PlaybackBackendSession + Send + Sync + 'static,
     {
         let (command_tx, command_rx) = tokio_mpsc::channel(COMMAND_CAPACITY);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
@@ -303,16 +304,31 @@ impl PlaybackService {
             return Ok(self.snapshot());
         }
 
-        let result = self.command(|reply| Command::Shutdown { reply }, true);
-        if lock(&self.done_rx)
-            .recv_timeout(CONTROLLER_SHUTDOWN_TIMEOUT)
-            .is_ok()
-        {
-            if let Some(handle) = lock(&self.controller_thread).take() {
-                let _ = handle.join();
+        let deadline = Instant::now() + CONTROLLER_SHUTDOWN_TIMEOUT;
+        let result = self.command_with_timeout(
+            |reply| Command::Shutdown { reply },
+            true,
+            deadline.saturating_duration_since(Instant::now()),
+        );
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let controller_stopped = lock(&self.done_rx).recv_timeout(remaining).is_ok();
+        if controller_stopped {
+            let mut controller_thread = lock(&self.controller_thread);
+            if controller_thread
+                .as_ref()
+                .is_some_and(JoinHandle::is_finished)
+            {
+                if let Some(handle) = controller_thread.take() {
+                    let _ = handle.join();
+                }
             }
-        } else {
-            let _ = lock(&self.controller_thread).take();
+        }
+        if !controller_stopped {
+            return Err(PlaybackError::new(
+                PlaybackErrorCode::RequestTimeout,
+                "the playback controller did not shut down within 3 seconds",
+                true,
+            ));
         }
         result
     }
@@ -328,6 +344,15 @@ impl PlaybackService {
         &self,
         build: impl FnOnce(Sender<Result<T, PlaybackError>>) -> Command,
         allow_after_shutdown: bool,
+    ) -> Result<T, PlaybackError> {
+        self.command_with_timeout(build, allow_after_shutdown, COMMAND_RESPONSE_TIMEOUT)
+    }
+
+    fn command_with_timeout<T: Send + 'static>(
+        &self,
+        build: impl FnOnce(Sender<Result<T, PlaybackError>>) -> Command,
+        allow_after_shutdown: bool,
+        response_timeout: Duration,
     ) -> Result<T, PlaybackError> {
         if !allow_after_shutdown && !self.accepting_commands.load(Ordering::Acquire) {
             return Err(shutting_down_error());
@@ -346,7 +371,7 @@ impl PlaybackService {
                 }
                 Err(tokio_mpsc::error::TrySendError::Full(_)) => {
                     return Err(PlaybackError::new(
-                        PlaybackErrorCode::ControllerBusy,
+                        PlaybackErrorCode::RequestTimeout,
                         "the playback command queue is busy",
                         true,
                     ));
@@ -357,7 +382,7 @@ impl PlaybackService {
             }
         }
         reply_rx
-            .recv_timeout(COMMAND_RESPONSE_TIMEOUT)
+            .recv_timeout(response_timeout)
             .map_err(|_| controller_unavailable_error())?
     }
 }
@@ -483,12 +508,17 @@ struct RecoveryPlan {
     attempts: usize,
     due_at: Instant,
     restore: Option<PlaybackRestore>,
+    waiting_for_backend: bool,
 }
 
 struct Controller {
     library: LibraryService,
     backend_factory: BackendFactory,
-    backend: Box<dyn PlaybackBackend>,
+    backend: Arc<dyn PlaybackBackend>,
+    backend_events: tokio_mpsc::Receiver<GenerationStampedBackendEvent>,
+    backend_generation: u64,
+    next_backend_generation: u64,
+    terminal_failure_generation: Option<u64>,
     sink: SnapshotSink,
     snapshot_tx: watch::Sender<PlaybackSnapshot>,
     snapshot: PlaybackSnapshot,
@@ -499,6 +529,7 @@ struct Controller {
     phase_before_seeking: Option<PlaybackPhase>,
     desired_paused: bool,
     shutting_down: bool,
+    pending_audio_devices: Option<Sender<Result<Vec<AudioDevice>, PlaybackError>>>,
 }
 
 impl Controller {
@@ -508,11 +539,16 @@ impl Controller {
         sink: SnapshotSink,
         snapshot_tx: watch::Sender<PlaybackSnapshot>,
     ) -> Self {
-        let backend = backend_factory();
+        let backend_generation = 1;
+        let PlaybackBackendSession { backend, events } = backend_factory(backend_generation);
         Self {
             library,
             backend_factory,
             backend,
+            backend_events: events,
+            backend_generation,
+            next_backend_generation: backend_generation,
+            terminal_failure_generation: None,
             sink,
             snapshot_tx,
             snapshot: PlaybackSnapshot::default(),
@@ -523,20 +559,13 @@ impl Controller {
             phase_before_seeking: None,
             desired_paused: false,
             shutting_down: false,
+            pending_audio_devices: None,
         }
     }
 
     fn initialize(&mut self) {
-        match self.backend.start() {
-            Ok(()) => {
-                self.snapshot.phase = PlaybackPhase::Idle;
-                self.snapshot.error = None;
-            }
-            Err(error) => {
-                self.snapshot.phase = PlaybackPhase::Failed;
-                self.set_error(playback_error_from_backend(error));
-            }
-        }
+        self.snapshot.phase = PlaybackPhase::Idle;
+        self.snapshot.error = None;
         self.publish();
     }
 
@@ -626,11 +655,17 @@ impl Controller {
                 let _ = reply.send(Ok(self.snapshot.clone()));
             }
             Command::GetAudioDevices { reply } => {
-                let result = self
-                    .backend
-                    .list_audio_devices()
-                    .map_err(playback_error_from_backend);
-                let _ = reply.send(result);
+                if self.pending_audio_devices.is_some() {
+                    let _ = reply.send(Err(PlaybackError::new(
+                        PlaybackErrorCode::RequestTimeout,
+                        "an audio-device request is already pending",
+                        true,
+                    )));
+                } else if let Err(error) = self.backend.send(BackendCommand::QueryAudioDevices) {
+                    let _ = reply.send(Err(error));
+                } else {
+                    self.pending_audio_devices = Some(reply);
+                }
             }
             Command::SetAudioDevice { name, reply } => {
                 let result = self.set_audio_device(name);
@@ -661,7 +696,6 @@ impl Controller {
     ) -> Result<PlaybackSnapshot, PlaybackError> {
         self.reject_during_recovery()?;
         let resolved = self.resolve_for_play(&request)?;
-        self.ensure_backend_ready()?;
         self.recovery = None;
         self.pending_load = None;
         let entry = self.queue_entry(resolved.track_id, Some(resolved.source_id));
@@ -706,20 +740,18 @@ impl Controller {
         }
         match self.snapshot.phase {
             PlaybackPhase::Playing | PlaybackPhase::Seeking => {
-                self.backend.pause().map_err(playback_error_from_backend)?;
+                self.backend.send(BackendCommand::SetPaused(true))?;
                 self.snapshot.phase = PlaybackPhase::Paused;
                 self.desired_paused = true;
             }
             PlaybackPhase::Paused => {
-                self.backend.resume().map_err(playback_error_from_backend)?;
+                self.backend.send(BackendCommand::SetPaused(false))?;
                 self.snapshot.phase = PlaybackPhase::Playing;
                 self.desired_paused = false;
             }
             PlaybackPhase::Ended if self.snapshot.current_track_id.is_some() => {
-                self.backend
-                    .seek(0)
-                    .and_then(|()| self.backend.resume())
-                    .map_err(playback_error_from_backend)?;
+                self.backend.send(BackendCommand::SeekAbsoluteMs(0))?;
+                self.backend.send(BackendCommand::SetPaused(false))?;
                 self.snapshot.position_ms = 0;
                 self.snapshot.phase = PlaybackPhase::Playing;
                 self.desired_paused = false;
@@ -755,8 +787,10 @@ impl Controller {
         };
         self.snapshot.phase = PlaybackPhase::Seeking;
         self.publish();
-        if let Err(error) = self.backend.seek(position_ms) {
-            let error = playback_error_from_backend(error);
+        if let Err(error) = self
+            .backend
+            .send(BackendCommand::SeekAbsoluteMs(position_ms))
+        {
             self.begin_recovery(error.clone());
             return Err(error);
         }
@@ -803,8 +837,7 @@ impl Controller {
         let volume_percent = volume_percent.min(100);
         self.snapshot.volume_percent = volume_percent;
         if self.backend.health().connected {
-            if let Err(error) = self.backend.set_volume(volume_percent) {
-                let error = playback_error_from_backend(error);
+            if let Err(error) = self.backend.send(BackendCommand::SetVolume(volume_percent)) {
                 self.publish();
                 return Err(error);
             }
@@ -816,8 +849,7 @@ impl Controller {
     fn set_muted(&mut self, muted: bool) -> Result<PlaybackSnapshot, PlaybackError> {
         self.snapshot.muted = muted;
         if self.backend.health().connected {
-            if let Err(error) = self.backend.set_muted(muted) {
-                let error = playback_error_from_backend(error);
+            if let Err(error) = self.backend.send(BackendCommand::SetMuted(muted)) {
                 self.publish();
                 return Err(error);
             }
@@ -829,14 +861,13 @@ impl Controller {
     fn set_audio_device(&mut self, name: String) -> Result<PlaybackSnapshot, PlaybackError> {
         if name.trim().is_empty() {
             return Err(PlaybackError::new(
-                PlaybackErrorCode::BackendOperation,
+                PlaybackErrorCode::DeviceUnavailable,
                 "the audio device name is empty",
                 false,
             ));
         }
         self.backend
-            .set_audio_device(&name)
-            .map_err(playback_error_from_backend)?;
+            .send(BackendCommand::SelectAudioDevice(name.clone()))?;
         self.snapshot.selected_audio_device = name;
         self.publish();
         Ok(self.snapshot.clone())
@@ -885,7 +916,7 @@ impl Controller {
         self.recovery = None;
         self.pending_load = None;
         self.begin_recovery(PlaybackError::new(
-            PlaybackErrorCode::BackendDisconnected,
+            PlaybackErrorCode::IpcDisconnected,
             "retrying the playback backend",
             true,
         ));
@@ -896,7 +927,7 @@ impl Controller {
         self.recovery = None;
         self.pending_load = None;
         if self.snapshot.current_track_id.is_some() && self.backend.health().connected {
-            self.backend.stop().map_err(playback_error_from_backend)?;
+            self.backend.send(BackendCommand::Stop)?;
         }
         self.queue.clear();
         self.clear_current_metadata();
@@ -912,6 +943,9 @@ impl Controller {
         self.shutting_down = true;
         self.recovery = None;
         self.pending_load = None;
+        if let Some(reply) = self.pending_audio_devices.take() {
+            let _ = reply.send(Err(shutting_down_error()));
+        }
         self.snapshot.phase = PlaybackPhase::ShuttingDown;
         self.snapshot.recovering = false;
         self.snapshot.error = None;
@@ -922,108 +956,34 @@ impl Controller {
     }
 
     fn process_backend_events(&mut self) {
-        let events = self.backend.poll_events();
-        for event in events {
+        for _ in 0..COMMAND_CAPACITY.saturating_mul(2) {
+            let stamped = match self.backend_events.try_recv() {
+                Ok(stamped) => stamped,
+                Err(tokio_mpsc::error::TryRecvError::Empty) => break,
+                Err(tokio_mpsc::error::TryRecvError::Disconnected) => {
+                    self.handle_backend_failure_for_generation(
+                        self.backend_generation,
+                        PlaybackError::new(
+                            PlaybackErrorCode::IpcDisconnected,
+                            "the playback backend event worker stopped",
+                            true,
+                        ),
+                        true,
+                    );
+                    break;
+                }
+            };
             if self.shutting_down {
                 break;
             }
-            match event {
-                BackendEvent::FileLoaded => {
-                    self.finish_pending_load(None);
-                }
-                BackendEvent::PositionChanged(position_ms) => {
-                    if self.snapshot.current_track_id.is_some() && self.pending_load.is_none() {
-                        self.snapshot.position_ms =
-                            clamp_position(position_ms, self.snapshot.duration_ms);
-                        self.publish();
-                    }
-                }
-                BackendEvent::PauseChanged(paused) => {
-                    if self.pending_load.is_none()
-                        && matches!(
-                            self.snapshot.phase,
-                            PlaybackPhase::Playing | PlaybackPhase::Paused | PlaybackPhase::Seeking
-                        )
-                    {
-                        self.snapshot.phase = if paused {
-                            PlaybackPhase::Paused
-                        } else {
-                            PlaybackPhase::Playing
-                        };
-                        self.desired_paused = paused;
-                        self.publish();
-                    }
-                }
-                BackendEvent::SeekingChanged(seeking) => {
-                    if self.pending_load.is_none() && self.snapshot.current_track_id.is_some() {
-                        if seeking {
-                            self.phase_before_seeking = Some(self.snapshot.phase);
-                            self.snapshot.phase = PlaybackPhase::Seeking;
-                        } else {
-                            self.snapshot.phase = match self.phase_before_seeking.take() {
-                                Some(PlaybackPhase::Paused) => PlaybackPhase::Paused,
-                                _ => PlaybackPhase::Playing,
-                            };
-                        }
-                        self.publish();
-                    }
-                }
-                BackendEvent::EndFile(reason) => {
-                    if reason == EndFileReason::Eof && self.pending_load.is_none() {
-                        self.handle_eof();
-                    }
-                }
-                BackendEvent::AudioDeviceChanged(name) => {
-                    self.snapshot.selected_audio_device = name;
-                    self.publish();
-                }
-                BackendEvent::AudioDevices(_) => {}
-                BackendEvent::DurationChanged(duration_ms) => {
-                    if let Some(pending) = self.pending_load.as_mut() {
-                        pending.resolved.duration_ms = duration_ms.or(pending.resolved.duration_ms);
-                        self.snapshot.duration_ms = pending.resolved.duration_ms;
-                    } else {
-                        self.snapshot.duration_ms = duration_ms;
-                        self.snapshot.position_ms =
-                            clamp_position(self.snapshot.position_ms, duration_ms);
-                    }
-                    self.publish();
-                }
-                BackendEvent::VolumeChanged(volume_percent) => {
-                    self.snapshot.volume_percent = volume_percent.min(100);
-                    self.publish();
-                }
-                BackendEvent::MuteChanged(muted) => {
-                    self.snapshot.muted = muted;
-                    self.publish();
-                }
-                BackendEvent::Disconnected => {
-                    self.handle_backend_failure(PlaybackError::new(
-                        PlaybackErrorCode::IpcDisconnected,
-                        "the playback backend disconnected",
-                        true,
-                    ));
-                }
-                BackendEvent::ProcessExited { expected, code } => {
-                    if !expected {
-                        self.handle_backend_failure(PlaybackError::new(
-                            PlaybackErrorCode::IpcDisconnected,
-                            format!("the mpv process exited unexpectedly (code {code:?})"),
-                            true,
-                        ));
-                    }
-                }
-                BackendEvent::ProtocolError(detail) => {
-                    self.handle_backend_failure(PlaybackError::new(
-                        PlaybackErrorCode::ProtocolError,
-                        detail,
-                        true,
-                    ));
-                }
-                BackendEvent::Ready => {
-                    self.publish();
-                }
+            // A replacement backend owns a new event receiver, but an already
+            // buffered event may still be observed while recovery swaps it.
+            // Keep the generation check at this controller boundary so stale
+            // FileLoaded, position, EOF, and failure events cannot mutate state.
+            if stamped.generation != self.backend_generation {
+                continue;
             }
+            self.process_backend_event(stamped.event);
         }
 
         let health = self.backend.health();
@@ -1038,11 +998,138 @@ impl Controller {
                     PlaybackPhase::Recovering | PlaybackPhase::Failed | PlaybackPhase::ShuttingDown
                 )
             {
-                self.begin_recovery(PlaybackError::new(
-                    PlaybackErrorCode::BackendDisconnected,
+                self.handle_backend_failure_for_generation(
+                    self.backend_generation,
+                    PlaybackError::new(
+                        PlaybackErrorCode::IpcDisconnected,
+                        "the playback backend disconnected",
+                        true,
+                    ),
+                    true,
+                );
+            }
+        }
+    }
+
+    fn process_backend_event(&mut self, event: BackendEvent) {
+        match event {
+            BackendEvent::FileLoaded => self.finish_pending_load(None),
+            BackendEvent::PositionChanged(position_ms) => {
+                if self.snapshot.current_track_id.is_some() && self.pending_load.is_none() {
+                    self.snapshot.position_ms =
+                        clamp_position(position_ms, self.snapshot.duration_ms);
+                    self.publish();
+                }
+            }
+            BackendEvent::PauseChanged(paused) => {
+                if self.pending_load.is_none()
+                    && matches!(
+                        self.snapshot.phase,
+                        PlaybackPhase::Playing | PlaybackPhase::Paused | PlaybackPhase::Seeking
+                    )
+                {
+                    self.snapshot.phase = if paused {
+                        PlaybackPhase::Paused
+                    } else {
+                        PlaybackPhase::Playing
+                    };
+                    self.desired_paused = paused;
+                    self.publish();
+                }
+            }
+            BackendEvent::SeekingChanged(seeking) => {
+                if self.pending_load.is_none() && self.snapshot.current_track_id.is_some() {
+                    if seeking {
+                        self.phase_before_seeking = Some(self.snapshot.phase);
+                        self.snapshot.phase = PlaybackPhase::Seeking;
+                    } else {
+                        self.snapshot.phase = match self.phase_before_seeking.take() {
+                            Some(PlaybackPhase::Paused) => PlaybackPhase::Paused,
+                            _ => PlaybackPhase::Playing,
+                        };
+                    }
+                    self.publish();
+                }
+            }
+            BackendEvent::EndFile(reason) => {
+                if reason == EndFileReason::Eof && self.pending_load.is_none() {
+                    self.handle_eof();
+                }
+            }
+            BackendEvent::AudioDeviceChanged(name) => {
+                self.snapshot.selected_audio_device = name;
+                self.publish();
+            }
+            BackendEvent::AudioDevices(devices) => {
+                if let Some(reply) = self.pending_audio_devices.take() {
+                    let _ = reply.send(Ok(devices));
+                }
+            }
+            BackendEvent::DurationChanged(duration_ms) => {
+                if let Some(pending) = self.pending_load.as_mut() {
+                    pending.resolved.duration_ms = duration_ms.or(pending.resolved.duration_ms);
+                    self.snapshot.duration_ms = pending.resolved.duration_ms;
+                } else {
+                    self.snapshot.duration_ms = duration_ms;
+                    self.snapshot.position_ms =
+                        clamp_position(self.snapshot.position_ms, duration_ms);
+                }
+                self.publish();
+            }
+            BackendEvent::VolumeChanged(volume_percent) => {
+                self.snapshot.volume_percent = volume_percent.min(100);
+                self.publish();
+            }
+            BackendEvent::MuteChanged(muted) => {
+                self.snapshot.muted = muted;
+                self.publish();
+            }
+            BackendEvent::Disconnected => self.handle_backend_failure_for_generation(
+                self.backend_generation,
+                PlaybackError::new(
+                    PlaybackErrorCode::IpcDisconnected,
                     "the playback backend disconnected",
                     true,
-                ));
+                ),
+                true,
+            ),
+            BackendEvent::ProcessExited { expected, code } if !expected => {
+                self.handle_backend_failure_for_generation(
+                    self.backend_generation,
+                    PlaybackError::new(
+                        PlaybackErrorCode::IpcDisconnected,
+                        format!("the mpv process exited unexpectedly (code {code:?})"),
+                        true,
+                    ),
+                    true,
+                );
+            }
+            BackendEvent::ProcessExited { .. } => {}
+            BackendEvent::ProtocolError(detail) => self.handle_backend_failure_for_generation(
+                self.backend_generation,
+                PlaybackError::new(PlaybackErrorCode::ProtocolError, detail, true),
+                true,
+            ),
+            BackendEvent::Failure(error) => {
+                let terminal = is_terminal_backend_failure(&error);
+                self.handle_backend_failure_for_generation(
+                    self.backend_generation,
+                    error,
+                    terminal,
+                );
+            }
+            BackendEvent::Ready => {
+                if self
+                    .recovery
+                    .as_ref()
+                    .is_some_and(|plan| plan.waiting_for_backend && plan.restore.is_none())
+                {
+                    self.recovery = None;
+                    self.snapshot.phase = PlaybackPhase::Idle;
+                    self.snapshot.recovering = false;
+                    self.snapshot.error = None;
+                }
+                self.publish();
             }
         }
     }
@@ -1061,6 +1148,13 @@ impl Controller {
         repeat_mode: RepeatMode,
         from_eof: bool,
     ) -> Result<PlaybackSnapshot, PlaybackError> {
+        // A queue advance already owns the current transition until its
+        // FileLoaded event completes. This also makes a concurrently queued
+        // Next command harmless when the backend reports EOF for the same
+        // track.
+        if self.pending_load.is_some() {
+            return Ok(self.snapshot.clone());
+        }
         let Some(index) = self.queue.next_index(repeat_mode) else {
             if self.queue.entries().is_empty() {
                 return Err(queue_empty_error());
@@ -1114,15 +1208,17 @@ impl Controller {
             .resolved
             .path
             .clone();
-        if let Err(error) = self.backend.load(&load_path) {
-            let error = playback_error_from_backend(error);
+        if let Err(error) = self.backend.send(BackendCommand::Load {
+            path: load_path,
+            start_paused: desired_paused,
+        }) {
             let pending = self
                 .pending_load
                 .take()
                 .expect("failed load retains its pending state");
             let returned_error = if matches!(&pending.purpose, LoadPurpose::SwitchTarget { .. }) {
                 PlaybackError::new(
-                    PlaybackErrorCode::SourceSwitchFailed,
+                    PlaybackErrorCode::LoadFailed,
                     format!("source switch failed: {}", error.detail),
                     true,
                 )
@@ -1141,31 +1237,20 @@ impl Controller {
         };
         let duration_ms = observed_duration_ms.or(pending.resolved.duration_ms);
         let position_ms = clamp_position(pending.desired_position_ms, duration_ms);
-        let restoration = self
-            .backend
-            .set_volume(self.snapshot.volume_percent)
-            .and_then(|()| self.backend.set_muted(self.snapshot.muted))
-            .and_then(|()| {
-                self.backend
-                    .set_audio_device(&self.snapshot.selected_audio_device)
-            })
-            .and_then(|()| {
-                if position_ms > 0 {
-                    self.backend.seek(position_ms)
-                } else {
-                    Ok(())
-                }
-            })
-            .and_then(|()| {
-                if pending.desired_paused {
-                    self.backend.pause()
-                } else {
-                    self.backend.resume()
-                }
-            });
-        if let Err(error) = restoration {
-            self.handle_load_failure(pending, playback_error_from_backend(error));
-            return;
+        let mut restoration = vec![
+            BackendCommand::SetVolume(self.snapshot.volume_percent),
+            BackendCommand::SetMuted(self.snapshot.muted),
+            BackendCommand::SelectAudioDevice(self.snapshot.selected_audio_device.clone()),
+        ];
+        if position_ms > 0 {
+            restoration.push(BackendCommand::SeekAbsoluteMs(position_ms));
+        }
+        restoration.push(BackendCommand::SetPaused(pending.desired_paused));
+        for command in restoration {
+            if let Err(error) = self.backend.send(command) {
+                self.handle_load_failure(pending, error);
+                return;
+            }
         }
 
         self.apply_resolved(&pending.resolved);
@@ -1223,7 +1308,7 @@ impl Controller {
                 self.begin_switch_rollback(
                     prior,
                     PlaybackError::new(
-                        PlaybackErrorCode::SourceSwitchFailed,
+                        PlaybackErrorCode::LoadFailed,
                         format!("source switch failed: {}", error.detail),
                         true,
                     ),
@@ -1234,20 +1319,20 @@ impl Controller {
                 original_error,
             } => {
                 self.restore_snapshot_identity(&prior);
-                self.snapshot.phase = PlaybackPhase::Failed;
-                self.snapshot.recovering = false;
-                self.snapshot.error = Some(
-                    PlaybackError::new(
-                        PlaybackErrorCode::SourceSwitchFailed,
-                        format!(
-                            "{}; prior source restoration also failed: {}",
-                            original_error.detail, error.detail
-                        ),
-                        true,
-                    )
-                    .dto(),
+                let rollback_error = PlaybackError::new(
+                    error.code,
+                    format!(
+                        "{}; prior source restoration also failed: {}",
+                        original_error.detail, error.detail
+                    ),
+                    error.retryable,
                 );
-                self.publish();
+                // The controller identity now points at the restored source,
+                // so normal recovery reloads that source rather than the failed
+                // replacement and never advances the queue. A failed rollback
+                // is a backend failure even when its public operation code is
+                // LoadFailed or SeekFailed.
+                self.begin_recovery(rollback_error);
             }
             LoadPurpose::Recovery { token } => {
                 self.schedule_recovery_failure(token, error);
@@ -1277,7 +1362,10 @@ impl Controller {
                         original_error: original_error.clone(),
                     },
                 );
-                if result.is_err() && self.snapshot.phase != PlaybackPhase::Failed {
+                if result.is_err()
+                    && self.snapshot.phase != PlaybackPhase::Failed
+                    && self.recovery.is_none()
+                {
                     self.restore_snapshot_identity(&prior);
                     self.snapshot.phase = PlaybackPhase::Failed;
                     self.set_error(original_error);
@@ -1289,7 +1377,7 @@ impl Controller {
                 self.snapshot.phase = PlaybackPhase::Failed;
                 self.snapshot.error = Some(
                     PlaybackError::new(
-                        PlaybackErrorCode::SourceSwitchFailed,
+                        PlaybackErrorCode::LoadFailed,
                         format!(
                             "{}; prior source could not be resolved: {}",
                             original_error.detail, rollback_error.detail
@@ -1316,7 +1404,7 @@ impl Controller {
             self.handle_load_failure(
                 pending,
                 PlaybackError::new(
-                    PlaybackErrorCode::BackendTimeout,
+                    PlaybackErrorCode::LoadFailed,
                     "timed out waiting for file-loaded confirmation",
                     true,
                 ),
@@ -1324,9 +1412,32 @@ impl Controller {
         }
     }
 
-    fn handle_backend_failure(&mut self, error: PlaybackError) {
+    fn handle_backend_failure_for_generation(
+        &mut self,
+        generation: u64,
+        error: PlaybackError,
+        terminal: bool,
+    ) {
+        if generation != self.backend_generation
+            || (terminal && self.terminal_failure_generation == Some(generation))
+        {
+            return;
+        }
+        if terminal {
+            self.terminal_failure_generation = Some(generation);
+        }
+        if let Some(reply) = self.pending_audio_devices.take() {
+            let _ = reply.send(Err(error.clone()));
+        }
         if let Some(pending) = self.pending_load.take() {
             self.handle_load_failure(pending, error);
+        } else if let Some(token) = self
+            .recovery
+            .as_ref()
+            .filter(|plan| plan.waiting_for_backend)
+            .map(|plan| plan.token)
+        {
+            self.schedule_recovery_failure(token, error);
         } else {
             self.begin_recovery(error);
         }
@@ -1344,6 +1455,7 @@ impl Controller {
             attempts: 0,
             due_at: Instant::now() + RECOVERY_BACKOFF[0],
             restore,
+            waiting_for_backend: false,
         });
         self.snapshot.phase = PlaybackPhase::Recovering;
         self.snapshot.recovering = true;
@@ -1365,21 +1477,22 @@ impl Controller {
         let Some(mut plan) = self.recovery.take() else {
             return;
         };
+        if plan.waiting_for_backend {
+            self.recovery = Some(plan);
+            return;
+        }
         if Instant::now() < plan.due_at {
             self.recovery = Some(plan);
             return;
         }
         plan.attempts += 1;
+        plan.waiting_for_backend = true;
         let token = plan.token;
         let restore = plan.restore.clone();
         self.recovery = Some(plan);
 
         let _ = self.backend.shutdown();
-        self.backend = (self.backend_factory)();
-        if let Err(error) = self.backend.start() {
-            self.schedule_recovery_failure(token, playback_error_from_backend(error));
-            return;
-        }
+        self.replace_backend();
         if let Some(restore) = restore {
             match self.resolve_for_play(&TrackPlaybackRequest {
                 track_id: restore.track_id,
@@ -1396,10 +1509,9 @@ impl Controller {
                 Err(error) => self.schedule_recovery_failure(token, error),
             }
         } else {
-            self.recovery = None;
-            self.snapshot.phase = PlaybackPhase::Idle;
-            self.snapshot.recovering = false;
-            self.snapshot.error = None;
+            // Wait for the new worker's Ready or Failure event. Clearing the
+            // recovery plan here would reset its bounded attempt counter if
+            // startup fails before a track is loaded.
             self.publish();
         }
     }
@@ -1411,6 +1523,7 @@ impl Controller {
         if plan.token != token {
             return;
         }
+        plan.waiting_for_backend = false;
         if plan.attempts >= MAX_RECOVERY_ATTEMPTS {
             self.recovery = None;
             self.snapshot.phase = PlaybackPhase::Failed;
@@ -1444,18 +1557,14 @@ impl Controller {
         self.publish();
     }
 
-    fn ensure_backend_ready(&mut self) -> Result<(), PlaybackError> {
-        if self.backend.health().ready && self.backend.health().connected {
-            return Ok(());
-        }
-        self.backend = (self.backend_factory)();
-        self.backend.start().map_err(|error| {
-            let error = playback_error_from_backend(error);
-            self.snapshot.phase = PlaybackPhase::Failed;
-            self.set_error(error.clone());
-            self.publish();
-            error
-        })
+    fn replace_backend(&mut self) {
+        self.next_backend_generation = self.next_backend_generation.wrapping_add(1).max(1);
+        let generation = self.next_backend_generation;
+        let PlaybackBackendSession { backend, events } = (self.backend_factory)(generation);
+        self.backend = backend;
+        self.backend_events = events;
+        self.backend_generation = generation;
+        self.terminal_failure_generation = None;
     }
 
     fn resolve_for_play(
@@ -1549,7 +1658,7 @@ impl Controller {
             .get(track_id)
             .map_err(|error| {
                 PlaybackError::new(
-                    PlaybackErrorCode::LibraryOperation,
+                    PlaybackErrorCode::SourceUnavailable,
                     format!("could not read track: {error}"),
                     true,
                 )
@@ -1726,7 +1835,7 @@ fn playback_error_from_library(error: LibraryError) -> PlaybackError {
             )
         }
         other => PlaybackError::new(
-            PlaybackErrorCode::LibraryOperation,
+            PlaybackErrorCode::SourceUnavailable,
             format!("library playback resolution failed: {other}"),
             true,
         ),
@@ -1797,6 +1906,18 @@ fn is_recoverable_backend_failure(error: &PlaybackError) -> bool {
     )
 }
 
+fn is_terminal_backend_failure(error: &PlaybackError) -> bool {
+    matches!(
+        error.code,
+        PlaybackErrorCode::ToolMissing
+            | PlaybackErrorCode::ToolBroken
+            | PlaybackErrorCode::SpawnFailed
+            | PlaybackErrorCode::IpcConnectTimeout
+            | PlaybackErrorCode::IpcDisconnected
+            | PlaybackErrorCode::ProtocolError
+    )
+}
+
 fn source_label(provider: ProviderKind) -> String {
     provider.as_str().to_ascii_uppercase()
 }
@@ -1814,7 +1935,7 @@ fn queue_empty_error() -> PlaybackError {
 }
 
 fn invalid_state_error(detail: impl Into<String>) -> PlaybackError {
-    PlaybackError::new(PlaybackErrorCode::InvalidState, detail, true)
+    PlaybackError::new(PlaybackErrorCode::RequestTimeout, detail, true)
 }
 
 fn shutting_down_error() -> PlaybackError {
@@ -1827,7 +1948,7 @@ fn shutting_down_error() -> PlaybackError {
 
 fn controller_unavailable_error() -> PlaybackError {
     PlaybackError::new(
-        PlaybackErrorCode::ControllerUnavailable,
+        PlaybackErrorCode::IpcDisconnected,
         "the playback controller is unavailable",
         true,
     )
@@ -1842,8 +1963,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::{Duration, Instant};
@@ -1856,7 +1976,8 @@ mod tests {
     use crate::library::folders::normalize_file_path;
     use crate::library::LibraryService;
     use crate::playback::backend::{
-        AudioDevice, BackendError, BackendEvent, BackendHealth, EndFileReason, PlaybackBackend,
+        AudioDevice, BackendCommand, BackendEvent, BackendHealth, EndFileReason,
+        GenerationStampedBackendEvent, PlaybackBackend, PlaybackBackendSession,
     };
     use crate::playback::{PlaybackError, RepeatMode};
 
@@ -1877,7 +1998,6 @@ mod tests {
 
     struct FakeState {
         operations: Vec<FakeOperation>,
-        events: VecDeque<BackendEvent>,
         health: BackendHealth,
         start_failures: usize,
         load_failures: usize,
@@ -1891,7 +2011,6 @@ mod tests {
         fn default() -> Self {
             Self {
                 operations: Vec::new(),
-                events: VecDeque::new(),
                 health: BackendHealth::default(),
                 start_failures: 0,
                 load_failures: 0,
@@ -1910,19 +2029,75 @@ mod tests {
     #[derive(Default)]
     struct FakeControl {
         state: Mutex<FakeState>,
+        event_tx: Mutex<Option<(u64, tokio_mpsc::Sender<GenerationStampedBackendEvent>)>>,
     }
 
     impl FakeControl {
+        fn session(self: &Arc<Self>, generation: u64) -> PlaybackBackendSession {
+            let (event_tx, event_rx) = tokio_mpsc::channel(COMMAND_CAPACITY);
+            let startup_event = {
+                let mut state = self.state.lock().unwrap();
+                state.operations.push(FakeOperation::Start);
+                if state.start_failures > 0 {
+                    state.start_failures -= 1;
+                    state.health = BackendHealth {
+                        ready: false,
+                        connected: false,
+                        detail: Some("injected start failure".to_owned()),
+                        recovery_action: Some("Retry".to_owned()),
+                    };
+                    BackendEvent::Failure(PlaybackError::new(
+                        PlaybackErrorCode::SpawnFailed,
+                        "injected start failure",
+                        true,
+                    ))
+                } else {
+                    state.health = BackendHealth {
+                        ready: true,
+                        connected: true,
+                        detail: None,
+                        recovery_action: None,
+                    };
+                    BackendEvent::Ready
+                }
+            };
+            *self.event_tx.lock().unwrap() = Some((generation, event_tx.clone()));
+            let _ = event_tx.try_send(GenerationStampedBackendEvent::new(
+                generation,
+                startup_event,
+            ));
+            PlaybackBackendSession {
+                backend: Arc::new(FakeBackend::new(self.clone())),
+                events: event_rx,
+            }
+        }
+
         fn push_event(&self, event: BackendEvent) {
-            let mut state = self.state.lock().unwrap();
             if matches!(
-                event,
-                BackendEvent::Disconnected | BackendEvent::ProtocolError(_)
+                &event,
+                BackendEvent::Disconnected
+                    | BackendEvent::ProtocolError(_)
+                    | BackendEvent::Failure(_)
             ) {
+                let mut state = self.state.lock().unwrap();
                 state.health.ready = false;
                 state.health.connected = false;
             }
-            state.events.push_back(event);
+            let generation = self
+                .event_tx
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|(generation, _)| *generation);
+            if let Some(generation) = generation {
+                self.push_event_for_generation(generation, event);
+            }
+        }
+
+        fn push_event_for_generation(&self, generation: u64, event: BackendEvent) {
+            if let Some((_, event_tx)) = self.event_tx.lock().unwrap().clone() {
+                let _ = event_tx.try_send(GenerationStampedBackendEvent::new(generation, event));
+            }
         }
 
         fn auto_file_loaded(&self, enabled: bool, duration_ms: Option<u64>) {
@@ -1959,134 +2134,125 @@ mod tests {
     }
 
     impl PlaybackBackend for FakeBackend {
-        fn start(&mut self) -> Result<(), BackendError> {
-            let mut state = self.control.state.lock().unwrap();
-            state.operations.push(FakeOperation::Start);
-            if state.start_failures > 0 {
-                state.start_failures -= 1;
-                state.health = BackendHealth {
-                    ready: false,
-                    connected: false,
-                    detail: Some("injected start failure".to_owned()),
-                    recovery_action: Some("Retry".to_owned()),
-                };
-                return Err(BackendError::Unavailable {
-                    detail: "injected start failure".to_owned(),
-                });
+        fn send(&self, command: BackendCommand) -> Result<(), PlaybackError> {
+            match command {
+                BackendCommand::Load { path, start_paused } => {
+                    let (failure, auto_file_loaded, duration_ms) = {
+                        let mut state = self.control.state.lock().unwrap();
+                        state.operations.push(FakeOperation::Load(path));
+                        if state.load_disconnect_failures > 0 {
+                            state.load_disconnect_failures -= 1;
+                            state.health.ready = false;
+                            state.health.connected = false;
+                            (
+                                Some(PlaybackError::new(
+                                    PlaybackErrorCode::IpcDisconnected,
+                                    "injected load disconnect",
+                                    true,
+                                )),
+                                false,
+                                None,
+                            )
+                        } else if state.load_failures > 0 {
+                            state.load_failures -= 1;
+                            (
+                                Some(PlaybackError::new(
+                                    PlaybackErrorCode::LoadFailed,
+                                    "injected load failure",
+                                    true,
+                                )),
+                                false,
+                                None,
+                            )
+                        } else {
+                            (None, state.auto_file_loaded, state.duration_ms)
+                        }
+                    };
+                    if let Some(error) = failure {
+                        return Err(error);
+                    }
+                    if auto_file_loaded {
+                        self.control
+                            .push_event(BackendEvent::DurationChanged(duration_ms));
+                        self.control.push_event(BackendEvent::FileLoaded);
+                    }
+                    if start_paused {
+                        self.send(BackendCommand::SetPaused(true))?;
+                    }
+                    Ok(())
+                }
+                BackendCommand::SetPaused(paused) => {
+                    self.control
+                        .state
+                        .lock()
+                        .unwrap()
+                        .operations
+                        .push(if paused {
+                            FakeOperation::Pause
+                        } else {
+                            FakeOperation::Resume
+                        });
+                    Ok(())
+                }
+                BackendCommand::SeekAbsoluteMs(position_ms) => {
+                    self.control
+                        .state
+                        .lock()
+                        .unwrap()
+                        .operations
+                        .push(FakeOperation::Seek(position_ms));
+                    Ok(())
+                }
+                BackendCommand::SetVolume(volume_percent) => {
+                    self.control
+                        .state
+                        .lock()
+                        .unwrap()
+                        .operations
+                        .push(FakeOperation::Volume(volume_percent));
+                    Ok(())
+                }
+                BackendCommand::SetMuted(muted) => {
+                    self.control
+                        .state
+                        .lock()
+                        .unwrap()
+                        .operations
+                        .push(FakeOperation::Muted(muted));
+                    Ok(())
+                }
+                BackendCommand::QueryAudioDevices => {
+                    let devices = {
+                        let mut state = self.control.state.lock().unwrap();
+                        state.operations.push(FakeOperation::ListDevices);
+                        state.devices.clone()
+                    };
+                    self.control.push_event(BackendEvent::AudioDevices(devices));
+                    Ok(())
+                }
+                BackendCommand::SelectAudioDevice(name) => {
+                    self.control
+                        .state
+                        .lock()
+                        .unwrap()
+                        .operations
+                        .push(FakeOperation::Device(name));
+                    Ok(())
+                }
+                BackendCommand::Stop => {
+                    self.control
+                        .state
+                        .lock()
+                        .unwrap()
+                        .operations
+                        .push(FakeOperation::Stop);
+                    Ok(())
+                }
+                BackendCommand::Shutdown => self.shutdown(),
             }
-            state.health = BackendHealth {
-                ready: true,
-                connected: true,
-                detail: None,
-                recovery_action: None,
-            };
-            Ok(())
         }
 
-        fn load(&mut self, path: &Path) -> Result<(), BackendError> {
-            let mut state = self.control.state.lock().unwrap();
-            state
-                .operations
-                .push(FakeOperation::Load(path.to_path_buf()));
-            if state.load_disconnect_failures > 0 {
-                state.load_disconnect_failures -= 1;
-                state.health.ready = false;
-                state.health.connected = false;
-                return Err(BackendError::Disconnected);
-            }
-            if state.load_failures > 0 {
-                state.load_failures -= 1;
-                return Err(BackendError::Operation {
-                    detail: "injected load failure".to_owned(),
-                });
-            }
-            if state.auto_file_loaded {
-                let duration_ms = state.duration_ms;
-                state
-                    .events
-                    .push_back(BackendEvent::DurationChanged(duration_ms));
-                state.events.push_back(BackendEvent::FileLoaded);
-            }
-            Ok(())
-        }
-
-        fn pause(&mut self) -> Result<(), BackendError> {
-            self.control
-                .state
-                .lock()
-                .unwrap()
-                .operations
-                .push(FakeOperation::Pause);
-            Ok(())
-        }
-
-        fn resume(&mut self) -> Result<(), BackendError> {
-            self.control
-                .state
-                .lock()
-                .unwrap()
-                .operations
-                .push(FakeOperation::Resume);
-            Ok(())
-        }
-
-        fn seek(&mut self, position_ms: u64) -> Result<(), BackendError> {
-            self.control
-                .state
-                .lock()
-                .unwrap()
-                .operations
-                .push(FakeOperation::Seek(position_ms));
-            Ok(())
-        }
-
-        fn set_volume(&mut self, volume_percent: u8) -> Result<(), BackendError> {
-            self.control
-                .state
-                .lock()
-                .unwrap()
-                .operations
-                .push(FakeOperation::Volume(volume_percent));
-            Ok(())
-        }
-
-        fn set_muted(&mut self, muted: bool) -> Result<(), BackendError> {
-            self.control
-                .state
-                .lock()
-                .unwrap()
-                .operations
-                .push(FakeOperation::Muted(muted));
-            Ok(())
-        }
-
-        fn list_audio_devices(&mut self) -> Result<Vec<AudioDevice>, BackendError> {
-            let mut state = self.control.state.lock().unwrap();
-            state.operations.push(FakeOperation::ListDevices);
-            Ok(state.devices.clone())
-        }
-
-        fn set_audio_device(&mut self, name: &str) -> Result<(), BackendError> {
-            self.control
-                .state
-                .lock()
-                .unwrap()
-                .operations
-                .push(FakeOperation::Device(name.to_owned()));
-            Ok(())
-        }
-
-        fn stop(&mut self) -> Result<(), BackendError> {
-            self.control
-                .state
-                .lock()
-                .unwrap()
-                .operations
-                .push(FakeOperation::Stop);
-            Ok(())
-        }
-
-        fn shutdown(&mut self) -> Result<(), PlaybackError> {
+        fn shutdown(&self) -> Result<(), PlaybackError> {
             let mut state = self.control.state.lock().unwrap();
             state.operations.push(FakeOperation::Shutdown);
             state.health.ready = false;
@@ -2096,16 +2262,6 @@ mod tests {
 
         fn health(&self) -> BackendHealth {
             self.control.state.lock().unwrap().health.clone()
-        }
-
-        fn poll_events(&mut self) -> Vec<BackendEvent> {
-            self.control
-                .state
-                .lock()
-                .unwrap()
-                .events
-                .drain(..)
-                .collect()
         }
     }
 
@@ -2223,7 +2379,7 @@ mod tests {
         });
         let service = PlaybackService::new_with_backend_factory(
             library.service.clone(),
-            move || Box::new(FakeBackend::new(factory_control.clone())),
+            move |generation| factory_control.session(generation),
             sink,
         );
         (service, control, snapshots)
@@ -2473,6 +2629,89 @@ mod tests {
     }
 
     #[test]
+    fn simultaneous_next_and_eof_advances_once() {
+        let library = test_library(3);
+        let (service, control, _) = service_with(&library);
+        control.auto_file_loaded(false, Some(10_000));
+        service.play_track(library.tracks[0].clone()).unwrap();
+        control.push_event(BackendEvent::FileLoaded);
+        wait_until_playing(&service);
+        service.enqueue_track(library.tracks[1].clone()).unwrap();
+        service.enqueue_track(library.tracks[2].clone()).unwrap();
+
+        let service = Arc::new(service);
+        let next_service = service.clone();
+        let next = thread::spawn(move || next_service.next_track());
+        control.push_event(BackendEvent::EndFile(EndFileReason::Eof));
+        assert!(next.join().unwrap().is_ok());
+
+        // Both possible command/event arrival orders leave one load pending;
+        // completing that load must land on the same next queue entry.
+        control.push_event(BackendEvent::FileLoaded);
+        let advanced = wait_for_snapshot(&service, |snapshot| {
+            snapshot.phase == PlaybackPhase::Playing
+                && snapshot.current_track_id == Some(library.tracks[1].track_id)
+        });
+        assert_eq!(advanced.queue_index, Some(1));
+        assert_eq!(advanced.queue_length, 3);
+        thread::sleep(Duration::from_millis(25));
+        assert_eq!(
+            service.snapshot().current_track_id,
+            Some(library.tracks[1].track_id)
+        );
+        assert_eq!(service.snapshot().queue_index, Some(1));
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn stale_generation_events_cannot_mutate_the_active_backend_state() {
+        let library = test_library(2);
+        let (service, control, _) = service_with(&library);
+        control.auto_file_loaded(false, Some(10_000));
+        let loading = service.play_track(library.tracks[0].clone()).unwrap();
+        assert_eq!(loading.phase, PlaybackPhase::Loading);
+
+        control.push_event_for_generation(0, BackendEvent::FileLoaded);
+        control.push_event_for_generation(0, BackendEvent::PositionChanged(4_000));
+        thread::sleep(Duration::from_millis(25));
+        assert_eq!(service.snapshot().phase, PlaybackPhase::Loading);
+        assert_eq!(service.snapshot().position_ms, 0);
+
+        control.push_event(BackendEvent::FileLoaded);
+        wait_until_playing(&service);
+        service.enqueue_track(library.tracks[1].clone()).unwrap();
+        let before_stale_events = service.snapshot();
+        control.push_event_for_generation(0, BackendEvent::PositionChanged(7_000));
+        control.push_event_for_generation(0, BackendEvent::EndFile(EndFileReason::Eof));
+        control.push_event_for_generation(
+            0,
+            BackendEvent::Failure(PlaybackError::new(
+                PlaybackErrorCode::ProtocolError,
+                "stale generation failure",
+                true,
+            )),
+        );
+        thread::sleep(Duration::from_millis(35));
+
+        let after_stale_events = service.snapshot();
+        assert_eq!(after_stale_events.phase, PlaybackPhase::Playing);
+        assert_eq!(
+            after_stale_events.current_track_id,
+            before_stale_events.current_track_id
+        );
+        assert_eq!(
+            after_stale_events.queue_index,
+            before_stale_events.queue_index
+        );
+        assert_eq!(
+            after_stale_events.position_ms,
+            before_stale_events.position_ms
+        );
+        assert!(after_stale_events.error.is_none());
+        service.shutdown().unwrap();
+    }
+
+    #[test]
     fn shuffle_preserves_the_current_entry_and_canonical_queue_length() {
         let library = test_library(3);
         let (service, control, _) = service_with(&library);
@@ -2622,7 +2861,7 @@ mod tests {
                 source_id: Some(alternate),
             })
             .unwrap_err();
-        assert_eq!(error.code, PlaybackErrorCode::SourceSwitchFailed);
+        assert_eq!(error.code, PlaybackErrorCode::LoadFailed);
         let restored = wait_for_snapshot(&service, |snapshot| {
             snapshot.phase == PlaybackPhase::Playing
                 && snapshot.current_source_id == before.current_source_id
@@ -2634,7 +2873,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_source_switch_retains_prior_metadata_and_queue_when_rollback_fails() {
+    fn failed_source_switch_rollback_enters_normal_recovery_without_queue_advance() {
         let library = test_library(1);
         let alternate =
             add_local_source(&library, library.tracks[0].track_id, "alternate.wav", 2_000);
@@ -2650,13 +2889,22 @@ mod tests {
                 source_id: Some(alternate),
             })
             .unwrap_err();
-        let failed =
-            wait_for_snapshot(&service, |snapshot| snapshot.phase == PlaybackPhase::Failed);
-        assert_eq!(failed.current_track_id, before.current_track_id);
-        assert_eq!(failed.current_source_id, before.current_source_id);
-        assert_eq!(failed.title, before.title);
-        assert_eq!(failed.queue_length, before.queue_length);
-        assert_eq!(failed.queue_index, before.queue_index);
+        let recovering = wait_for_snapshot(&service, |snapshot| {
+            snapshot.phase == PlaybackPhase::Recovering
+                && snapshot.current_track_id == before.current_track_id
+                && snapshot.current_source_id == before.current_source_id
+        });
+        assert_eq!(recovering.queue_length, before.queue_length);
+        assert_eq!(recovering.queue_index, before.queue_index);
+        let restored = wait_for_snapshot(&service, |snapshot| {
+            snapshot.phase == PlaybackPhase::Playing
+                && snapshot.current_track_id == before.current_track_id
+                && snapshot.current_source_id == before.current_source_id
+                && snapshot.error.is_none()
+        });
+        assert_eq!(restored.title, before.title);
+        assert_eq!(restored.queue_length, before.queue_length);
+        assert_eq!(restored.queue_index, before.queue_index);
         service.shutdown().unwrap();
     }
 
@@ -2744,6 +2992,74 @@ mod tests {
     }
 
     #[test]
+    fn disconnect_event_during_load_enters_recovery_and_reloads_the_current_track() {
+        let library = test_library(1);
+        let (service, control, _) = service_with(&library);
+        control.auto_file_loaded(false, Some(10_000));
+        let loading = service.play_track(library.tracks[0].clone()).unwrap();
+        assert_eq!(loading.phase, PlaybackPhase::Loading);
+
+        control.push_event(BackendEvent::Disconnected);
+        control.auto_file_loaded(true, Some(10_000));
+        let recovered = wait_for_snapshot(&service, |snapshot| {
+            snapshot.phase == PlaybackPhase::Playing
+                && !snapshot.recovering
+                && snapshot.error.is_none()
+        });
+        assert_eq!(recovered.current_track_id, Some(library.tracks[0].track_id));
+        assert_eq!(recovered.queue_index, Some(0));
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn duplicate_terminal_events_start_one_recovery_for_a_backend_generation() {
+        let library = test_library(1);
+        let (service, control, snapshots) = service_with(&library);
+        control.auto_file_loaded(true, Some(10_000));
+        service.play_track(library.tracks[0].clone()).unwrap();
+        wait_until_playing(&service);
+        let starts_before = control
+            .operations()
+            .iter()
+            .filter(|operation| operation == &&FakeOperation::Start)
+            .count();
+        let revision_before_failure = service.snapshot().revision;
+
+        control.push_event(BackendEvent::Disconnected);
+        control.push_event(BackendEvent::ProcessExited {
+            expected: false,
+            code: Some(9),
+        });
+        let recovering = wait_for_snapshot(&service, |snapshot| {
+            snapshot.phase == PlaybackPhase::Recovering
+                && snapshot.revision > revision_before_failure
+        });
+        wait_for_snapshot(&service, |snapshot| {
+            snapshot.phase == PlaybackPhase::Playing
+                && !snapshot.recovering
+                && snapshot.error.is_none()
+                && snapshot.revision > recovering.revision
+        });
+
+        let starts_after = control
+            .operations()
+            .iter()
+            .filter(|operation| operation == &&FakeOperation::Start)
+            .count();
+        assert_eq!(starts_after, starts_before + 1);
+        assert_eq!(
+            snapshots
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|snapshot| snapshot.phase == PlaybackPhase::Recovering)
+                .count(),
+            1
+        );
+        service.shutdown().unwrap();
+    }
+
+    #[test]
     fn shutdown_is_bounded_publishes_state_and_rejects_new_work() {
         let library = test_library(1);
         let (service, control, _) = service_with(&library);
@@ -2751,6 +3067,21 @@ mod tests {
         assert_eq!(snapshot.phase, PlaybackPhase::ShuttingDown);
         let error = service.set_playback_muted(true).unwrap_err();
         assert_eq!(error.code, PlaybackErrorCode::ShuttingDown);
+        assert!(control.operations().contains(&FakeOperation::Shutdown));
+    }
+
+    #[test]
+    fn shutdown_during_load_is_bounded_and_clears_the_pending_transition() {
+        let library = test_library(1);
+        let (service, control, _) = service_with(&library);
+        control.auto_file_loaded(false, Some(10_000));
+        let loading = service.play_track(library.tracks[0].clone()).unwrap();
+        assert_eq!(loading.phase, PlaybackPhase::Loading);
+
+        let started = Instant::now();
+        let shutdown = service.shutdown().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert_eq!(shutdown.phase, PlaybackPhase::ShuttingDown);
         assert!(control.operations().contains(&FakeOperation::Shutdown));
     }
 

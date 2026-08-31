@@ -1,7 +1,7 @@
-use std::collections::VecDeque;
 use std::path::Path;
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{mpsc as std_mpsc, Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant as StdInstant};
 
 use serde_json::{json, Value};
 
@@ -9,7 +9,7 @@ use crate::media_tools::{MediaToolManager, MediaToolStatus};
 
 use super::backend::{
     AudioDevice, BackendCommand, BackendError, BackendEvent, BackendHealth, EndFileReason,
-    PlaybackBackend,
+    GenerationStampedBackendEvent, PlaybackBackend, PlaybackBackendSession,
 };
 use super::protocol::{parse_frame as parse_protocol_frame, ProtocolFrame, RequestIdGenerator};
 use super::{PlaybackError, PlaybackErrorCode};
@@ -17,12 +17,15 @@ use super::{PlaybackError, PlaybackErrorCode};
 pub(crate) use super::protocol::MAX_FRAME_BYTES;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
-const LOAD_TIMEOUT: Duration = Duration::from_secs(10);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 const FORCED_REAP_TIMEOUT: Duration = Duration::from_millis(500);
 const TASK_JOIN_TIMEOUT: Duration = Duration::from_millis(250);
 const POSITION_EVENT_INTERVAL: Duration = Duration::from_millis(250);
 const BACKEND_COMMAND_CAPACITY: usize = 64;
+const BACKEND_EVENT_CAPACITY: usize = 128;
+const CRITICAL_EVENT_RESERVE: usize = 16;
+const BACKEND_WORKER_TICK: Duration = Duration::from_millis(5);
+const SESSION_EVENT_CAPACITY: usize = BACKEND_EVENT_CAPACITY;
 
 const OBSERVED_PROPERTIES: &[(i64, &str)] = &[
     (1, "pause"),
@@ -37,7 +40,6 @@ const OBSERVED_PROPERTIES: &[(i64, &str)] = &[
 struct SessionConfig {
     connect_timeout: Duration,
     request_timeout: Duration,
-    load_timeout: Duration,
     shutdown_timeout: Duration,
     position_event_interval: Duration,
 }
@@ -47,20 +49,30 @@ impl Default for SessionConfig {
         Self {
             connect_timeout: CONNECT_TIMEOUT,
             request_timeout: REQUEST_TIMEOUT,
-            load_timeout: LOAD_TIMEOUT,
             shutdown_timeout: SHUTDOWN_TIMEOUT,
             position_event_interval: POSITION_EVENT_INTERVAL,
         }
     }
 }
 
-/// Managed external-mpv implementation of the frozen playback backend contract.
+/// Synchronous handle for the bounded mpv worker. Normal operations only
+/// enqueue commands; request/reply work stays on the worker thread.
 pub struct MpvBackend {
+    command_tx: tokio::sync::mpsc::Sender<BackendCommand>,
+    health: Arc<Mutex<BackendHealth>>,
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
+    shutdown_state: Mutex<BackendShutdownState>,
+}
+
+struct BackendShutdownState {
+    done_rx: std_mpsc::Receiver<()>,
+    worker: Option<JoinHandle<()>>,
+}
+
+struct MpvWorker {
     manager: MediaToolManager,
     health: BackendHealth,
-    buffered_events: VecDeque<BackendEvent>,
-    pending_commands: Mutex<VecDeque<BackendCommand>>,
-    next_generation: u64,
+    shutdown_rx: tokio::sync::watch::Receiver<bool>,
     config: SessionConfig,
     #[cfg(windows)]
     runtime: Option<tokio::runtime::Runtime>,
@@ -69,7 +81,65 @@ pub struct MpvBackend {
 }
 
 impl MpvBackend {
-    pub fn new(manager: MediaToolManager) -> Self {
+    pub fn start(manager: MediaToolManager, generation: u64) -> PlaybackBackendSession {
+        let health = Arc::new(Mutex::new(initial_health(&manager)));
+        let (command_tx, command_rx) = tokio::sync::mpsc::channel(BACKEND_COMMAND_CAPACITY);
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(BACKEND_EVENT_CAPACITY);
+        let startup_event_tx = event_tx.clone();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let (done_tx, done_rx) = std_mpsc::sync_channel(1);
+        let worker_health = health.clone();
+        let worker = thread::Builder::new()
+            .name(format!("spotdiy-mpv-backend-{generation}"))
+            .spawn(move || {
+                run_backend_worker(
+                    MpvWorker::new(manager, shutdown_rx),
+                    generation,
+                    command_rx,
+                    event_tx,
+                    worker_health,
+                );
+                let _ = done_tx.send(());
+            });
+
+        let worker = match worker {
+            Ok(worker) => Some(worker),
+            Err(_) => {
+                let error = PlaybackError::new(
+                    PlaybackErrorCode::SpawnFailed,
+                    "the mpv backend worker could not be started",
+                    true,
+                );
+                if let Ok(mut current) = health.lock() {
+                    *current = BackendHealth {
+                        ready: false,
+                        connected: false,
+                        detail: Some(error.detail.clone()),
+                        recovery_action: Some("Retry the playback backend".to_owned()),
+                    };
+                }
+                let _ = startup_event_tx.try_send(GenerationStampedBackendEvent::new(
+                    generation,
+                    BackendEvent::Failure(error),
+                ));
+                None
+            }
+        };
+
+        PlaybackBackendSession {
+            backend: Arc::new(Self {
+                command_tx,
+                health,
+                shutdown_tx,
+                shutdown_state: Mutex::new(BackendShutdownState { done_rx, worker }),
+            }),
+            events: event_rx,
+        }
+    }
+}
+
+impl MpvWorker {
+    fn new(manager: MediaToolManager, shutdown_rx: tokio::sync::watch::Receiver<bool>) -> Self {
         let health = initial_health(&manager);
         #[cfg(windows)]
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -82,9 +152,7 @@ impl MpvBackend {
         Self {
             manager,
             health,
-            buffered_events: VecDeque::new(),
-            pending_commands: Mutex::new(VecDeque::new()),
-            next_generation: 0,
+            shutdown_rx,
             config: SessionConfig::default(),
             #[cfg(windows)]
             runtime,
@@ -106,11 +174,12 @@ impl MpvBackend {
                 detail: "the mpv async runtime could not be initialized".to_owned(),
             })?;
         let session = self.session.as_ref().ok_or(BackendError::NotStarted)?;
-        let result = runtime.block_on(send_request(
+        let result = runtime.block_on(send_request_cancellable(
             &session.request_tx,
             operation,
             command,
             self.config.request_timeout,
+            &mut self.shutdown_rx,
         ));
         if matches!(
             result,
@@ -131,54 +200,44 @@ impl MpvBackend {
     }
 
     #[cfg(windows)]
-    fn drain_session_events(&mut self) {
+    fn drain_session_events(&mut self) -> Vec<BackendEvent> {
         let Some(session) = self.session.as_mut() else {
-            return;
+            return Vec::new();
         };
+        let generation = session.generation;
+        let mut stamped_events = Vec::with_capacity(SESSION_EVENT_CAPACITY);
         while let Ok(stamped) = session.event_rx.try_recv() {
-            if stamped.generation != session.generation {
+            stamped_events.push(stamped);
+        }
+
+        let mut events = Vec::with_capacity(stamped_events.len());
+        for stamped in stamped_events {
+            if stamped.generation != generation {
                 continue;
             }
             match stamped.event {
-                SessionEvent::Backend(event) => self.buffered_events.push_back(event),
-                SessionEvent::FileLoaded => {
-                    self.buffered_events.push_back(BackendEvent::FileLoaded);
-                }
-                SessionEvent::Disconnected(_error) => {
+                SessionEvent::Backend(event) => events.push(event),
+                SessionEvent::FileLoaded => events.push(BackendEvent::FileLoaded),
+                SessionEvent::Disconnected(error) => {
                     self.health = BackendHealth {
                         ready: false,
                         connected: false,
                         detail: Some("the mpv session disconnected".to_owned()),
                         recovery_action: Some("Retry the playback backend".to_owned()),
                     };
-                    self.buffered_events.push_back(BackendEvent::Disconnected);
+                    events.push(match error {
+                        BackendError::Protocol { detail } => BackendEvent::ProtocolError(detail),
+                        error => BackendEvent::Failure(super::playback_error_from_backend(error)),
+                    });
                 }
             }
         }
+        events
     }
 }
 
-impl PlaybackBackend for MpvBackend {
-    fn send(&self, command: BackendCommand) -> Result<(), PlaybackError> {
-        let mut pending = self.pending_commands.lock().map_err(|_| {
-            PlaybackError::new(
-                PlaybackErrorCode::BackendOperation,
-                "the mpv command queue lock is poisoned",
-                true,
-            )
-        })?;
-        if pending.len() >= BACKEND_COMMAND_CAPACITY {
-            return Err(PlaybackError::new(
-                PlaybackErrorCode::ControllerBusy,
-                "the mpv command queue is full",
-                true,
-            ));
-        }
-        pending.push_back(command);
-        Ok(())
-    }
-
-    fn start(&mut self) -> Result<(), BackendError> {
+impl MpvWorker {
+    fn start_session(&mut self, generation: u64) -> Result<(), BackendError> {
         #[cfg(not(windows))]
         {
             self.mark_disconnected("mpv playback currently requires Windows named pipes");
@@ -204,8 +263,6 @@ impl PlaybackBackend for MpvBackend {
                     ));
                 }
             }
-            self.buffered_events.clear();
-
             let tool_health = self.manager.refresh();
             if tool_health.status != MediaToolStatus::Ready {
                 self.health = initial_health(&self.manager);
@@ -227,9 +284,12 @@ impl PlaybackBackend for MpvBackend {
                 .ok_or_else(|| BackendError::Unavailable {
                     detail: "the mpv async runtime could not be initialized".to_owned(),
                 })?;
-            self.next_generation = self.next_generation.wrapping_add(1).max(1);
-            let generation = self.next_generation;
-            match runtime.block_on(spawn_session(&executable, generation, self.config.clone())) {
+            match runtime.block_on(spawn_session(
+                &executable,
+                generation,
+                self.config.clone(),
+                &mut self.shutdown_rx,
+            )) {
                 Ok(session) => {
                     self.session = Some(session);
                     self.health = BackendHealth {
@@ -238,7 +298,6 @@ impl PlaybackBackend for MpvBackend {
                         detail: None,
                         recovery_action: None,
                     };
-                    self.buffered_events.push_back(BackendEvent::Ready);
                     Ok(())
                 }
                 Err(error) => {
@@ -277,28 +336,6 @@ impl PlaybackBackend for MpvBackend {
                 vec![json!("loadfile"), json!(path), json!("replace")],
             )?;
 
-            let runtime = self
-                .runtime
-                .as_ref()
-                .ok_or_else(|| BackendError::Unavailable {
-                    detail: "the mpv async runtime could not be initialized".to_owned(),
-                })?;
-            let session = self.session.as_mut().ok_or(BackendError::NotStarted)?;
-            let preceding_events =
-                runtime.block_on(wait_for_file_loaded(session, self.config.load_timeout))?;
-            self.buffered_events.extend(preceding_events);
-
-            let duration_ms = self
-                .request(
-                    "read duration",
-                    vec![json!("get_property"), json!("duration")],
-                )
-                .ok()
-                .and_then(|value| value.as_f64())
-                .and_then(seconds_to_millis);
-            self.buffered_events
-                .push_back(BackendEvent::DurationChanged(duration_ms));
-            self.buffered_events.push_back(BackendEvent::FileLoaded);
             Ok(())
         }
     }
@@ -434,7 +471,7 @@ impl PlaybackBackend for MpvBackend {
         Err(BackendError::NotStarted)
     }
 
-    fn shutdown(&mut self) -> Result<(), super::PlaybackError> {
+    fn shutdown_session(&mut self) -> Result<(), BackendError> {
         #[cfg(windows)]
         {
             let result = if let Some(session) = self.session.take() {
@@ -443,8 +480,7 @@ impl PlaybackBackend for MpvBackend {
                     .as_ref()
                     .ok_or_else(|| BackendError::Unavailable {
                         detail: "the mpv async runtime could not be initialized".to_owned(),
-                    })
-                    .map_err(super::playback_error_from_backend)?;
+                    })?;
                 runtime.block_on(shutdown_session(
                     session,
                     self.config.request_timeout,
@@ -453,13 +489,11 @@ impl PlaybackBackend for MpvBackend {
             } else {
                 Ok(())
             };
-            self.buffered_events.clear();
             self.health = stopped_health(&self.manager);
-            result.map_err(super::playback_error_from_backend)
+            result
         }
         #[cfg(not(windows))]
         {
-            self.buffered_events.clear();
             self.health = stopped_health(&self.manager);
             Ok(())
         }
@@ -470,51 +504,262 @@ impl PlaybackBackend for MpvBackend {
     }
 
     fn poll_events(&mut self) -> Vec<BackendEvent> {
-        self.process_pending_commands();
         #[cfg(windows)]
-        self.drain_session_events();
-        self.buffered_events.drain(..).collect()
+        return self.drain_session_events();
+        #[cfg(not(windows))]
+        Vec::new()
     }
 }
 
-impl MpvBackend {
-    fn process_pending_commands(&mut self) {
-        let commands = self
-            .pending_commands
+fn run_backend_worker(
+    mut worker: MpvWorker,
+    generation: u64,
+    mut command_rx: tokio::sync::mpsc::Receiver<BackendCommand>,
+    event_tx: tokio::sync::mpsc::Sender<GenerationStampedBackendEvent>,
+    shared_health: Arc<Mutex<BackendHealth>>,
+) {
+    let mut terminal_failure_emitted = false;
+    match worker.start_session(generation) {
+        Ok(()) => {
+            if !*worker.shutdown_rx.borrow() {
+                emit_backend_event(
+                    &event_tx,
+                    generation,
+                    BackendEvent::Ready,
+                    &mut terminal_failure_emitted,
+                );
+            }
+        }
+        Err(error) if !*worker.shutdown_rx.borrow() => {
+            emit_backend_event(
+                &event_tx,
+                generation,
+                BackendEvent::Failure(super::playback_error_from_backend(error)),
+                &mut terminal_failure_emitted,
+            );
+        }
+        Err(_) => {}
+    }
+    sync_worker_health(&shared_health, worker.health());
+
+    loop {
+        let events = worker.poll_events();
+        for event in events {
+            emit_backend_event(&event_tx, generation, event, &mut terminal_failure_emitted);
+        }
+        sync_worker_health(&shared_health, worker.health());
+
+        if *worker.shutdown_rx.borrow() {
+            let _ = worker.shutdown_session();
+            break;
+        }
+
+        match command_rx.try_recv() {
+            Ok(BackendCommand::Shutdown) => {
+                let _ = worker.shutdown_session();
+                break;
+            }
+            Ok(command) => match process_backend_command(&mut worker, command) {
+                Ok(Some(event)) => {
+                    emit_backend_event(&event_tx, generation, event, &mut terminal_failure_emitted)
+                }
+                Ok(None) => {}
+                Err(error) => emit_backend_event(
+                    &event_tx,
+                    generation,
+                    BackendEvent::Failure(super::playback_error_from_backend(error)),
+                    &mut terminal_failure_emitted,
+                ),
+            },
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                thread::sleep(BACKEND_WORKER_TICK);
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                let _ = worker.shutdown_session();
+                break;
+            }
+        }
+    }
+
+    sync_worker_health(&shared_health, worker.health());
+}
+
+fn process_backend_command(
+    worker: &mut MpvWorker,
+    command: BackendCommand,
+) -> Result<Option<BackendEvent>, BackendError> {
+    match command {
+        BackendCommand::Load { path, start_paused } => {
+            worker.load(&path)?;
+            if start_paused {
+                worker.pause()?;
+            }
+            Ok(None)
+        }
+        BackendCommand::SetPaused(paused) => {
+            if paused {
+                worker.pause()?;
+            } else {
+                worker.resume()?;
+            }
+            Ok(None)
+        }
+        BackendCommand::SeekAbsoluteMs(position_ms) => {
+            worker.seek(position_ms)?;
+            Ok(None)
+        }
+        BackendCommand::SetVolume(volume_percent) => {
+            worker.set_volume(volume_percent)?;
+            Ok(None)
+        }
+        BackendCommand::SetMuted(muted) => {
+            worker.set_muted(muted)?;
+            Ok(None)
+        }
+        BackendCommand::QueryAudioDevices => Ok(Some(BackendEvent::AudioDevices(
+            worker.list_audio_devices()?,
+        ))),
+        BackendCommand::SelectAudioDevice(name) => {
+            worker.set_audio_device(&name)?;
+            Ok(None)
+        }
+        BackendCommand::Stop => {
+            worker.stop()?;
+            Ok(None)
+        }
+        BackendCommand::Shutdown => {
+            worker.shutdown_session()?;
+            Ok(None)
+        }
+    }
+}
+
+fn sync_worker_health(shared: &Mutex<BackendHealth>, health: BackendHealth) {
+    if let Ok(mut current) = shared.lock() {
+        *current = health;
+    }
+}
+
+fn emit_backend_event(
+    event_tx: &tokio::sync::mpsc::Sender<GenerationStampedBackendEvent>,
+    generation: u64,
+    event: BackendEvent,
+    terminal_failure_emitted: &mut bool,
+) {
+    let terminal = is_terminal_failure(&event);
+    if terminal && *terminal_failure_emitted {
+        return;
+    }
+    if terminal {
+        *terminal_failure_emitted = true;
+    }
+
+    let event = GenerationStampedBackendEvent::new(generation, event);
+    if matches!(event.event, BackendEvent::PositionChanged(_)) {
+        if event_tx.capacity() <= CRITICAL_EVENT_RESERVE {
+            return;
+        }
+        let _ = event_tx.try_send(event);
+    } else {
+        let _ = event_tx.blocking_send(event);
+    }
+}
+
+fn is_terminal_failure(event: &BackendEvent) -> bool {
+    match event {
+        BackendEvent::Disconnected | BackendEvent::ProtocolError(_) => true,
+        BackendEvent::ProcessExited { expected, .. } => !expected,
+        BackendEvent::Failure(error) => matches!(
+            error.code,
+            PlaybackErrorCode::IpcDisconnected | PlaybackErrorCode::ProtocolError
+        ),
+        _ => false,
+    }
+}
+
+impl PlaybackBackend for MpvBackend {
+    fn send(&self, command: BackendCommand) -> Result<(), PlaybackError> {
+        if *self.shutdown_tx.borrow() {
+            return Err(PlaybackError::new(
+                PlaybackErrorCode::ShuttingDown,
+                "the mpv backend is shutting down",
+                false,
+            ));
+        }
+        self.command_tx
+            .try_send(command)
+            .map_err(|error| match error {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => PlaybackError::new(
+                    PlaybackErrorCode::RequestTimeout,
+                    "the bounded mpv command queue is full",
+                    true,
+                ),
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => PlaybackError::new(
+                    PlaybackErrorCode::IpcDisconnected,
+                    "the mpv backend worker is unavailable",
+                    true,
+                ),
+            })
+    }
+
+    fn health(&self) -> BackendHealth {
+        self.health
             .lock()
-            .map(|mut pending| pending.drain(..).collect::<Vec<_>>())
-            .unwrap_or_default();
-        for command in commands {
-            let result = match command {
-                BackendCommand::Load { path, start_paused } => {
-                    self.load(&path)
-                        .and_then(|()| if start_paused { self.pause() } else { Ok(()) })
+            .map(|health| health.clone())
+            .unwrap_or_else(|_| BackendHealth {
+                ready: false,
+                connected: false,
+                detail: Some("the mpv backend health lock is unavailable".to_owned()),
+                recovery_action: Some("Retry the playback backend".to_owned()),
+            })
+    }
+
+    fn shutdown(&self) -> Result<(), PlaybackError> {
+        let deadline = StdInstant::now() + SHUTDOWN_TIMEOUT;
+        let _ = self.shutdown_tx.send(true);
+        let mut state = self.shutdown_state.lock().map_err(|_| {
+            PlaybackError::new(
+                PlaybackErrorCode::RequestTimeout,
+                "the mpv backend shutdown state is unavailable",
+                true,
+            )
+        })?;
+        if state.worker.is_none() {
+            return Ok(());
+        }
+
+        let remaining = deadline.saturating_duration_since(StdInstant::now());
+        match state.done_rx.recv_timeout(remaining) {
+            Ok(()) => {
+                if let Some(worker) = state.worker.take() {
+                    worker.join().map_err(|_| {
+                        PlaybackError::new(
+                            PlaybackErrorCode::RequestTimeout,
+                            "the mpv backend worker join failed",
+                            true,
+                        )
+                    })?;
                 }
-                BackendCommand::SetPaused(paused) => {
-                    if paused {
-                        self.pause()
-                    } else {
-                        self.resume()
+                Ok(())
+            }
+            Err(std_mpsc::RecvTimeoutError::Timeout) => Err(PlaybackError::new(
+                PlaybackErrorCode::RequestTimeout,
+                "the mpv backend did not shut down within 3 seconds",
+                true,
+            )),
+            Err(std_mpsc::RecvTimeoutError::Disconnected) => {
+                if state.worker.as_ref().is_some_and(JoinHandle::is_finished) {
+                    if let Some(worker) = state.worker.take() {
+                        let _ = worker.join();
                     }
+                    Ok(())
+                } else {
+                    Err(PlaybackError::new(
+                        PlaybackErrorCode::IpcDisconnected,
+                        "the mpv backend worker ended without a shutdown acknowledgement",
+                        true,
+                    ))
                 }
-                BackendCommand::SeekAbsoluteMs(position_ms) => self.seek(position_ms),
-                BackendCommand::SetVolume(volume_percent) => self.set_volume(volume_percent),
-                BackendCommand::SetMuted(muted) => self.set_muted(muted),
-                BackendCommand::QueryAudioDevices => self.list_audio_devices().map(|devices| {
-                    self.buffered_events
-                        .push_back(BackendEvent::AudioDevices(devices));
-                }),
-                BackendCommand::SelectAudioDevice(name) => self.set_audio_device(&name),
-                BackendCommand::Stop => self.stop(),
-                BackendCommand::Shutdown => {
-                    return {
-                        let _ = PlaybackBackend::shutdown(self);
-                    }
-                }
-            };
-            if let Err(error) = result {
-                self.buffered_events
-                    .push_back(BackendEvent::ProtocolError(error.to_string()));
             }
         }
     }
@@ -752,7 +997,7 @@ mod windows_session {
     pub(super) struct Session {
         pub(super) generation: u64,
         pub(super) request_tx: mpsc::Sender<OutboundRequest>,
-        pub(super) event_rx: mpsc::UnboundedReceiver<StampedSessionEvent>,
+        pub(super) event_rx: mpsc::Receiver<StampedSessionEvent>,
         pub(super) process_control_tx: mpsc::Sender<ProcessControl>,
         pub(super) process_exit_rx: watch::Receiver<Option<ProcessExit>>,
         pub(super) pipe_task: JoinHandle<()>,
@@ -849,6 +1094,7 @@ mod windows_session {
         executable: &Path,
         generation: u64,
         config: SessionConfig,
+        shutdown_rx: &mut watch::Receiver<bool>,
     ) -> Result<Session, BackendError> {
         let pipe_name = fresh_pipe_name();
         let mut command = Command::new(executable);
@@ -868,23 +1114,29 @@ mod windows_session {
         let mut process_task =
             tokio::spawn(monitor_child(child, process_control_rx, process_exit_tx));
 
-        let client =
-            match connect_pipe(&pipe_name, config.connect_timeout, &mut process_exit_rx).await {
-                Ok(client) => client,
-                Err(error) => {
-                    let cleanup = force_process_and_reap(
-                        &process_control_tx,
-                        &mut process_exit_rx,
-                        &mut process_task,
-                        FORCED_REAP_TIMEOUT,
-                    )
-                    .await;
-                    return cleanup.and(Err(error));
-                }
-            };
+        let client = match connect_pipe(
+            &pipe_name,
+            config.connect_timeout,
+            &mut process_exit_rx,
+            shutdown_rx,
+        )
+        .await
+        {
+            Ok(client) => client,
+            Err(error) => {
+                let cleanup = force_process_and_reap(
+                    &process_control_tx,
+                    &mut process_exit_rx,
+                    &mut process_task,
+                    FORCED_REAP_TIMEOUT,
+                )
+                .await;
+                return cleanup.and(Err(error));
+            }
+        };
 
         let (request_tx, request_rx) = mpsc::channel(32);
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::channel(SESSION_EVENT_CAPACITY);
         let pipe_task = tokio::spawn(run_pipe_session(
             client,
             generation,
@@ -905,18 +1157,19 @@ mod windows_session {
         };
 
         let handshake = async {
-            let idle_active = send_request(
+            let idle_active = send_request_cancellable(
                 &session.request_tx,
                 "health check",
                 vec![json!("get_property"), json!("idle-active")],
                 config.request_timeout,
+                shutdown_rx,
             )
             .await?;
             if idle_active.as_bool().is_none() {
                 return Err(protocol_error("mpv returned an invalid health response"));
             }
             for (observation_id, property) in OBSERVED_PROPERTIES {
-                send_request(
+                send_request_cancellable(
                     &session.request_tx,
                     "register observation",
                     vec![
@@ -925,6 +1178,7 @@ mod windows_session {
                         json!(property),
                     ],
                     config.request_timeout,
+                    shutdown_rx,
                 )
                 .await?;
             }
@@ -965,16 +1219,29 @@ mod windows_session {
         response_rx.await.map_err(|_| BackendError::Disconnected)?
     }
 
-    pub(super) async fn wait_for_file_loaded(
-        session: &mut Session,
+    pub(super) async fn send_request_cancellable(
+        request_tx: &mpsc::Sender<OutboundRequest>,
+        operation: &'static str,
+        command: Vec<Value>,
         timeout: Duration,
-    ) -> Result<Vec<BackendEvent>, BackendError> {
-        wait_for_file_loaded_events(session.generation, &mut session.event_rx, timeout).await
+        shutdown_rx: &mut watch::Receiver<bool>,
+    ) -> Result<Value, BackendError> {
+        if *shutdown_rx.borrow() {
+            return Err(shutdown_cancelled_error());
+        }
+        tokio::select! {
+            result = send_request(request_tx, operation, command, timeout) => result,
+            changed = shutdown_rx.changed() => {
+                let _ = changed;
+                Err(shutdown_cancelled_error())
+            }
+        }
     }
 
+    #[cfg(test)]
     pub(super) async fn wait_for_file_loaded_events(
         generation: u64,
-        event_rx: &mut mpsc::UnboundedReceiver<StampedSessionEvent>,
+        event_rx: &mut mpsc::Receiver<StampedSessionEvent>,
         timeout: Duration,
     ) -> Result<Vec<BackendEvent>, BackendError> {
         let deadline = Instant::now() + timeout;
@@ -1272,10 +1539,14 @@ mod windows_session {
         pipe_name: &str,
         timeout: Duration,
         process_exit_rx: &mut watch::Receiver<Option<ProcessExit>>,
+        shutdown_rx: &mut watch::Receiver<bool>,
     ) -> Result<NamedPipeClient, BackendError> {
         let deadline = Instant::now() + timeout;
         let mut retry_delay = Duration::from_millis(50);
         loop {
+            if *shutdown_rx.borrow() {
+                return Err(shutdown_cancelled_error());
+            }
             if process_exit_rx.borrow().is_some() {
                 return Err(BackendError::Operation {
                     detail: "mpv exited before its IPC session was ready".to_owned(),
@@ -1306,6 +1577,10 @@ mod windows_session {
                         });
                     }
                 }
+                changed = shutdown_rx.changed() => {
+                    let _ = changed;
+                    return Err(shutdown_cancelled_error());
+                }
             }
             retry_delay = (retry_delay + Duration::from_millis(50)).min(Duration::from_millis(250));
         }
@@ -1313,6 +1588,12 @@ mod windows_session {
 
     fn is_retryable_pipe_error(error: &io::Error) -> bool {
         error.kind() == ErrorKind::NotFound || error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32)
+    }
+
+    fn shutdown_cancelled_error() -> BackendError {
+        BackendError::Timeout {
+            operation: "shutdown".to_owned(),
+        }
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1379,7 +1660,7 @@ mod windows_session {
 
     pub(super) fn signal_unhealthy_generation_kill(
         process_control_tx: &mpsc::Sender<ProcessControl>,
-        event_tx: &mpsc::UnboundedSender<StampedSessionEvent>,
+        event_tx: &mpsc::Sender<StampedSessionEvent>,
         generation: u64,
     ) -> Result<(), BackendError> {
         let (response_tx, response_rx) = oneshot::channel();
@@ -1398,10 +1679,12 @@ mod windows_session {
                         }),
                     };
                     if let Some(error) = error {
-                        let _ = event_tx.send(StampedSessionEvent {
+                        emit_session_event(
+                            &event_tx,
                             generation,
-                            event: SessionEvent::Disconnected(error),
-                        });
+                            SessionEvent::Disconnected(error),
+                        )
+                        .await;
                     }
                 });
                 Ok(())
@@ -1420,7 +1703,7 @@ mod windows_session {
     pub(super) fn terminate_after_write_failure(
         write_error: BackendError,
         process_control_tx: &mpsc::Sender<ProcessControl>,
-        event_tx: &mpsc::UnboundedSender<StampedSessionEvent>,
+        event_tx: &mpsc::Sender<StampedSessionEvent>,
         generation: u64,
     ) -> BackendError {
         signal_unhealthy_generation_kill(process_control_tx, event_tx, generation)
@@ -1432,7 +1715,7 @@ mod windows_session {
         client: NamedPipeClient,
         generation: u64,
         mut request_rx: mpsc::Receiver<OutboundRequest>,
-        event_tx: mpsc::UnboundedSender<StampedSessionEvent>,
+        event_tx: mpsc::Sender<StampedSessionEvent>,
         process_control_tx: mpsc::Sender<ProcessControl>,
         mut process_exit_rx: watch::Receiver<Option<ProcessExit>>,
         position_event_interval: Duration,
@@ -1453,14 +1736,17 @@ mod windows_session {
                         disconnect_error = BackendError::Disconnected;
                         break;
                     }
-                    if let Some(exit) = process_exit_rx.borrow().clone() {
-                        let _ = event_tx.send(StampedSessionEvent {
+                    let process_exit = process_exit_rx.borrow().clone();
+                    if let Some(exit) = process_exit {
+                        emit_session_event(
+                            &event_tx,
                             generation,
-                            event: SessionEvent::Backend(BackendEvent::ProcessExited {
+                            SessionEvent::Backend(BackendEvent::ProcessExited {
                                 expected: false,
                                 code: exit.code,
                             }),
-                        });
+                        )
+                        .await;
                         disconnect_error = exit.result.err().unwrap_or(BackendError::Disconnected);
                         break;
                     }
@@ -1511,6 +1797,14 @@ mod windows_session {
                             break;
                         }
                         Err(error) => {
+                            // Preserve the parser's typed detail through the
+                            // session failure event; do not collapse malformed
+                            // or oversized frames into a generic disconnect.
+                            let _ = signal_unhealthy_generation_kill(
+                                &process_control_tx,
+                                &event_tx,
+                                generation,
+                            );
                             disconnect_error = error;
                             break;
                         }
@@ -1526,6 +1820,17 @@ mod windows_session {
                                     })
                                 };
                                 let _ = pending_request.response.send(result);
+                            } else {
+                                let error = protocol_error(&format!(
+                                    "mpv replied with unknown request id {request_id}"
+                                ));
+                                let _ = signal_unhealthy_generation_kill(
+                                    &process_control_tx,
+                                    &event_tx,
+                                    generation,
+                                );
+                                disconnect_error = error;
+                                break;
                             }
                         }
                         Ok(IncomingFrame::Event(event)) => {
@@ -1542,20 +1847,29 @@ mod windows_session {
                                 true
                             };
                             if emit {
-                                let _ = event_tx.send(StampedSessionEvent {
+                                emit_session_event(
+                                    &event_tx,
                                     generation,
-                                    event: SessionEvent::Backend(event),
-                                });
+                                    SessionEvent::Backend(event),
+                                )
+                                .await;
                             }
                         }
                         Ok(IncomingFrame::FileLoaded) => {
-                            let _ = event_tx.send(StampedSessionEvent {
+                            emit_session_event(
+                                &event_tx,
                                 generation,
-                                event: SessionEvent::FileLoaded,
-                            });
+                                SessionEvent::FileLoaded,
+                            )
+                            .await;
                         }
                         Ok(IncomingFrame::Ignored) => {}
                         Err(error) => {
+                            let _ = signal_unhealthy_generation_kill(
+                                &process_control_tx,
+                                &event_tx,
+                                generation,
+                            );
                             disconnect_error = error;
                             break;
                         }
@@ -1582,10 +1896,32 @@ mod windows_session {
         for (_, request) in pending.drain() {
             let _ = request.response.send(Err(disconnect_error.clone()));
         }
-        let _ = event_tx.send(StampedSessionEvent {
+        emit_session_event(
+            &event_tx,
             generation,
-            event: SessionEvent::Disconnected(disconnect_error),
-        });
+            SessionEvent::Disconnected(disconnect_error),
+        )
+        .await;
+    }
+
+    async fn emit_session_event(
+        event_tx: &mpsc::Sender<StampedSessionEvent>,
+        generation: u64,
+        event: SessionEvent,
+    ) {
+        let stamped = StampedSessionEvent { generation, event };
+        if matches!(
+            stamped.event,
+            SessionEvent::Backend(BackendEvent::PositionChanged(_))
+        ) {
+            // Position is a sampled state value: when the bounded queue is
+            // full, keeping the already queued sample is sufficient and the
+            // next 250 ms sample will supersede it. Lifecycle events await
+            // capacity and are never discarded.
+            let _ = event_tx.try_send(stamped);
+        } else {
+            let _ = event_tx.send(stamped).await;
+        }
     }
 
     fn fresh_pipe_name() -> String {
@@ -1611,7 +1947,7 @@ mod windows_session {
 
         pub(crate) type ProtocolSessionParts = (
             mpsc::Sender<OutboundRequest>,
-            mpsc::UnboundedReceiver<StampedSessionEvent>,
+            mpsc::Receiver<StampedSessionEvent>,
             JoinHandle<()>,
             watch::Sender<Option<ProcessExit>>,
             mpsc::Receiver<ProcessControl>,
@@ -1633,7 +1969,7 @@ mod windows_session {
             request_timeout: Duration,
         ) -> ProtocolSessionParts {
             let (request_tx, request_rx) = mpsc::channel(8);
-            let (event_tx, event_rx) = mpsc::unbounded_channel();
+            let (event_tx, event_rx) = mpsc::channel(SESSION_EVENT_CAPACITY);
             let (process_control_tx, process_control_rx) = mpsc::channel(1);
             let (process_exit_tx, process_exit_rx) = watch::channel(None);
             let task = tokio::spawn(run_pipe_session(
@@ -1663,7 +1999,7 @@ mod windows_session {
 
 #[cfg(windows)]
 use windows_session::{
-    send_request, shutdown_session, spawn_session, wait_for_file_loaded, Session, SessionEvent,
+    send_request_cancellable, shutdown_session, spawn_session, Session, SessionEvent,
 };
 
 #[cfg(test)]
@@ -1988,6 +2324,143 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn malformed_frames_fail_pending_requests_as_protocol_errors() {
+            let (mut server, client) = connected_pair().await;
+            let (request_tx, mut event_rx, task, _process_exit_tx, _process_control_rx) =
+                start_protocol_session(client, Duration::from_secs(1));
+            let request = tokio::spawn({
+                let request_tx = request_tx.clone();
+                async move {
+                    send_request(
+                        &request_tx,
+                        "malformed frame probe",
+                        vec![json!("get_property"), json!("pause")],
+                        Duration::from_secs(1),
+                    )
+                    .await
+                }
+            });
+            let mut request_bytes = [0_u8; 512];
+            let read = server.read(&mut request_bytes).await.unwrap();
+            assert!(read > 0);
+            server.write_all(b"{not-json}\n").await.unwrap();
+
+            assert!(matches!(
+                request.await.unwrap(),
+                Err(BackendError::Protocol { detail }) if detail == "mpv sent malformed JSON"
+            ));
+            let event = time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(matches!(
+                event.event,
+                SessionEvent::Disconnected(BackendError::Protocol { detail })
+                    if detail == "mpv sent malformed JSON"
+            ));
+            drop(server);
+            drop(request_tx);
+            time::timeout(Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn oversized_frames_fail_pending_requests_as_protocol_errors() {
+            let (mut server, client) = connected_pair().await;
+            let (request_tx, mut event_rx, task, _process_exit_tx, _process_control_rx) =
+                start_protocol_session(client, Duration::from_secs(1));
+            let request = tokio::spawn({
+                let request_tx = request_tx.clone();
+                async move {
+                    send_request(
+                        &request_tx,
+                        "oversized frame probe",
+                        vec![json!("get_property"), json!("pause")],
+                        Duration::from_secs(1),
+                    )
+                    .await
+                }
+            });
+            let mut request_bytes = [0_u8; 512];
+            let read = server.read(&mut request_bytes).await.unwrap();
+            assert!(read > 0);
+            server
+                .write_all(&vec![b'x'; MAX_FRAME_BYTES + 1])
+                .await
+                .unwrap();
+
+            assert!(matches!(
+                request.await.unwrap(),
+                Err(BackendError::Protocol { detail })
+                    if detail == "an mpv frame exceeded the size limit"
+            ));
+            let event = time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(matches!(
+                event.event,
+                SessionEvent::Disconnected(BackendError::Protocol { detail })
+                    if detail == "an mpv frame exceeded the size limit"
+            ));
+            drop(server);
+            drop(request_tx);
+            time::timeout(Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn unknown_reply_correlation_fails_pending_requests_as_protocol_errors() {
+            let (mut server, client) = connected_pair().await;
+            let (request_tx, mut event_rx, task, _process_exit_tx, _process_control_rx) =
+                start_protocol_session(client, Duration::from_secs(1));
+            let request = tokio::spawn({
+                let request_tx = request_tx.clone();
+                async move {
+                    send_request(
+                        &request_tx,
+                        "unknown correlation probe",
+                        vec![json!("get_property"), json!("pause")],
+                        Duration::from_secs(1),
+                    )
+                    .await
+                }
+            });
+            let mut request_bytes = [0_u8; 512];
+            let read = server.read(&mut request_bytes).await.unwrap();
+            assert!(read > 0);
+            server
+                .write_all(b"{\"request_id\":999999,\"error\":\"success\",\"data\":true}\n")
+                .await
+                .unwrap();
+
+            assert!(matches!(
+                request.await.unwrap(),
+                Err(BackendError::Protocol { detail })
+                    if detail == "mpv replied with unknown request id 999999"
+            ));
+            let event = time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(matches!(
+                event.event,
+                SessionEvent::Disconnected(BackendError::Protocol { detail })
+                    if detail == "mpv replied with unknown request id 999999"
+            ));
+            drop(server);
+            drop(request_tx);
+            time::timeout(Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+
+        #[tokio::test]
         async fn process_exit_is_emitted_with_generation_and_exit_code() {
             let (_server, client) = connected_pair().await;
             let (request_tx, mut event_rx, task, process_exit_tx, _process_control_rx) =
@@ -2105,7 +2578,7 @@ mod tests {
             );
 
             let (process_control_tx, mut process_control_rx) = tokio::sync::mpsc::channel(1);
-            let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(SESSION_EVENT_CAPACITY);
             assert_eq!(
                 terminate_after_write_failure(write_error, &process_control_tx, &event_tx, 7),
                 BackendError::Timeout {
@@ -2222,24 +2695,27 @@ mod tests {
 
         #[tokio::test]
         async fn load_wait_ignores_interleaved_events_until_file_loaded() {
-            let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(SESSION_EVENT_CAPACITY);
             event_tx
                 .send(StampedSessionEvent {
                     generation: 7,
                     event: SessionEvent::Backend(BackendEvent::PauseChanged(false)),
                 })
+                .await
                 .unwrap();
             event_tx
                 .send(StampedSessionEvent {
                     generation: 6,
                     event: SessionEvent::FileLoaded,
                 })
+                .await
                 .unwrap();
             event_tx
                 .send(StampedSessionEvent {
                     generation: 7,
                     event: SessionEvent::FileLoaded,
                 })
+                .await
                 .unwrap();
 
             assert_eq!(

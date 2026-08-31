@@ -52,22 +52,9 @@ pub enum PlaybackErrorCode {
     RecoveryRetrying,
     RecoveryExhausted,
     ShuttingDown,
-
-    // Kept for stable internal diagnostics while the backend migration is
-    // completed. They are not emitted by new frontend command paths.
-    SourceSwitchFailed,
-    InvalidState,
-    BackendUnavailable,
-    BackendDisconnected,
-    BackendTimeout,
-    BackendProtocol,
-    BackendOperation,
-    LibraryOperation,
-    ControllerBusy,
-    ControllerUnavailable,
 }
 
-#[derive(Clone, Debug, Eq, Error, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, Error, PartialEq, Serialize)]
 #[error("{detail}")]
 pub struct PlaybackError {
     pub code: PlaybackErrorCode,
@@ -180,5 +167,19 @@ impl Default for PlaybackSnapshot {
             recovering: false,
             error: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dto_serializes_only_the_public_error_contract() {
+        let error = PlaybackError::new(PlaybackErrorCode::LoadFailed, "the load failed", true);
+
+        let dto = error.dto();
+        assert_eq!(dto.code, PlaybackErrorCode::LoadFailed);
+        assert_eq!(serde_json::to_value(dto).unwrap()["code"], "loadFailed");
     }
 }

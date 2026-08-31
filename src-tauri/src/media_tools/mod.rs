@@ -1,7 +1,10 @@
 use std::env;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::process::{Child, Command, Stdio};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +13,9 @@ const MINIMUM_MPV_VERSION: MpvVersion = MpvVersion {
     minor: 41,
     patch: 0,
 };
+const MPV_VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const MPV_VERSION_PROBE_POLL: Duration = Duration::from_millis(10);
+const MPV_VERSION_PROBE_OUTPUT_LIMIT: usize = 64 * 1024;
 
 /// The public health classification used by backend startup and recovery.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -242,8 +248,14 @@ fn executable_names() -> &'static [&'static str] {
 }
 
 fn inspect_mpv(path: &Path) -> MpvToolStatus {
-    let output = match Command::new(path).arg("--version").output() {
-        Ok(output) => output,
+    let mut child = match Command::new(path)
+        .args(["--no-config", "--version"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
         Err(_) => {
             return MpvToolStatus {
                 health: MediaToolHealth::Broken,
@@ -253,9 +265,43 @@ fn inspect_mpv(path: &Path) -> MpvToolStatus {
             }
         }
     };
-    let output_text = String::from_utf8_lossy(&output.stdout);
+
+    let deadline = Instant::now() + MPV_VERSION_PROBE_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => thread::sleep(MPV_VERSION_PROBE_POLL),
+            Ok(None) => {
+                return broken_probe_status(&mut child, "mpv --no-config --version timed out");
+            }
+            Err(_) => {
+                return broken_probe_status(
+                    &mut child,
+                    "mpv --no-config --version could not be checked",
+                );
+            }
+        }
+    };
+
+    let stdout_rx = child.stdout.take().map(spawn_probe_output_reader);
+    let stderr_rx = child.stderr.take().map(spawn_probe_output_reader);
+    let stdout = match receive_probe_output(stdout_rx.as_ref(), deadline) {
+        Ok(output) => output,
+        Err(error) => {
+            return broken_probe_status(&mut child, probe_output_error_detail(error));
+        }
+    };
+    let stderr = match receive_probe_output(stderr_rx.as_ref(), deadline) {
+        Ok(output) => output,
+        Err(error) => {
+            return broken_probe_status(&mut child, probe_output_error_detail(error));
+        }
+    };
+    let mut output_text = String::from_utf8_lossy(&stdout).into_owned();
+    output_text.push('\n');
+    output_text.push_str(&String::from_utf8_lossy(&stderr));
     let version = parse_mpv_version(&output_text);
-    if !output.status.success() {
+    if !status.success() {
         return MpvToolStatus {
             health: MediaToolHealth::Broken,
             executable: None,
@@ -289,6 +335,69 @@ fn inspect_mpv(path: &Path) -> MpvToolStatus {
             },
             |_| None,
         ),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProbeOutputError {
+    Read,
+    Oversized,
+    Timeout,
+}
+
+fn spawn_probe_output_reader<R: Read + Send + 'static>(
+    mut pipe: R,
+) -> mpsc::Receiver<Result<Vec<u8>, ProbeOutputError>> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut output = Vec::with_capacity(4 * 1024);
+        let mut chunk = [0_u8; 8 * 1024];
+        let result = loop {
+            let read = match pipe.read(&mut chunk) {
+                Ok(read) => read,
+                Err(_) => break Err(ProbeOutputError::Read),
+            };
+            if read == 0 {
+                break Ok(output);
+            }
+            if output.len().saturating_add(read) > MPV_VERSION_PROBE_OUTPUT_LIMIT {
+                break Err(ProbeOutputError::Oversized);
+            }
+            output.extend_from_slice(&chunk[..read]);
+        };
+        let _ = sender.send(result);
+    });
+    receiver
+}
+
+fn receive_probe_output(
+    receiver: Option<&mpsc::Receiver<Result<Vec<u8>, ProbeOutputError>>>,
+    deadline: Instant,
+) -> Result<Vec<u8>, ProbeOutputError> {
+    let Some(receiver) = receiver else {
+        return Ok(Vec::new());
+    };
+    receiver
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .map_err(|_| ProbeOutputError::Timeout)?
+}
+
+fn probe_output_error_detail(error: ProbeOutputError) -> &'static str {
+    match error {
+        ProbeOutputError::Read => "mpv --no-config --version output could not be read",
+        ProbeOutputError::Oversized => "mpv --no-config --version output exceeded the size limit",
+        ProbeOutputError::Timeout => "mpv --no-config --version output timed out",
+    }
+}
+
+fn broken_probe_status(child: &mut Child, detail: &str) -> MpvToolStatus {
+    let _ = child.kill();
+    let _ = child.wait();
+    MpvToolStatus {
+        health: MediaToolHealth::Broken,
+        executable: None,
+        version: None,
+        detail: Some(detail.to_owned()),
     }
 }
 

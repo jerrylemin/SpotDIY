@@ -52,12 +52,15 @@ try {
     let lastScanStatus = null;
     try {
       await waitFor("the synthetic folder scan", async () => {
-      const status = await invoke("get_library_status");
+        const status = await invoke("get_library_status");
         lastScanStatus = status;
-      return status.folders?.length === 1 && status.indexedTrackCount >= 2 && !status.isScanning ? status : false;
+        return status.folders?.length === 1 && status.indexedTrackCount >= 2 && !status.isScanning ? status : false;
       });
     } catch (error) {
-      throw new Error(`${error instanceof Error ? error.message : String(error)}; last scan status: ${JSON.stringify(lastScanStatus)}`);
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; last scan status: ${JSON.stringify(lastScanStatus)}`,
+        { cause: error },
+      );
     }
 
     await page.getByRole("link", { name: "Your library", exact: true }).click();
