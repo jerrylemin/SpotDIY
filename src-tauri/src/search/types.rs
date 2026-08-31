@@ -256,23 +256,27 @@ impl SafeUrl {
 }
 
 fn contains_sensitive_query(url: &Url) -> bool {
-    url.query_pairs().any(|(key, value)| {
-        let text = format!("{key}={value}").to_ascii_lowercase();
-        [
-            "access_token",
-            "refresh_token",
-            "client_secret",
-            "authorization",
-            "password",
-            "cookie",
-            "api_key",
-            "token",
-            "secret",
-            "oauth",
-            "code",
-        ]
-        .iter()
-        .any(|needle| text.contains(needle))
+    url.query_pairs().any(|(key, _)| {
+        let key = key.to_ascii_lowercase().replace('-', "_");
+        matches!(
+            key.as_str(),
+            "auth"
+                | "authorization"
+                | "access_token"
+                | "accesstoken"
+                | "refresh_token"
+                | "refreshtoken"
+                | "client_secret"
+                | "clientsecret"
+                | "api_key"
+                | "apikey"
+                | "cookie"
+                | "password"
+                | "token"
+                | "secret"
+                | "code"
+                | "oauth"
+        )
     })
 }
 
@@ -320,6 +324,7 @@ pub enum ProviderSearchState {
 pub struct ProviderSearchError {
     pub code: ProviderSearchErrorCode,
     pub detail: Option<String>,
+    #[serde(rename = "retryAfterSeconds")]
     pub retry_after_seconds: Option<u64>,
 }
 
@@ -457,6 +462,18 @@ mod tests {
             serde_json::to_string(&ProviderSearchErrorCode::InvalidResponse).unwrap(),
             "\"invalid_response\""
         );
+    }
+
+    #[test]
+    fn provider_error_fields_keep_camel_case_wire_names() {
+        let error = ProviderSearchError {
+            code: ProviderSearchErrorCode::Timeout,
+            detail: None,
+            retry_after_seconds: Some(3),
+        };
+        let value = serde_json::to_value(error).unwrap();
+        assert_eq!(value["retryAfterSeconds"], 3);
+        assert!(value.get("retry_after_seconds").is_none());
     }
 
     #[tokio::test]

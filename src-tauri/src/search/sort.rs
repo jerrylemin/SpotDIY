@@ -61,7 +61,14 @@ mod tests {
     #[test]
     fn tracks_artists_and_albums_lenses_exclude_spotify() {
         for lens in [SearchLens::Tracks, SearchLens::Artists, SearchLens::Albums] {
-            assert!(!all_provider_kinds_for_lens(lens).contains(&ProviderKind::Spotify));
+            assert_eq!(
+                all_provider_kinds_for_lens(lens),
+                &[
+                    ProviderKind::Local,
+                    ProviderKind::Youtube,
+                    ProviderKind::Soundcloud
+                ]
+            );
         }
     }
 

@@ -92,5 +92,15 @@ mod tests {
             "https://youtube.com/watch?access_token=secret"
         )
         .is_err());
+        assert!(validate_provider_url(
+            ProviderKind::Youtube,
+            "https://youtube.com/watch?v=decoder1234"
+        )
+        .is_ok());
+        assert!(validate_provider_url(
+            ProviderKind::Youtube,
+            "https://youtube.com/watch?apiKey=secret"
+        )
+        .is_err());
     }
 }
