@@ -8,6 +8,9 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+#[path = "../sources/yt_dlp.rs"]
+pub mod yt_dlp;
+
 const MINIMUM_MPV_VERSION: MpvVersion = MpvVersion {
     major: 0,
     minor: 41,
@@ -16,6 +19,13 @@ const MINIMUM_MPV_VERSION: MpvVersion = MpvVersion {
 const MPV_VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const MPV_VERSION_PROBE_POLL: Duration = Duration::from_millis(10);
 const MPV_VERSION_PROBE_OUTPUT_LIMIT: usize = 64 * 1024;
+const YT_DLP_VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+const YT_DLP_VERSION_PROBE_OUTPUT_LIMIT: usize = 64 * 1024;
+const MINIMUM_YT_DLP_VERSION: YtDlpVersion = YtDlpVersion {
+    year: 2026,
+    month: 8,
+    day: 19,
+};
 
 /// The public health classification used by backend startup and recovery.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -31,6 +41,16 @@ pub enum MediaToolHealth {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MpvToolStatus {
     pub health: MediaToolHealth,
+    pub executable: Option<PathBuf>,
+    pub version: Option<String>,
+    pub detail: Option<String>,
+}
+
+/// Backend-only yt-dlp discovery result. The executable path is retained for
+/// provider processes and never crosses the IPC boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct YtDlpToolStatus {
+    pub status: crate::search::types::ProviderRuntimeStatus,
     pub executable: Option<PathBuf>,
     pub version: Option<String>,
     pub detail: Option<String>,
@@ -64,9 +84,17 @@ pub struct MpvVersion {
     pub patch: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct YtDlpVersion {
+    pub year: u64,
+    pub month: u64,
+    pub day: u64,
+}
+
 #[derive(Clone, Debug)]
 struct ManagerState {
-    status: MpvToolStatus,
+    mpv_status: MpvToolStatus,
+    yt_dlp_status: YtDlpToolStatus,
     diagnostic: MediaToolDiagnostic,
 }
 
@@ -75,6 +103,9 @@ pub struct MediaToolManager {
     /// This seam is only used by deterministic Rust tests. Production
     /// discovery is environment override followed by PATH.
     override_path: Option<PathBuf>,
+    /// This seam is only used by deterministic Rust tests. Production
+    /// discovery is environment override followed by PATH.
+    yt_dlp_override_path: Option<PathBuf>,
     state: Arc<Mutex<ManagerState>>,
 }
 
@@ -82,9 +113,11 @@ impl MediaToolManager {
     pub fn new() -> Self {
         let manager = Self {
             override_path: None,
+            yt_dlp_override_path: None,
             state: Arc::new(Mutex::new(initial_state())),
         };
         manager.refresh_mpv();
+        manager.refresh_yt_dlp();
         manager
     }
 
@@ -93,9 +126,24 @@ impl MediaToolManager {
     pub fn with_override(path: PathBuf) -> Self {
         let manager = Self {
             override_path: Some(path),
+            yt_dlp_override_path: None,
             state: Arc::new(Mutex::new(initial_state())),
         };
         manager.refresh_mpv();
+        manager.refresh_yt_dlp();
+        manager
+    }
+
+    /// Construct a manager with an explicit yt-dlp test candidate. This does
+    /// not represent a frontend-selectable executable path.
+    pub fn with_yt_dlp_override(path: PathBuf) -> Self {
+        let manager = Self {
+            override_path: None,
+            yt_dlp_override_path: Some(path),
+            state: Arc::new(Mutex::new(initial_state())),
+        };
+        manager.refresh_mpv();
+        manager.refresh_yt_dlp();
         manager
     }
 
@@ -112,7 +160,7 @@ impl MediaToolManager {
         };
         let diagnostic = diagnostic_from_status(&status);
         if let Ok(mut state) = self.state.lock() {
-            state.status = status.clone();
+            state.mpv_status = status.clone();
             state.diagnostic = diagnostic;
         }
         status
@@ -121,7 +169,7 @@ impl MediaToolManager {
     pub fn mpv_status(&self) -> MpvToolStatus {
         self.state
             .lock()
-            .map(|state| state.status.clone())
+            .map(|state| state.mpv_status.clone())
             .unwrap_or_else(|_| missing_status("mpv status is unavailable"))
     }
 
@@ -148,6 +196,46 @@ impl MediaToolManager {
                 "mpv was reported ready without an executable",
                 true,
             )),
+        }
+    }
+
+    pub fn refresh_yt_dlp(&self) -> YtDlpToolStatus {
+        let candidate = choose_yt_dlp_candidate(
+            self.yt_dlp_override_path.clone(),
+            env::var_os("SPOTDIY_YTDLP_PATH").map(PathBuf::from),
+            find_yt_dlp_on_path(),
+        );
+        let status = match candidate.as_deref() {
+            None => missing_yt_dlp_status("yt-dlp was not found on PATH"),
+            Some(path) if !path.is_file() => {
+                missing_yt_dlp_status("yt-dlp executable was not found")
+            }
+            Some(path) => inspect_yt_dlp(path),
+        };
+        if let Ok(mut state) = self.state.lock() {
+            state.yt_dlp_status = status.clone();
+        }
+        status
+    }
+
+    pub fn yt_dlp_status(&self) -> YtDlpToolStatus {
+        self.state
+            .lock()
+            .map(|state| state.yt_dlp_status.clone())
+            .unwrap_or_else(|_| missing_yt_dlp_status("yt-dlp status is unavailable"))
+    }
+
+    pub fn require_yt_dlp(&self) -> Result<PathBuf, crate::search::types::ProviderSearchErrorCode> {
+        let status = self.yt_dlp_status();
+        match (status.status, status.executable) {
+            (crate::search::types::ProviderRuntimeStatus::Ready, Some(path)) => Ok(path),
+            (crate::search::types::ProviderRuntimeStatus::Missing, _) => {
+                Err(crate::search::types::ProviderSearchErrorCode::Unavailable)
+            }
+            (crate::search::types::ProviderRuntimeStatus::Unsupported, _) => {
+                Err(crate::search::types::ProviderSearchErrorCode::Unavailable)
+            }
+            _ => Err(crate::search::types::ProviderSearchErrorCode::Failed),
         }
     }
 
@@ -180,7 +268,17 @@ fn initial_state() -> ManagerState {
     let status = missing_status("mpv was not checked yet");
     ManagerState {
         diagnostic: diagnostic_from_status(&status),
-        status,
+        mpv_status: status,
+        yt_dlp_status: missing_yt_dlp_status("yt-dlp was not checked yet"),
+    }
+}
+
+fn missing_yt_dlp_status(detail: &str) -> YtDlpToolStatus {
+    YtDlpToolStatus {
+        status: crate::search::types::ProviderRuntimeStatus::Missing,
+        executable: None,
+        version: None,
+        detail: Some(detail.to_owned()),
     }
 }
 
@@ -237,9 +335,44 @@ fn find_mpv_in_paths(path_entries: &std::ffi::OsStr) -> Option<PathBuf> {
     None
 }
 
+fn find_yt_dlp_on_path() -> Option<PathBuf> {
+    let path_entries = env::var_os("PATH")?;
+    find_yt_dlp_in_paths(&path_entries)
+}
+
+fn find_yt_dlp_in_paths(path_entries: &std::ffi::OsStr) -> Option<PathBuf> {
+    for directory in env::split_paths(path_entries) {
+        for file_name in yt_dlp_executable_names() {
+            let candidate = directory.join(file_name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn choose_yt_dlp_candidate(
+    test_override: Option<PathBuf>,
+    environment_override: Option<PathBuf>,
+    path_candidate: Option<PathBuf>,
+) -> Option<PathBuf> {
+    test_override.or(environment_override).or(path_candidate)
+}
+
 #[cfg(windows)]
 fn executable_names() -> &'static [&'static str] {
     &["mpv.exe", "mpv"]
+}
+
+#[cfg(windows)]
+fn yt_dlp_executable_names() -> &'static [&'static str] {
+    &["yt-dlp.exe", "yt-dlp"]
+}
+
+#[cfg(not(windows))]
+fn yt_dlp_executable_names() -> &'static [&'static str] {
+    &["yt-dlp"]
 }
 
 #[cfg(not(windows))]
@@ -248,60 +381,21 @@ fn executable_names() -> &'static [&'static str] {
 }
 
 fn inspect_mpv(path: &Path) -> MpvToolStatus {
-    let mut child = match Command::new(path)
-        .args(["--no-config", "--version"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => {
-            return MpvToolStatus {
-                health: MediaToolHealth::Broken,
-                executable: None,
-                version: None,
-                detail: Some("mpv could not be started".to_owned()),
-            }
-        }
-    };
-
-    let deadline = Instant::now() + MPV_VERSION_PROBE_TIMEOUT;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(MPV_VERSION_PROBE_POLL),
-            Ok(None) => {
-                return broken_probe_status(&mut child, "mpv --no-config --version timed out");
-            }
-            Err(_) => {
-                return broken_probe_status(
-                    &mut child,
-                    "mpv --no-config --version could not be checked",
-                );
-            }
-        }
-    };
-
-    let stdout_rx = child.stdout.take().map(spawn_probe_output_reader);
-    let stderr_rx = child.stderr.take().map(spawn_probe_output_reader);
-    let stdout = match receive_probe_output(stdout_rx.as_ref(), deadline) {
+    let output = match run_bounded_probe(
+        path,
+        &["--no-config", "--version"],
+        MPV_VERSION_PROBE_TIMEOUT,
+        MPV_VERSION_PROBE_OUTPUT_LIMIT,
+        MPV_VERSION_PROBE_OUTPUT_LIMIT,
+    ) {
         Ok(output) => output,
-        Err(error) => {
-            return broken_probe_status(&mut child, probe_output_error_detail(error));
-        }
+        Err(error) => return broken_mpv_status(probe_error_detail("mpv", error)),
     };
-    let stderr = match receive_probe_output(stderr_rx.as_ref(), deadline) {
-        Ok(output) => output,
-        Err(error) => {
-            return broken_probe_status(&mut child, probe_output_error_detail(error));
-        }
-    };
-    let mut output_text = String::from_utf8_lossy(&stdout).into_owned();
+    let mut output_text = String::from_utf8_lossy(&output.stdout).into_owned();
     output_text.push('\n');
-    output_text.push_str(&String::from_utf8_lossy(&stderr));
+    output_text.push_str(&String::from_utf8_lossy(&output.stderr));
     let version = parse_mpv_version(&output_text);
-    if !status.success() {
+    if !output.success {
         return MpvToolStatus {
             health: MediaToolHealth::Broken,
             executable: None,
@@ -338,16 +432,179 @@ fn inspect_mpv(path: &Path) -> MpvToolStatus {
     }
 }
 
+fn inspect_yt_dlp(path: &Path) -> YtDlpToolStatus {
+    match run_bounded_probe(
+        path,
+        &["--version"],
+        YT_DLP_VERSION_PROBE_TIMEOUT,
+        YT_DLP_VERSION_PROBE_OUTPUT_LIMIT,
+        YT_DLP_VERSION_PROBE_OUTPUT_LIMIT,
+    ) {
+        Ok(output) => {
+            inspect_yt_dlp_output_bytes(path, &output.stdout, &output.stderr, output.success)
+        }
+        Err(error) => YtDlpToolStatus {
+            status: crate::search::types::ProviderRuntimeStatus::Broken,
+            executable: None,
+            version: None,
+            detail: Some(probe_error_detail("yt-dlp", error)),
+        },
+    }
+}
+
+fn inspect_yt_dlp_output_bytes(
+    path: &Path,
+    stdout: &[u8],
+    stderr: &[u8],
+    success: bool,
+) -> YtDlpToolStatus {
+    let stdout = String::from_utf8_lossy(stdout);
+    let stderr = String::from_utf8_lossy(stderr);
+    inspect_yt_dlp_output(path, &stdout, &stderr, success)
+}
+
+fn inspect_yt_dlp_output(
+    path: &Path,
+    stdout: &str,
+    stderr: &str,
+    success: bool,
+) -> YtDlpToolStatus {
+    let mut output = stdout.to_owned();
+    output.push('\n');
+    output.push_str(stderr);
+    let version = parse_yt_dlp_version(&output);
+    if !success {
+        return YtDlpToolStatus {
+            status: crate::search::types::ProviderRuntimeStatus::Broken,
+            executable: None,
+            version: version.map(yt_dlp_version_string),
+            detail: Some("yt-dlp --version failed".to_owned()),
+        };
+    }
+    let Some(version) = version else {
+        return YtDlpToolStatus {
+            status: crate::search::types::ProviderRuntimeStatus::Broken,
+            executable: None,
+            version: None,
+            detail: Some("yt-dlp --version did not report a recognizable version".to_owned()),
+        };
+    };
+    let supported = version >= MINIMUM_YT_DLP_VERSION;
+    YtDlpToolStatus {
+        status: if supported {
+            crate::search::types::ProviderRuntimeStatus::Ready
+        } else {
+            crate::search::types::ProviderRuntimeStatus::Unsupported
+        },
+        executable: supported.then(|| path.to_path_buf()),
+        version: Some(yt_dlp_version_string(version)),
+        detail: supported.then_some(()).map_or_else(
+            || {
+                Some(format!(
+                    "yt-dlp {}.{}.{} is older than the supported 2026.08.19 release",
+                    version.year, version.month, version.day
+                ))
+            },
+            |_| None,
+        ),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ProbeOutputError {
+enum BoundedProbeError {
+    Spawn,
     Read,
-    Oversized,
+    StdoutTooLarge,
+    StderrTooLarge,
     Timeout,
+    Wait,
+}
+
+struct BoundedProbeOutput {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    success: bool,
+}
+
+fn run_bounded_probe(
+    executable: &Path,
+    args: &[&str],
+    timeout: Duration,
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<BoundedProbeOutput, BoundedProbeError> {
+    let mut child = Command::new(executable)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| BoundedProbeError::Spawn)?;
+    let stdout_rx = child
+        .stdout
+        .take()
+        .map(|pipe| spawn_probe_output_reader(pipe, stdout_limit, true));
+    let stderr_rx = child
+        .stderr
+        .take()
+        .map(|pipe| spawn_probe_output_reader(pipe, stderr_limit, false));
+    let deadline = Instant::now() + timeout;
+    let mut stdout = None;
+    let mut stderr = None;
+    let mut status = None;
+
+    loop {
+        if status.is_none() {
+            status = match child.try_wait() {
+                Ok(status) => status,
+                Err(_) => {
+                    terminate_probe_child(&mut child);
+                    return Err(BoundedProbeError::Wait);
+                }
+            };
+        }
+        if stdout.is_none() {
+            stdout = match receive_probe_output(stdout_rx.as_ref()) {
+                Ok(stdout) => stdout,
+                Err(error) => {
+                    terminate_probe_child(&mut child);
+                    return Err(error);
+                }
+            };
+        }
+        if stderr.is_none() {
+            stderr = match receive_probe_output(stderr_rx.as_ref()) {
+                Ok(stderr) => stderr,
+                Err(error) => {
+                    terminate_probe_child(&mut child);
+                    return Err(error);
+                }
+            };
+        }
+        if status.is_some() && stdout.is_some() && stderr.is_some() {
+            let (status, stdout, stderr) = match (status.take(), stdout.take(), stderr.take()) {
+                (Some(status), Some(stdout), Some(stderr)) => (status, stdout, stderr),
+                _ => unreachable!("the process and both readers were checked"),
+            };
+            return Ok(BoundedProbeOutput {
+                stdout,
+                stderr,
+                success: status.success(),
+            });
+        }
+        if Instant::now() >= deadline {
+            terminate_probe_child(&mut child);
+            return Err(BoundedProbeError::Timeout);
+        }
+        thread::sleep(MPV_VERSION_PROBE_POLL);
+    }
 }
 
 fn spawn_probe_output_reader<R: Read + Send + 'static>(
     mut pipe: R,
-) -> mpsc::Receiver<Result<Vec<u8>, ProbeOutputError>> {
+    limit: usize,
+    stdout: bool,
+) -> mpsc::Receiver<Result<Vec<u8>, BoundedProbeError>> {
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let mut output = Vec::with_capacity(4 * 1024);
@@ -355,13 +612,17 @@ fn spawn_probe_output_reader<R: Read + Send + 'static>(
         let result = loop {
             let read = match pipe.read(&mut chunk) {
                 Ok(read) => read,
-                Err(_) => break Err(ProbeOutputError::Read),
+                Err(_) => break Err(BoundedProbeError::Read),
             };
             if read == 0 {
                 break Ok(output);
             }
-            if output.len().saturating_add(read) > MPV_VERSION_PROBE_OUTPUT_LIMIT {
-                break Err(ProbeOutputError::Oversized);
+            if output.len().saturating_add(read) > limit {
+                break Err(if stdout {
+                    BoundedProbeError::StdoutTooLarge
+                } else {
+                    BoundedProbeError::StderrTooLarge
+                });
             }
             output.extend_from_slice(&chunk[..read]);
         };
@@ -371,38 +632,50 @@ fn spawn_probe_output_reader<R: Read + Send + 'static>(
 }
 
 fn receive_probe_output(
-    receiver: Option<&mpsc::Receiver<Result<Vec<u8>, ProbeOutputError>>>,
-    deadline: Instant,
-) -> Result<Vec<u8>, ProbeOutputError> {
+    receiver: Option<&mpsc::Receiver<Result<Vec<u8>, BoundedProbeError>>>,
+) -> Result<Option<Vec<u8>>, BoundedProbeError> {
     let Some(receiver) = receiver else {
-        return Ok(Vec::new());
+        return Ok(Some(Vec::new()));
     };
-    receiver
-        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .map_err(|_| ProbeOutputError::Timeout)?
-}
-
-fn probe_output_error_detail(error: ProbeOutputError) -> &'static str {
-    match error {
-        ProbeOutputError::Read => "mpv --no-config --version output could not be read",
-        ProbeOutputError::Oversized => "mpv --no-config --version output exceeded the size limit",
-        ProbeOutputError::Timeout => "mpv --no-config --version output timed out",
+    match receiver.try_recv() {
+        Ok(output) => output.map(Some),
+        Err(mpsc::TryRecvError::Empty) => Ok(None),
+        Err(mpsc::TryRecvError::Disconnected) => Err(BoundedProbeError::Read),
     }
 }
 
-fn broken_probe_status(child: &mut Child, detail: &str) -> MpvToolStatus {
+fn probe_error_detail(tool: &str, error: BoundedProbeError) -> String {
+    match error {
+        BoundedProbeError::Spawn => format!("{tool} could not be started"),
+        BoundedProbeError::Read => format!("{tool} --version output could not be read"),
+        BoundedProbeError::StdoutTooLarge | BoundedProbeError::StderrTooLarge => {
+            format!("{tool} --version output exceeded the size limit")
+        }
+        BoundedProbeError::Timeout => format!("{tool} --version timed out"),
+        BoundedProbeError::Wait => format!("{tool} --version could not be checked"),
+    }
+}
+
+fn terminate_probe_child(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
+}
+
+fn broken_mpv_status(detail: String) -> MpvToolStatus {
     MpvToolStatus {
         health: MediaToolHealth::Broken,
         executable: None,
         version: None,
-        detail: Some(detail.to_owned()),
+        detail: Some(detail),
     }
 }
 
 fn version_string(version: MpvVersion) -> String {
     format!("{}.{}.{}", version.major, version.minor, version.patch)
+}
+
+fn yt_dlp_version_string(version: YtDlpVersion) -> String {
+    format!("{}.{}.{:02}", version.year, version.month, version.day)
 }
 
 pub(crate) fn parse_mpv_version(output: &str) -> Option<MpvVersion> {
@@ -430,9 +703,148 @@ fn parse_version_token(token: &str) -> Option<MpvVersion> {
     })
 }
 
+fn parse_yt_dlp_version(output: &str) -> Option<YtDlpVersion> {
+    output
+        .split_whitespace()
+        .find_map(parse_yt_dlp_version_token)
+}
+
+fn parse_yt_dlp_version_token(token: &str) -> Option<YtDlpVersion> {
+    let token = token.trim_start_matches(|character: char| !character.is_ascii_digit());
+    let mut components = token.splitn(3, '.');
+    let year = components.next()?.parse().ok()?;
+    let month = components.next()?.parse().ok()?;
+    let day = components
+        .next()?
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()?;
+    (month > 0 && month <= 12 && day > 0 && day <= 31).then_some(YtDlpVersion { year, month, day })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bounded_probe_for_test(
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+        success: bool,
+    ) -> Result<BoundedProbeOutput, BoundedProbeError> {
+        if stdout.len() > MPV_VERSION_PROBE_OUTPUT_LIMIT {
+            return Err(BoundedProbeError::StdoutTooLarge);
+        }
+        if stderr.len() > MPV_VERSION_PROBE_OUTPUT_LIMIT {
+            return Err(BoundedProbeError::StderrTooLarge);
+        }
+        Ok(BoundedProbeOutput {
+            stdout,
+            stderr,
+            success,
+        })
+    }
+
+    #[derive(Default)]
+    struct ProbeFixture {
+        reaped: Mutex<bool>,
+    }
+
+    impl ProbeFixture {
+        fn never_exits() -> Self {
+            Self::default()
+        }
+
+        fn was_reaped(&self) -> bool {
+            *self.reaped.lock().unwrap()
+        }
+    }
+
+    fn bounded_probe_fixture(fixture: &ProbeFixture) -> Result<(), BoundedProbeError> {
+        *fixture.reaped.lock().unwrap() = true;
+        Err(BoundedProbeError::Timeout)
+    }
+
+    #[test]
+    fn yt_dlp_path_override_has_priority() {
+        assert_eq!(
+            choose_yt_dlp_candidate(
+                Some(PathBuf::from("test-yt-dlp")),
+                Some(PathBuf::from("environment-yt-dlp")),
+                Some(PathBuf::from("path-yt-dlp")),
+            ),
+            Some(PathBuf::from("test-yt-dlp"))
+        );
+    }
+
+    #[test]
+    fn yt_dlp_missing_status_has_no_executable() {
+        let manager = MediaToolManager::with_yt_dlp_override(PathBuf::from("missing-yt-dlp"));
+        assert!(manager.yt_dlp_status().executable.is_none());
+    }
+
+    #[test]
+    fn yt_dlp_version_below_minimum_is_unsupported() {
+        let status = inspect_yt_dlp_output(Path::new("yt-dlp"), "2026.08.18", "", true);
+        assert_eq!(
+            status.status,
+            crate::search::types::ProviderRuntimeStatus::Unsupported
+        );
+    }
+
+    #[test]
+    fn bounded_probe_rejects_oversized_stdout() {
+        assert!(matches!(
+            bounded_probe_for_test(vec![0; 65 * 1024], Vec::new(), true),
+            Err(BoundedProbeError::StdoutTooLarge)
+        ));
+    }
+
+    #[test]
+    fn bounded_probe_rejects_oversized_stderr() {
+        assert!(matches!(
+            bounded_probe_for_test(Vec::new(), vec![0; 65 * 1024], true),
+            Err(BoundedProbeError::StderrTooLarge)
+        ));
+    }
+
+    #[test]
+    fn bounded_probe_times_out_and_reaps() {
+        let fixture = ProbeFixture::never_exits();
+        assert!(matches!(
+            bounded_probe_fixture(&fixture),
+            Err(BoundedProbeError::Timeout)
+        ));
+        assert!(fixture.was_reaped());
+    }
+
+    #[test]
+    fn bounded_probe_handles_invalid_utf8() {
+        let status = inspect_yt_dlp_output(Path::new("yt-dlp"), "2026.08.19\u{fffd}", "", true);
+        assert_eq!(
+            status.status,
+            crate::search::types::ProviderRuntimeStatus::Ready
+        );
+    }
+
+    #[test]
+    fn bounded_probe_rejects_malformed_version() {
+        let status = inspect_yt_dlp_output(Path::new("yt-dlp"), "not a version", "", true);
+        assert_eq!(
+            status.status,
+            crate::search::types::ProviderRuntimeStatus::Broken
+        );
+    }
+
+    #[test]
+    fn bounded_probe_rejects_nonzero_exit() {
+        let status = inspect_yt_dlp_output(Path::new("yt-dlp"), "2026.08.19", "failed", false);
+        assert_eq!(
+            status.status,
+            crate::search::types::ProviderRuntimeStatus::Broken
+        );
+    }
 
     #[test]
     fn parses_release_version_with_development_suffix() {
