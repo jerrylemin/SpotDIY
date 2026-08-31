@@ -258,25 +258,31 @@ impl SafeUrl {
 fn contains_sensitive_query(url: &Url) -> bool {
     url.query_pairs().any(|(key, _)| {
         let key = key.to_ascii_lowercase().replace('-', "_");
-        matches!(
-            key.as_str(),
-            "auth"
-                | "authorization"
-                | "access_token"
-                | "accesstoken"
-                | "refresh_token"
-                | "refreshtoken"
-                | "client_secret"
-                | "clientsecret"
-                | "api_key"
-                | "apikey"
-                | "cookie"
-                | "password"
-                | "token"
-                | "secret"
-                | "code"
-                | "oauth"
-        )
+        let components: Vec<_> = key.split('_').collect();
+        let composite_credential = components.contains(&"token")
+            && components.iter().any(|component| {
+                matches!(*component, "oauth" | "auth" | "api" | "access" | "refresh")
+            });
+        composite_credential
+            || matches!(
+                key.as_str(),
+                "auth"
+                    | "authorization"
+                    | "access_token"
+                    | "accesstoken"
+                    | "refresh_token"
+                    | "refreshtoken"
+                    | "client_secret"
+                    | "clientsecret"
+                    | "api_key"
+                    | "apikey"
+                    | "cookie"
+                    | "password"
+                    | "token"
+                    | "secret"
+                    | "code"
+                    | "oauth"
+            )
     })
 }
 

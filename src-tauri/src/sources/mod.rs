@@ -102,5 +102,9 @@ mod tests {
             "https://youtube.com/watch?apiKey=secret"
         )
         .is_err());
+        for query_name in ["oauth_token", "AUTH-TOKEN", "Api_Token"] {
+            let url = format!("https://youtube.com/watch?{query_name}=secret");
+            assert!(validate_provider_url(ProviderKind::Youtube, &url).is_err());
+        }
     }
 }
