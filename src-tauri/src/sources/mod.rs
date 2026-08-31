@@ -1,4 +1,6 @@
+pub mod local;
 pub mod traits;
+pub use local::LocalSourceAdapter;
 pub use traits::SourceAdapter;
 
 use crate::domain::ProviderKind;
