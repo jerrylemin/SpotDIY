@@ -727,43 +727,35 @@ fn parse_yt_dlp_version_token(token: &str) -> Option<YtDlpVersion> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
-    fn bounded_probe_for_test(
-        stdout: Vec<u8>,
-        stderr: Vec<u8>,
-        success: bool,
+    const CONTROLLED_PROBE_TIMEOUT: Duration = Duration::from_millis(100);
+
+    fn test_executable() -> PathBuf {
+        std::env::current_exe().unwrap()
+    }
+
+    fn controlled_test_args(test_name: &'static str) -> [&'static str; 3] {
+        ["--exact", test_name, "--nocapture"]
+    }
+
+    fn is_controlled_child(test_name: &str) -> bool {
+        let mut args = std::env::args();
+        args.any(|argument| argument == "--exact")
+            && std::env::args().any(|argument| argument == test_name)
+    }
+
+    fn run_controlled_probe(
+        test_name: &'static str,
     ) -> Result<BoundedProbeOutput, BoundedProbeError> {
-        if stdout.len() > MPV_VERSION_PROBE_OUTPUT_LIMIT {
-            return Err(BoundedProbeError::StdoutTooLarge);
-        }
-        if stderr.len() > MPV_VERSION_PROBE_OUTPUT_LIMIT {
-            return Err(BoundedProbeError::StderrTooLarge);
-        }
-        Ok(BoundedProbeOutput {
-            stdout,
-            stderr,
-            success,
-        })
-    }
-
-    #[derive(Default)]
-    struct ProbeFixture {
-        reaped: Mutex<bool>,
-    }
-
-    impl ProbeFixture {
-        fn never_exits() -> Self {
-            Self::default()
-        }
-
-        fn was_reaped(&self) -> bool {
-            *self.reaped.lock().unwrap()
-        }
-    }
-
-    fn bounded_probe_fixture(fixture: &ProbeFixture) -> Result<(), BoundedProbeError> {
-        *fixture.reaped.lock().unwrap() = true;
-        Err(BoundedProbeError::Timeout)
+        let executable = test_executable();
+        run_bounded_probe(
+            &executable,
+            &controlled_test_args(test_name),
+            CONTROLLED_PROBE_TIMEOUT,
+            MPV_VERSION_PROBE_OUTPUT_LIMIT,
+            MPV_VERSION_PROBE_OUTPUT_LIMIT,
+        )
     }
 
     #[test]
@@ -796,7 +788,7 @@ mod tests {
     #[test]
     fn bounded_probe_rejects_oversized_stdout() {
         assert!(matches!(
-            bounded_probe_for_test(vec![0; 65 * 1024], Vec::new(), true),
+            run_controlled_probe("media_tools::tests::controlled_probe_overflows_stdout"),
             Err(BoundedProbeError::StdoutTooLarge)
         ));
     }
@@ -804,24 +796,33 @@ mod tests {
     #[test]
     fn bounded_probe_rejects_oversized_stderr() {
         assert!(matches!(
-            bounded_probe_for_test(Vec::new(), vec![0; 65 * 1024], true),
+            run_controlled_probe("media_tools::tests::controlled_probe_overflows_stderr"),
             Err(BoundedProbeError::StderrTooLarge)
         ));
     }
 
     #[test]
     fn bounded_probe_times_out_and_reaps() {
-        let fixture = ProbeFixture::never_exits();
+        let started = Instant::now();
         assert!(matches!(
-            bounded_probe_fixture(&fixture),
+            run_controlled_probe("media_tools::tests::controlled_probe_blocks"),
             Err(BoundedProbeError::Timeout)
         ));
-        assert!(fixture.was_reaped());
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]
     fn bounded_probe_handles_invalid_utf8() {
-        let status = inspect_yt_dlp_output(Path::new("yt-dlp"), "2026.08.19\u{fffd}", "", true);
+        let output =
+            run_controlled_probe("media_tools::tests::controlled_probe_writes_invalid_utf8")
+                .unwrap();
+        assert!(String::from_utf8_lossy(&output.stdout).contains('\u{fffd}'));
+        let status = inspect_yt_dlp_output_bytes(
+            Path::new("yt-dlp"),
+            &output.stdout,
+            &output.stderr,
+            output.success,
+        );
         assert_eq!(
             status.status,
             crate::search::types::ProviderRuntimeStatus::Ready
@@ -830,7 +831,15 @@ mod tests {
 
     #[test]
     fn bounded_probe_rejects_malformed_version() {
-        let status = inspect_yt_dlp_output(Path::new("yt-dlp"), "not a version", "", true);
+        let output =
+            run_controlled_probe("media_tools::tests::controlled_probe_writes_malformed_version")
+                .unwrap();
+        let status = inspect_yt_dlp_output_bytes(
+            Path::new("yt-dlp"),
+            &output.stdout,
+            &output.stderr,
+            output.success,
+        );
         assert_eq!(
             status.status,
             crate::search::types::ProviderRuntimeStatus::Broken
@@ -839,11 +848,80 @@ mod tests {
 
     #[test]
     fn bounded_probe_rejects_nonzero_exit() {
-        let status = inspect_yt_dlp_output(Path::new("yt-dlp"), "2026.08.19", "failed", false);
+        let output =
+            run_controlled_probe("media_tools::tests::controlled_probe_exits_nonzero").unwrap();
+        let status = inspect_yt_dlp_output_bytes(
+            Path::new("yt-dlp"),
+            &output.stdout,
+            &output.stderr,
+            output.success,
+        );
         assert_eq!(
             status.status,
             crate::search::types::ProviderRuntimeStatus::Broken
         );
+    }
+
+    #[test]
+    fn controlled_probe_overflows_stdout() {
+        if !is_controlled_child("media_tools::tests::controlled_probe_overflows_stdout") {
+            return;
+        }
+        let mut stdout = std::io::stdout().lock();
+        for _ in 0..9 {
+            stdout.write_all(&[b'x'; 8 * 1024]).unwrap();
+            stdout.flush().unwrap();
+        }
+        loop {
+            thread::sleep(Duration::from_secs(1));
+        }
+    }
+
+    #[test]
+    fn controlled_probe_overflows_stderr() {
+        if !is_controlled_child("media_tools::tests::controlled_probe_overflows_stderr") {
+            return;
+        }
+        let mut stderr = std::io::stderr().lock();
+        for _ in 0..9 {
+            stderr.write_all(&[b'x'; 8 * 1024]).unwrap();
+            stderr.flush().unwrap();
+        }
+        loop {
+            thread::sleep(Duration::from_secs(1));
+        }
+    }
+
+    #[test]
+    fn controlled_probe_blocks() {
+        if !is_controlled_child("media_tools::tests::controlled_probe_blocks") {
+            return;
+        }
+        loop {
+            thread::sleep(Duration::from_secs(1));
+        }
+    }
+
+    #[test]
+    fn controlled_probe_writes_invalid_utf8() {
+        if is_controlled_child("media_tools::tests::controlled_probe_writes_invalid_utf8") {
+            std::io::stdout().write_all(b"2026.08.19\xff").unwrap();
+        }
+    }
+
+    #[test]
+    fn controlled_probe_writes_malformed_version() {
+        if is_controlled_child("media_tools::tests::controlled_probe_writes_malformed_version") {
+            std::io::stdout().write_all(b"not-a-version").unwrap();
+        }
+    }
+
+    #[test]
+    fn controlled_probe_exits_nonzero() {
+        if is_controlled_child("media_tools::tests::controlled_probe_exits_nonzero") {
+            std::io::stdout().write_all(b"2026.08.19").unwrap();
+            std::process::exit(7);
+        }
     }
 
     #[test]

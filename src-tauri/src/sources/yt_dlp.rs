@@ -111,11 +111,7 @@ async fn run_yt_dlp(
         return Err(YtDlpProcessError::Cancelled);
     }
 
-    let mut child = Command::new(executable)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    let mut child = yt_dlp_command(executable, args)
         .spawn()
         .map_err(|_| YtDlpProcessError::Spawn)?;
     let stdout = child.stdout.take().ok_or(YtDlpProcessError::Read)?;
@@ -209,6 +205,16 @@ async fn run_yt_dlp(
     }
 }
 
+fn yt_dlp_command(executable: &str, args: &[String]) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
+}
+
 async fn terminate_owned_child(child: &mut tokio::process::Child) {
     let _ = child.kill().await;
     let _ = child.wait().await;
@@ -245,67 +251,42 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Mutex;
+    use std::io::Write;
+    use std::path::PathBuf;
 
     use super::*;
     use tokio::io::AsyncWriteExt;
 
-    #[derive(Default)]
-    struct RecordingRunner {
-        argv: Mutex<Vec<String>>,
-        reaped: AtomicBool,
+    fn test_executable() -> PathBuf {
+        std::env::current_exe().unwrap()
     }
 
-    impl RecordingRunner {
-        fn argv(&self) -> Vec<String> {
-            self.argv.lock().unwrap().clone()
-        }
-
-        fn shell_invoked(&self) -> bool {
-            false
-        }
-
-        fn was_reaped(&self) -> bool {
-            self.reaped.load(Ordering::SeqCst)
-        }
+    fn controlled_test_args(test_name: &'static str) -> Vec<String> {
+        ["--exact", test_name, "--nocapture"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
     }
 
-    impl YtDlpProcessRunner for RecordingRunner {
-        fn run<'a>(
-            &'a self,
-            _executable: &'a str,
-            args: &'a [String],
-            cancellation: SearchCancellation,
-        ) -> Pin<Box<dyn Future<Output = Result<YtDlpProcessOutput, YtDlpProcessError>> + Send + 'a>>
-        {
-            Box::pin(async move {
-                if *cancellation.subscribe().borrow() {
-                    self.reaped.store(true, Ordering::SeqCst);
-                    return Err(YtDlpProcessError::Cancelled);
-                }
-                *self.argv.lock().unwrap() = args.to_vec();
-                Ok(YtDlpProcessOutput {
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    exit_code: Some(0),
-                })
-            })
-        }
+    fn is_controlled_child(test_name: &str) -> bool {
+        std::env::args().any(|argument| argument == "--exact")
+            && std::env::args().any(|argument| argument == test_name)
     }
 
     #[tokio::test]
     async fn yt_dlp_runner_records_exact_argv_without_shell() {
-        let fake = RecordingRunner::default();
-        fake.run(
-            "C:/yt-dlp.exe",
-            &yt_dlp_search_args("query"),
-            SearchCancellation::new(),
-        )
-        .await
-        .unwrap();
+        let args = yt_dlp_search_args("query");
+        let command = yt_dlp_command("C:/yt-dlp.exe", &args);
         assert_eq!(
-            fake.argv(),
+            command.as_std().get_program(),
+            std::ffi::OsStr::new("C:/yt-dlp.exe")
+        );
+        assert_eq!(
+            command
+                .as_std()
+                .get_args()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
             [
                 "--no-config",
                 "--dump-single-json",
@@ -317,21 +298,21 @@ mod tests {
                 "ytsearch25:query",
             ]
         );
-        assert!(!fake.shell_invoked());
     }
 
     #[tokio::test]
     async fn metacharacters_remain_one_argument() {
-        let fake = RecordingRunner::default();
-        fake.run(
-            "C:/yt-dlp.exe",
-            &yt_dlp_search_args("a & b | c"),
-            SearchCancellation::new(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(fake.argv().last().unwrap(), "ytsearch25:a & b | c");
-        assert!(!fake.shell_invoked());
+        let args = yt_dlp_search_args("a & b | c");
+        let command = yt_dlp_command("C:/yt-dlp.exe", &args);
+        assert_eq!(
+            command
+                .as_std()
+                .get_args()
+                .last()
+                .unwrap()
+                .to_string_lossy(),
+            "ytsearch25:a & b | c"
+        );
     }
 
     #[tokio::test]
@@ -362,14 +343,34 @@ mod tests {
 
     #[tokio::test]
     async fn runner_cancellation_kills_and_reaps_owned_child() {
-        let fake = RecordingRunner::default();
+        let runner = TokioYtDlpProcessRunner;
+        let executable = test_executable().to_string_lossy().into_owned();
+        let args = controlled_test_args("media_tools::yt_dlp::tests::controlled_runner_blocks");
         let cancellation = SearchCancellation::new();
-        let _receiver = cancellation.subscribe();
+        let runner_cancellation = cancellation.clone();
+        let task =
+            tokio::spawn(async move { runner.run(&executable, &args, runner_cancellation).await });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let started = tokio::time::Instant::now();
         cancellation.cancel();
         assert!(matches!(
-            fake.run("C:/yt-dlp.exe", &[], cancellation).await,
+            tokio::time::timeout(Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap(),
             Err(YtDlpProcessError::Cancelled)
         ));
-        assert!(fake.was_reaped());
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn controlled_runner_blocks() {
+        if !is_controlled_child("media_tools::yt_dlp::tests::controlled_runner_blocks") {
+            return;
+        }
+        std::io::stdout().write_all(b"started\n").unwrap();
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+        }
     }
 }
