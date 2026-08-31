@@ -30,3 +30,15 @@ The controller retained ownership of shared interfaces, migration SQL, integrati
 The Plan 03 controller retained ownership of integration, final verification,
 durable documentation, and the authorized Git delivery. No research or review
 agent edited, staged, committed, or pushed shared work.
+
+## Plan 04 agent record
+
+The controller retained ownership of the shared playback integration, final
+verification, documentation, and Git delivery. The implementation slices were
+integrated into one feature boundary; no worker or reviewer is authorized to
+push `main`.
+
+| Agent ID | Role | Scope | Result | Status |
+|---|---|---|---|---|
+| controller | Lead implementation/integration | Playback contracts, mpv backend, service, Tauri IPC, frontend, browser/native smoke, and delivery | `536617d` feature commit; `af66127` review-fix; documentation closure recorded | COMPLETE |
+| Mendel (`01a05761-c31f-7f51-88d5-52902c7ac673`) | Fresh independent read-only reviewer | Whole Plan 04 feature range plus committed remediation `af66127` | Initial review found two medium findings; remediation recheck found no critical/high/correctness-medium findings and returned `PASS`; one low coverage note remains | COMPLETE |

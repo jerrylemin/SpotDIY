@@ -25,3 +25,30 @@
 - Added Tauri dialog/opener plugins, the narrow folder/scan/status/page/reveal IPC surface, artwork-only asset scope, typed Zod validation, React Query library hooks, progress cleanup, real paged folder/track UI, quality/provenance/error states, and disabled Plan 04 playback controls.
 - Added focused frontend tests and 53 Rust tests covering migration compatibility, path/fingerprint/metadata/artwork helpers, scanner/reconciliation identity, watcher semantics, paging, reveal security, and recovery. `0001_initial.sql` remains unchanged and no user media is mutated.
 - The independent final review requested medium corrections; those were integrated before the final verification pass. Derived Graphify output was updated to 1,202 nodes and 1,662 edges and remains ignored.
+
+## 2026-08-31 — Plan 04 Playback Engine
+
+- Integrated `MediaToolManager` discovery/health, typed playback contracts,
+  bounded mpv JSON protocol, the external Windows named-pipe backend, the
+  serialized `PlaybackService`, transient ID-only queue, managed local source
+  resolution, transport/repeat/shuffle/EOF/previous policy, source switching,
+  recovery/retry, and bounded shutdown.
+- Integrated typed Tauri playback commands and `playback://state`, strict
+  Zod parsing/revision handling, functional PlayerBar and local-library
+  transport actions, Ctrl+K transport commands, the three-width Playwright
+  matrix, real mpv smoke, and packaged lifecycle smoke.
+- The backend launches exactly `--no-config --idle=yes --terminal=no
+  --input-terminal=no --audio-display=no --input-ipc-server=<fresh pipe>`;
+  no provider, download, persistent queue, or later-plan playback behavior was
+  added. Plan 04 adds no database migration.
+- The packaged harness initially exposed a Windows known-folder isolation
+  issue. The final implementation uses a smoke-only
+  `SPOTDIY_PACKAGED_DATA_ROOT`, backed up and removed only the harness rows
+  written to the normal database, and verified zero remaining harness rows.
+- The coherent feature boundary is committed as `536617d` (`feat: add mpv
+  playback service and queue transport`), with review remediation committed
+  as `af66127` (`fix: harden mpv playback lifecycle and event ordering`).
+- The fresh independent recheck returned `PASS` with no critical, high, or
+  correctness/security medium findings. The final frontend/native/release,
+  real-mpv, and packaged lifecycle gates passed; the documentation closure is
+  recorded in this delivery boundary and remains a separate docs commit.

@@ -1,14 +1,18 @@
 # SpotDIY test matrix
 
-| Area | Current check | Required expansion |
+| Area | Current check | Result / coverage |
 |---|---|---|
-| Frontend type safety | `pnpm typecheck` | Strict DTO coverage for every IPC command. |
-| Frontend lint | `pnpm lint` | Keep no unused values and hook rules clean. |
-| Frontend behavior | `pnpm test` — 4 files, 18 tests | Browser-preview defaults, provider labels, native status/settings validation, library dialog/page/progress behavior, pagination, quality, unavailable rows, removal confirmation, and playback exclusion. |
-| Frontend build | `pnpm build` | Browser production bundle and Tauri build wiring. |
-| Rust formatting | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | Run on every native slice. |
-| Rust quality | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | Passed after Plan 03 scanner/watcher/recovery changes. |
-| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` — 53 tests | Migration 2/legacy promotion, WAL/FK, path/reparse safety, metadata/artwork/fingerprint helpers, recursive scanner, unchanged/forced/rename/missing/restore/ambiguous identity behavior, watcher coalescing/recovery, service paging/reveal, repositories, settings, and IPC status. |
-| Provider contracts | Not started | Mock malformed responses, timeouts, cancellation, rate limits, missing metrics/artwork. |
-| Visual QA | Browser runner unavailable; native CDP smoke passed | `pnpm exec playwright --version` returns 1.58.0, but `pnpm exec playwright test --list` returns `unknown command 'test'`; no Playwright config/project is present. The packaged native window was exercised through its CDP endpoint. |
-| Release | `pnpm tauri build` and packaged launch smoke | x64 release executable and NSIS installer build; executable startup creates the standard LocalAppData database. Synthetic native smoke also proves restart persistence, watcher changes, reveal validation, folder removal, and media preservation. Full clean install, playback, search, import/export, and visual screenshot QA remain later. |
+| Frontend type safety | `pnpm typecheck` | Pass. Strict playback/library/settings DTOs and command arguments are checked. |
+| Frontend lint | `pnpm lint` | Pass. |
+| Frontend behavior | `pnpm test` | Pass: 26 Vitest tests, including typed playback IPC, stale revisions, bridge ordering/race handling, PlayerBar, local-library actions, and Ctrl+K transport. |
+| Frontend build | `pnpm build` | Pass. Existing Browserslist/Tailwind content notices are non-fatal. |
+| Rust formatting | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | Pass. |
+| Rust quality | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | Pass. |
+| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | Pass: 117 tests, including playback contracts, protocol framing/correlation, queue policy, managed source resolution, state races/recovery, and library behavior. |
+| Browser playback | `pnpm exec playwright test` | Pass: 9 runs across 1280, 1920, and 2560 viewport projects; includes source-switch queue identity preservation and no console errors. |
+| Real mpv | Windows `mpv_smoke` integration gate | Pass with local `v0.41.0-dev-g41f6a6450`; synthetic WAV transport, device, EOF, shutdown, and process-exit behavior verified. |
+| Packaged lifecycle | `scripts/packaged-playback-smoke.ps1` | Pass with release executable: local indexing, playback transport, graceful close, owned-mpv cleanup, restart persistence, and empty transient queue. |
+| Release | `pnpm tauri build` | Pass. Release executable and NSIS bundle built with external `C:\CargoTarget\SpotDIY`; no repository-local `src-tauri\target`. |
+| Provider contracts | Not started | Plan 05+; no provider playback/search is part of Plan 04. |
+| Persistence boundary | Schema and restart smoke | Pass: Plan 04 adds no migration; library roots persist while the transient playback queue restarts empty. |
+| Visual follow-up | Playwright screenshots | The matrix exercises responsive widths, long titles, missing artwork, and accessible controls; later full visual/design QA remains part of the UI/release plans. |

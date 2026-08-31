@@ -55,3 +55,72 @@ At the bootstrap boundary, database tests, provider live tests, and the full Pla
 - Mocked-IPC browser smoke - configuration gap recorded: `pnpm exec playwright --version` reports 1.58.0, but `pnpm exec playwright test --list` fails with `unknown command 'test'`; no Playwright browser project/configuration exists in the repository. Native CDP smoke is the corresponding release evidence.
 - Independent read-only review - correctness findings for transient scan errors, watcher recovery, missing-root reactivation, reparse-point policy, and partial-error persistence were fixed and covered by focused tests.
 - `graphify update .` - passed; ignored derived output rebuilt with 1,202 nodes, 1,662 edges, and 109 communities. No generated graph artifacts are staged.
+
+## 2026-08-31 — Plan 04 playback verification
+
+The following entries are the pre-remediation baseline retained for audit
+history; the final post-fix delivery evidence is recorded in the section
+below.
+
+- Cargo/Tauri output was redirected to `C:\CargoTarget\SpotDIY`; the
+  repository-local `src-tauri\target` remained absent.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` — passed.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` — passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` — passed:
+  107 tests, 0 failures, with the real-mpv integration gate skipped when its
+  environment variable was unset.
+- `pnpm typecheck` — passed. `pnpm test` — passed: 5 files, 24 tests.
+- `pnpm build` — passed. `pnpm exec playwright test` — passed: 6 playback
+  specs across the 1280, 1920, and 2560 projects; no console errors.
+- `pnpm lint` initially reported the packaged harness's caught-error cause;
+  `scripts/packaged-playback-smoke.mjs` now preserves `{ cause: error }`, and
+  the follow-up lint plus `node --check scripts/packaged-playback-smoke.mjs`
+  passed.
+- Real Windows mpv smoke — passed: 1 test in 4.17 seconds using local
+  `v0.41.0-dev-g41f6a6450` at `.tools\mpv\v0.41.0\mpv.exe`; transport,
+  devices, EOF, shutdown, and process exit were observed.
+- `pnpm tauri build` — passed with the external target; release executable and
+  NSIS bundle were generated under `C:\CargoTarget\SpotDIY`.
+- Packaged playback smoke — passed with `-TimeoutSeconds 20`: synthetic
+  library indexing, playback flow, graceful close, owned-mpv cleanup, restart
+  persistence, and empty transient queue. No temporary profile, relevant
+  process, or harness row remained afterward.
+- The initial whole-branch independent review returned `FAIL`; its complete
+  findings and the one-agent fix wave are recorded in the Plan 04 SDD
+  workspace. The post-remediation recheck and final delivery evidence follow
+  below.
+
+## 2026-08-31 — Plan 04 final delivery after review fix
+
+- The single fresh read-only reviewer rechecked the committed remediation in
+  `af66127`: `CRITICAL None`, `HIGH None`, `MEDIUM None`, and `VERDICT PASS`.
+  The only remaining note was low priority: add direct hostile-probe output
+  regression tests; the implementation is bounded and the note is
+  non-blocking.
+- `pnpm typecheck` — passed. `pnpm lint` — passed. `pnpm test` — passed: 6
+  files, 26 tests. `pnpm build` — passed; existing stale Browserslist and
+  Tailwind content notices remain non-fatal.
+- `pnpm exec playwright test` — passed: 9 runs across the 1280, 1920, and
+  2560 viewport projects; no console errors.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` — passed.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+  --all-features -- -D warnings` — passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` — passed:
+  117 tests, 0 failures; the real-mpv test was gated in this run.
+- `pnpm tauri build` — passed; release executable and NSIS bundle were built
+  under external `C:\CargoTarget\SpotDIY`.
+- Real Windows mpv smoke with `SPOTDIY_REAL_MPV_SMOKE=1` — passed: 1 test in
+  4.13 seconds using `.tools\mpv\v0.41.0\mpv.exe`, including transport,
+  devices, EOF, shutdown, and process exit.
+- Packaged smoke with `SPOTDIY_PACKAGED_SMOKE=1` and `-TimeoutSeconds 45` —
+  passed: playback flow, restart persistence, transient-queue boundary, and
+  owned-process cleanup. No `mpv` or `spotdiy` process remained afterward.
+- The external target contained 9,657,154,275 bytes (8.99 GiB);
+  `src-tauri\target` was absent. Recovery snapshot:
+  `C:\Users\ADMINI~1\AppData\Local\Temp\SpotDIY-Plan04-Recovery-20260831-165653`.
+- `codegraph sync .`, `codegraph status .`, and the focused
+  `PlaybackService MpvBackend AppState` query — passed; CodeGraph reports 73
+  files, 1,789 nodes, 6,421 edges, and an up-to-date index.
+- `graphify update .` — passed once after documentation finalization; derived
+  output reports 1,933 nodes, 3,493 edges, and 151 communities, built from
+  `af66127d`.

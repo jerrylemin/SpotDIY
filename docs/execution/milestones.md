@@ -4,7 +4,7 @@
 |---|---|---|---|
 | M0 — Bootstrap | Repository, toolchain, memory, research, spec, plans, shell, CI | COMPLETE | `403d923`; `verification-log.md`; release build passed. |
 | M1 — Domain and storage | Unified track model, SQLite WAL, migrations, settings, typed IPC | NOT STARTED | Plan 02. |
-| M2 — Local listening | Library scan, file metadata, mpv playback, queue | NOT STARTED | Plans 03–04, 08. |
+| M2 — Local listening | Library scan, file metadata, mpv playback, transient queue | COMPLETE | Plans 03–04 delivered and verified; persistent queue remains Plan 08. |
 | M3 — Online sources | Provider adapters, partial search, fusion, resolver | NOT STARTED | Plans 05–06. |
 | M4 — Offline workflows | Downloads, lyrics, playlists, backup, portable mode | NOT STARTED | Plans 07–09, 13. |
 | M5 — Power surfaces | Overlays, analytics, smart features, advanced visual modes | NOT STARTED | Plans 12, 14–15. |

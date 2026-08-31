@@ -5,13 +5,34 @@ repositories, domain invariants, local-library path/fingerprint/metadata/artwork
 helpers, recursive scanning, transactional reconciliation, identity
 preservation, watcher event coalescing/recovery, paging, reveal ownership,
 settings, and status IPC. Provider tests use mocks; live integrations are
-opt-in. Plan 03 has 53 Rust tests and 18 frontend tests across four files.
+opt-in. Plan 03 had 53 Rust tests and 18 frontend tests across four files
+before Plan 04 added the playback coverage below.
 
 The packaged native smoke uses a temporary synthetic folder and proves launch,
 add/initial scan, restart persistence, unchanged and forced rescans, watcher
 create/rename/delete/restore behavior, identity stability, reveal validation,
 folder removal, and preservation of synthetic media. It does not touch real
-music folders. The repository has no Playwright browser test project: the
-installed CLI reports its version, but `pnpm exec playwright test --list`
-returns `unknown command 'test'`. The packaged window was still exercised via
-its CDP endpoint; full mocked-IPC screenshot QA remains a follow-up.
+music folders. Plan 04 adds a pinned browser project using the typed E2E
+adapter; later full visual/design QA remains a follow-up.
+
+## Plan 04 verification
+
+The native Rust suite passes with 117 all-target tests, including protocol
+framing/correlation, mpv lifecycle helpers, transient queue traversal,
+managed-source resolution, state transitions, source switching, recovery,
+stale generations, EOF policy, command races, and bounded shutdown. Frontend
+quality checks pass with 26 Vitest tests plus typecheck, lint, and build.
+
+The pinned Playwright matrix runs 9 tests at 1280, 1920, and 2560
+viewport projects through a browser-only typed IPC adapter. It covers all
+playback phases, queue/repeat/shuffle/previous semantics, volume/mute/device
+controls, source labels, local-library actions, stale revisions, long titles,
+missing artwork, keyboard focus, source-switch queue identity preservation,
+and console errors.
+
+The real Windows smoke uses generated WAV media and the local
+`.tools\mpv\v0.41.0\mpv.exe` development binary. The packaged smoke uses the
+release executable, indexes two synthetic tracks, exercises transport and
+restart behavior, verifies library persistence with an empty transient queue,
+and verifies no SpotDIY-owned mpv child remains. Temporary media, profiles,
+and test database rows are cleaned after the run.

@@ -1,43 +1,45 @@
 # SpotDIY project state
 
-State date: 2026-08-30
+State date: 2026-08-31
 
 ## Repository
 
 - Branch: `main`
 - Origin: `https://github.com/jerrylemin/SpotDIY`
-- Remote state: the Plan 03 delivery is authorized and tracked in the final verification/delivery record; local `main` contains the complete milestone.
-- Working tree: Plan 03 implementation, tests, and documentation are the milestone changes; unrelated files remain untouched.
+- Plan 04 feature commit: `536617d` (`feat: add mpv playback service and queue transport`)
+- Plan 04 review-fix commit: `af66127` (`fix: harden mpv playback lifecycle and event ordering`)
+- Delivery status: implementation, independent review, final gates, and documentation closure are recorded on `main`; remote SHA verification is the final delivery check.
 
 ## Runtime
 
 - Frontend: React 19, TypeScript 6 strict, Vite 8, TanStack Router/Query, Zustand, Zod.
-- Native: Tauri 2, Rust stable MSVC, typed serialized DTOs plus runtime frontend parsing.
-- Current native commands: `get_app_status`, `get_source_capabilities`, `get_settings_snapshot`, `set_setting`, `get_library_folders`, `add_library_folders`, `remove_library_folder`, `get_library_status`, `rescan_library_folder`, `rescan_all_library_folders`, `get_library_page`, and `reveal_local_file`.
-- Current persistence: SQLite `spotdiy.sqlite3` under `%LOCALAPPDATA%\SpotDIY`, initialized through migration 2 with WAL, foreign keys, and migration-time integrity checks enabled.
-- Persisted foundation: `tracks`, `artists`, `track_artists`, `albums`, `track_sources`, `local_files`, `library_folders`, `settings_metadata`, and `schema_metadata`.
-- Rust domain/repository foundation: typed UUID identifiers, `UnifiedTrack`, source capabilities, version qualifiers, focused repositories, and transactional aggregate creation.
-- Local library: `LibraryService` owns persistent folder roots, recursive WalkDir scans, Lofty metadata, streaming SHA-256 fingerprints, content-addressed artwork, Notify watchers, missing/restore/rename reconciliation, and bounded page reads. Plan 02 legacy local rows remain preserved but are excluded until a matching discovered path promotes them into managed ownership.
+- Native: Tauri 2, Rust stable MSVC, SQLite WAL, typed serialized DTOs, and runtime frontend parsing.
+- Library: `LibraryService` owns persistent folder roots, recursive local indexing, metadata/artwork/fingerprint evidence, watcher reconciliation, and managed-source path validation.
+- Playback: `PlaybackService` is the sole serialized controller. It owns the transient ID-only queue, snapshot revisions, transport, repeat/shuffle/previous/EOF policy, source switching, recovery, and shutdown.
+- Backend: `MpvBackend` starts one external `mpv.exe` child over one fresh Windows named pipe and keeps JSON protocol/process details behind the backend boundary. Discovery is `SPOTDIY_MPV_PATH`, then PATH.
+- Tauri playback surface: `get_playback_snapshot`, `play_track`, `enqueue_track`, `play_track_next`, `toggle_play_pause`, `seek_playback`, `next_track`, `previous_track`, `set_playback_volume`, `set_playback_muted`, `set_repeat_mode`, `set_shuffle_enabled`, `get_audio_devices`, `set_audio_device`, `switch_playback_source`, `retry_playback_backend`, and `clear_playback_queue`; state events use `playback://state`.
+- Build cache: Rust/Tauri output is external at `C:\CargoTarget\SpotDIY`; `src-tauri\target` is absent and the path is not committed.
 
 ## Decisions in force
 
-- Keep a single Tauri application.
-- Keep provider-specific logic in adapters.
-- Use explicit DTOs plus Zod at the initial IPC boundary; revisit generated types after compatibility is proven.
-- Generate icons from `public/spotdiy-mark.svg`; keep provider colors secondary.
-- Keep Spotify catalog sources metadata-only; secure provider credentials belong in Windows Credential Manager, not SQLite.
-- Keep portable mode deferred to its later startup plan; the current standard opener accepts an explicit database path and rejects an unsupported persisted portable mode.
-- Keep local source identity opaque and stable across rename, restoration, and same-path replacement; path ownership is validated independently before reveal.
-- Keep one Notify watcher per enabled root, debounce event bursts, force scans for create/modify/rename, and use full reconciliation for uncertain events or watcher recovery.
-- Keep playback disabled in the Plan 03 Library UI; Plan 04 owns the playback command and service boundary.
+- Keep one Tauri application and keep provider-specific logic behind later adapter boundaries.
+- Use explicit Rust DTOs plus strict Zod parsing at the IPC boundary; frontend commands carry typed IDs and values, never local paths, pipe names, request IDs, URLs, or raw mpv JSON.
+- Permit playback only for managed, indexed, enabled, available local sources resolved by Rust through `LibraryService`.
+- Keep the Plan 04 queue transient and non-persistent; persistent queue and queue snapshots belong to Plan 08.
+- Use the exact mpv startup arguments in the Plan 04 specification, positive request IDs, bounded 1 MiB frames, six property observations, generation-scoped events, and bounded quit/kill/reap.
+- Keep standard data under `%LOCALAPPDATA%\SpotDIY`; `SPOTDIY_PACKAGED_DATA_ROOT` is a smoke-only isolation seam because Windows known-folder resolution does not follow a child `LOCALAPPDATA` override.
+- Keep provider playback/search, Source Fusion, downloads, lyrics, playlists, overlays, media keys/SMTC, portable mode, analytics, EQ, normalization, crossfade, ReplayGain, and unrelated refactors out of Plan 04.
 
-## Plan 03 verification snapshot
+## Plan 04 verification snapshot
 
-- Rust: 53 tests, formatting, clippy with warnings denied, and all-target tests pass.
-- Frontend: 18 Vitest tests across 4 files, typecheck, lint, and production build pass.
-- Native: x64 Tauri release build, packaged launch, restart persistence, incremental scan, forced same-size modification, watcher create/rename/delete/restore, reveal validation, folder removal, and media-preservation smoke pass.
-- Browser harness: `pnpm exec playwright --version` is available, but `pnpm exec playwright test --list` returns `unknown command 'test'`; no Playwright test project/configuration is present. Native CDP smoke covered the real packaged window instead.
+- Rust: 117 all-target tests pass; formatting and all-features clippy with warnings denied pass; focused playback, protocol, queue, source-resolution, and shutdown behavior is covered.
+- Frontend: typecheck, lint, 26 Vitest tests, and production build pass; PlayerBar, local-library actions, and Ctrl+K transport are functional.
+- Browser: 9 Playwright runs pass across the 1280, 1920, and 2560 viewport projects with the browser-only typed IPC adapter.
+- Native: real synthetic WAV mpv smoke passes load, position, pause/resume, seek, volume/mute, devices, EOF, shutdown, and process exit.
+- Packaged: release executable smoke passes local indexing, playback transport, graceful close, owned-mpv cleanup, restart library persistence, and empty transient queue; no temporary profile or owned process remains.
+- Review: the single fresh read-only reviewer rechecked the fixes with `PASS`; critical, high, and correctness/security medium findings are zero. One low-priority request for additional hostile-probe regression coverage remains non-blocking.
+- Development mpv: local `.tools\mpv\v0.41.0\mpv.exe`, version `v0.41.0-dev-g41f6a6450`, SHA-256 `6145E63F026451A764077D53FD60860EC9F5C2BC76DCD6E62A88967AC375453D`. The documented official Windows x64 asset verification is recorded separately in the execution log.
 
 ## Next slice
 
-Plan 04 Playback Engine: introduce the playback service/adapter boundary only after the local library source, availability, and reveal contracts remain stable. Provider search and Source Fusion stay later.
+Plan 05 — Source Adapters and Search. Do not begin Source Fusion or provider playback in that slice until its own boundary is specified.

@@ -8,3 +8,5 @@
 - [ADR-0006](docs/SpotDIY-Vault/ADRs/ADR-0006-provider-source-identity.md): typed SpotDIY IDs, provider identity uniqueness, preferred-source integrity, and Spotify metadata-only sources.
 - [ADR-0007](docs/SpotDIY-Vault/ADRs/ADR-0007-settings-storage.md): typed ordinary settings in SQLite with a secure-credential boundary and deferred portable startup.
 - [ADR-0008](docs/SpotDIY-Vault/ADRs/ADR-0008-local-library-identity-and-reconciliation.md): persistent folder ownership, opaque local identity, watcher recovery, and conservative scan reconciliation.
+- [ADR-0009](docs/SpotDIY-Vault/ADRs/ADR-0009-external-mpv-json-ipc.md): one external mpv process over bounded Windows named-pipe JSON IPC, with PlaybackService-owned policy and a transient queue.
+- Plan 04 delivery (`536617d` + `af66127`): enqueue-only backend commands, generation-safe lifecycle events, bounded protocol/queues/probing, rollback recovery, strict frontend ordering, and verified native/browser/package smoke.

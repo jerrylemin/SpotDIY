@@ -2,19 +2,37 @@
 
 ## Current boundary
 
-Plan 02, unified domain and SQLite foundation, is implemented and verified. Plan 03 Local Library is now implemented and verified locally. The native core owns typed unified-track records, WAL-backed migration initialization through schema version 2, focused repositories, durable ordinary settings, typed status/settings IPC, persistent folder roots, incremental scanning/reconciliation, metadata/artwork/fingerprints, watcher recovery, and safe reveal.
+Plans 01–03 and Plan 04 are implemented. The native core owns the typed music
+domain, SQLite/WAL storage through schema version 2, durable settings,
+persistent managed local folders, recursive indexing/reconciliation,
+metadata/artwork/fingerprint evidence, watcher recovery, typed library IPC,
+and safe reveal.
 
-Verification includes 53 Rust tests, 18 frontend tests across four files, Rust formatting and clippy, TypeScript typecheck/lint/build, a Tauri x64 release build, packaged launch, native CDP Library smoke, and Graphify synchronization. The standard launch creates the expected local database at `%LOCALAPPDATA%\\SpotDIY\\spotdiy.sqlite3`; application artwork is cached under `%LOCALAPPDATA%\\SpotDIY\\cache\\artwork`.
+Plan 04 now adds the serialized `PlaybackService`, transient ID-only queue,
+external mpv JSON IPC backend, local source resolution, transport/repeat/
+shuffle/EOF/previous policy, source switching, crash recovery, retry, typed
+playback IPC, `playback://state`, functional PlayerBar/library controls, Ctrl+K
+transport, Playwright coverage, real mpv smoke, and packaged lifecycle smoke.
 
-Portable startup, FTS-backed search, provider adapters, playback, downloads, lyrics, playlists, queue, import/export, and analytics remain later-plan work. Portable mode is represented as future metadata but rejected by the current standard startup path until its deterministic executable-location selection is implemented. Plan 03 intentionally leaves playback controls disabled.
+The implementation is consolidated in feature commit `536617d` and review-fix
+commit `af66127`. The single fresh independent review passed after the fixes;
+the final release, real-mpv, and packaged smoke gates are green.
 
-The browser test runner gap is explicit: `pnpm exec playwright --version`
-works, but `pnpm exec playwright test --list` returns `unknown command 'test'`
-because no Playwright browser project/configuration is present. Native packaged
-CDP smoke is the current desktop evidence.
+## Verification boundary
+
+117 Rust all-target tests, fmt, clippy, 26 Vitest tests, frontend
+typecheck/lint/build, 9 Playwright runs at 1280/1920/2560, real synthetic mpv
+smoke, and release packaged playback/restart/cleanup smoke pass locally. Cargo
+output is external at
+`C:\CargoTarget\SpotDIY`; the repository-local `src-tauri\target` is absent.
+
+The queue is deliberately transient. Persistent queue state and queue snapshots
+remain Plan 08 work. Provider adapters/search, Source Fusion, downloads,
+lyrics, playlists, overlays, media keys/SMTC, portable mode, analytics, EQ,
+normalization, crossfade, ReplayGain, and later visual/performance work remain
+outside this boundary.
 
 ## Next atomic task
 
-Plan 04 Playback Engine: define the playback service and adapter boundary over
-the persistent local source/availability contracts. Keep provider logic behind
-capability-bearing adapters and do not begin Source Fusion in that slice.
+Plan 05 — Source Adapters and Search. Preserve the local playback boundary and
+do not begin Source Fusion until its own specification is active.

@@ -5,8 +5,10 @@ src/                         React/TanStack frontend
   app/                       App shell and cross-cutting composition
   components/                Shared shell, icons, empty states, badges
     library/                 Folder rows, track rows, quality/provenance states
-  hooks/                     TanStack Query hooks
+    player/                  Playback controls, progress, volume, audio device menu
+  hooks/                     TanStack Query and playback hooks
     useLibrary.ts            Library status/page mutations and scan progress
+    usePlayback.ts           Playback snapshot and transport mutations
   pages/                     Route-level screens
   services/                  Typed native IPC boundary
   stores/                    Zustand interaction state
@@ -18,10 +20,12 @@ src-tauri/                   Tauri 2 Rust application
   src/db/                    SQLite initialization and focused repositories
   src/ipc/                   Serialized native DTOs and status commands
   src/library/               Folder ownership, scanner, metadata, fingerprints, artwork, watcher
+  src/media_tools/           mpv discovery, validation, version, and health
+  src/playback/              Typed playback contracts, JSON IPC, mpv backend, queue, and controller
   src/settings/              Typed durable settings repository
   capabilities/              Narrow dialog/opener permissions for the desktop window
   icons/                     Generated Windows/app icon assets
-tests/                       Frontend behavior tests
+tests/                       Frontend behavior and browser tests
 docs/superpowers/specs/      Approved design specification
 docs/superpowers/plans/      Independent implementation plans
 docs/SpotDIY-Vault/          Human-readable project memory and research
@@ -30,4 +34,14 @@ docs/execution/              Machine/human execution ledger
 public/                      Brand source assets
 ```
 
-The intended Rust service boundaries are `LibraryService`, `SearchService`, `SourceFusionService`, `SourceResolver`, `PlaybackService`, `DownloadService`, `LyricsService`, `PlaylistService`, `QueueService`, `SettingsService`, `BackupService`, `AnalyticsService`, and `MediaToolManager`. Add them only when their slice is implemented; do not create empty facade modules.
+The implemented Rust service boundaries are `LibraryService`,
+`PlaybackService`, and `MediaToolManager`, plus the existing domain, database,
+IPC, and settings modules. `PlaybackService` owns the serialized playback
+controller and transient queue; `MpvBackend` owns the external process and
+JSON IPC; `LibraryService` remains the only source-path ownership boundary.
+The Plan 04 delivery tip is `af66127`; backend commands are enqueue-only and
+generation-stamped events are filtered at the controller boundary.
+`SearchService`, `SourceFusionService`, `SourceResolver`, `DownloadService`,
+`LyricsService`, `PlaylistService`, `QueueService`, `BackupService`, and
+`AnalyticsService` remain later-plan boundaries and have no empty facade
+modules.
