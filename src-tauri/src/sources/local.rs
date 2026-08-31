@@ -13,6 +13,7 @@ use crate::search::types::{
 use crate::sources::SourceAdapter;
 
 const MAX_LOCAL_RESULTS: usize = 50;
+const MAX_LOCAL_CANDIDATES_PER_ENTITY: usize = MAX_LOCAL_RESULTS;
 const LOCAL_CAPABILITIES: SourceCapabilities = SourceCapabilities {
     search: true,
     playback: true,
@@ -174,7 +175,11 @@ impl LocalSourceAdapter {
         let mut rows = Vec::new();
         for entity in SUPPORTED_ENTITIES {
             if request.entities.contains(entity) {
-                rows.extend(self.query_entity(*entity, &pattern, limit)?);
+                rows.extend(self.query_entity(
+                    *entity,
+                    &pattern,
+                    MAX_LOCAL_CANDIDATES_PER_ENTITY,
+                )?);
             }
         }
 
@@ -205,16 +210,16 @@ impl LocalSourceAdapter {
             SearchEntityKind::Playlist => return Ok(Vec::new()),
         };
         let limit = i64::try_from(limit).map_err(|_| "local result limit is invalid".to_owned())?;
-        #[cfg(test)]
-        self.executed_queries
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.database
             .with_connection(|connection| {
                 let mut statement = connection.prepare(sql)?;
                 let rows = statement
                     .query_map(params![pattern, limit], map_local_search_row)?
-                    .collect();
-                rows
+                    .collect::<Result<Vec<_>, _>>()?;
+                #[cfg(test)]
+                self.executed_queries
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Ok(rows)
             })
             .map_err(|_| "local library search failed".to_owned())
     }
@@ -543,6 +548,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_relevance_precedes_requested_limit() {
+        let fixture = LocalFixture::new("relevance-before-limit");
+        fixture.add_track("A Signal Title Candidate", &["Artist"], None, true);
+        let (_, exact_title_source_id) = fixture.add_track("Signal", &["Artist"], None, true);
+        fixture.add_track("A Artist Candidate", &["Not Signal Artist"], None, true);
+        let (_, exact_artist_source_id) =
+            fixture.add_track("Z Artist Exact", &["Signal"], None, true);
+        fixture.add_track(
+            "A Album Candidate",
+            &["Artist"],
+            Some("Not Signal Album"),
+            true,
+        );
+        let (_, exact_album_source_id) =
+            fixture.add_track("Z Album Exact", &["Artist"], Some("Signal"), true);
+
+        let title = fixture
+            .search_with_entities(
+                "Signal",
+                SearchLens::Local,
+                vec![SearchEntityKind::Track],
+                1,
+            )
+            .await;
+        let artist = fixture
+            .search_with_entities(
+                "Signal",
+                SearchLens::Local,
+                vec![SearchEntityKind::Artist],
+                1,
+            )
+            .await;
+        let album = fixture
+            .search_with_entities(
+                "Signal",
+                SearchLens::Local,
+                vec![SearchEntityKind::Album],
+                1,
+            )
+            .await;
+
+        assert_eq!(
+            title.results[0].local_source_id,
+            Some(exact_title_source_id)
+        );
+        assert_eq!(
+            artist.results[0].local_source_id,
+            Some(exact_artist_source_id)
+        );
+        assert_eq!(
+            album.results[0].local_source_id,
+            Some(exact_album_source_id)
+        );
+    }
+
+    #[tokio::test]
     async fn local_multiple_artists_are_retained_in_order() {
         let fixture = LocalFixture::new("artists-order");
         fixture.add_track("Signal", &["First Artist", "Second Artist"], None, true);
@@ -753,17 +814,33 @@ mod tests {
             lens: SearchLens,
             limit: u8,
         ) -> crate::search::types::ProviderSearchSection {
+            self.search_with_entities(
+                query,
+                lens,
+                vec![
+                    SearchEntityKind::Track,
+                    SearchEntityKind::Artist,
+                    SearchEntityKind::Album,
+                ],
+                limit,
+            )
+            .await
+        }
+
+        async fn search_with_entities(
+            &self,
+            query: &str,
+            lens: SearchLens,
+            entities: Vec<SearchEntityKind>,
+            limit: u8,
+        ) -> crate::search::types::ProviderSearchSection {
             self.adapter
                 .search(
                     ProviderSearchRequest {
                         search_id: SearchId::new(),
                         query: query.to_owned(),
                         lens,
-                        entities: vec![
-                            SearchEntityKind::Track,
-                            SearchEntityKind::Artist,
-                            SearchEntityKind::Album,
-                        ],
+                        entities,
                         sort_field: SearchSortField::Relevance,
                         sort_direction: SearchSortDirection::Descending,
                         limit,
