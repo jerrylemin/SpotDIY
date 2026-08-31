@@ -6,6 +6,14 @@ pub mod media_tools;
 pub mod playback;
 pub mod queue;
 pub mod settings;
+pub mod search {
+    pub mod sort;
+    pub mod types;
+
+    pub use sort::all_provider_kinds_for_lens;
+    pub use types::*;
+}
+pub mod sources;
 
 use db::{standard_database_path, Database};
 use ipc::{app_status, source_capabilities, AppStatus, ProviderCapabilities};
