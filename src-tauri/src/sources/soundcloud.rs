@@ -1,19 +1,17 @@
+use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
-
-use serde_json::{Map, Value};
 
 use crate::domain::{ProviderKind, SourceCapabilities};
-use crate::media_tools::{MediaToolManager, YtDlpToolStatus};
 use crate::search::types::{
-    EngagementKind, ProviderRuntimeStatus, ProviderSearchError, ProviderSearchErrorCode,
-    ProviderSearchRequest, ProviderSearchSection, ProviderSearchState, SearchCancellation,
-    SearchEntityKind, SearchResult,
+    EngagementKind, ProviderRuntimeStatus, ProviderSearchErrorCode, ProviderSearchRequest,
+    ProviderSearchSection, SearchCancellation, SearchEntityKind, SearchResult,
 };
-use crate::sources::yt_dlp::{TokioYtDlpProcessRunner, YtDlpProcessError, YtDlpProcessRunner};
-use crate::sources::{sanitize_artwork_url, validate_provider_url, SourceAdapter};
+use crate::sources::{
+    cancelled_provider_section, failed_provider_section, is_cancelled, ready_provider_section,
+    sanitize_artwork_url, validate_provider_url, SourceAdapter, YtDlpAdapterRuntime,
+};
 
 const SUPPORTED_ENTITIES: &[SearchEntityKind] = &[SearchEntityKind::Track];
 const SOUNDCLOUD_CAPABILITIES: SourceCapabilities = SourceCapabilities {
@@ -29,37 +27,24 @@ const SOUNDCLOUD_CAPABILITIES: SourceCapabilities = SourceCapabilities {
 };
 
 pub struct SoundcloudSourceAdapter {
-    media_tools: MediaToolManager,
-    runner: Arc<dyn YtDlpProcessRunner>,
-    #[cfg(test)]
-    test_status: Option<YtDlpToolStatus>,
+    runtime: YtDlpAdapterRuntime,
 }
 
 impl SoundcloudSourceAdapter {
-    pub fn new(media_tools: MediaToolManager) -> Self {
+    pub fn new(media_tools: crate::media_tools::MediaToolManager) -> Self {
         Self {
-            media_tools,
-            runner: Arc::new(TokioYtDlpProcessRunner::default()),
-            #[cfg(test)]
-            test_status: None,
+            runtime: YtDlpAdapterRuntime::new(media_tools),
         }
     }
 
     #[cfg(test)]
-    fn with_runner_for_tests(status: YtDlpToolStatus, runner: Arc<dyn YtDlpProcessRunner>) -> Self {
+    fn with_runner_for_tests(
+        status: crate::media_tools::YtDlpToolStatus,
+        runner: std::sync::Arc<dyn crate::sources::yt_dlp::YtDlpProcessRunner>,
+    ) -> Self {
         Self {
-            media_tools: MediaToolManager::with_yt_dlp_override("test-only-yt-dlp".into()),
-            runner,
-            test_status: Some(status),
+            runtime: YtDlpAdapterRuntime::with_runner_for_tests(status, runner),
         }
-    }
-
-    fn tool_status(&self) -> YtDlpToolStatus {
-        #[cfg(test)]
-        if let Some(status) = &self.test_status {
-            return status.clone();
-        }
-        self.media_tools.yt_dlp_status()
     }
 }
 
@@ -77,7 +62,7 @@ impl SourceAdapter for SoundcloudSourceAdapter {
     }
 
     fn runtime_status(&self) -> ProviderRuntimeStatus {
-        self.tool_status().status
+        self.runtime.runtime_status()
     }
 
     fn search(
@@ -86,54 +71,36 @@ impl SourceAdapter for SoundcloudSourceAdapter {
         cancellation: SearchCancellation,
     ) -> Pin<Box<dyn Future<Output = ProviderSearchSection> + Send + '_>> {
         Box::pin(async move {
-            if *cancellation.subscribe().borrow() {
-                return cancelled_section();
+            if is_cancelled(&cancellation) {
+                return cancelled_provider_section(ProviderKind::Soundcloud);
             }
             if request.limit == 0
                 || request.query.trim().is_empty()
                 || !request.entities.contains(&SearchEntityKind::Track)
             {
-                return ready_section(Vec::new());
+                return ready_provider_section(ProviderKind::Soundcloud, Vec::new());
             }
-
-            let status = self.tool_status();
-            let Some(executable) = ready_executable(&status) else {
-                return status_failure_section(status.status);
-            };
-            let args = soundcloud_search_args(request.query.trim());
             match self
-                .runner
-                .run(&executable, &args, cancellation.clone())
+                .runtime
+                .execute_structured_search(
+                    ProviderKind::Soundcloud,
+                    request.query.trim(),
+                    cancellation,
+                )
                 .await
             {
-                Ok(_output) if *cancellation.subscribe().borrow() => cancelled_section(),
-                Ok(output) => {
-                    match parse_soundcloud_results(&output.stdout, usize::from(request.limit)) {
-                        Ok(results) => ready_section(results),
-                        Err(error) => failed_section(
-                            error,
-                            Some("yt-dlp returned an invalid structured response".into()),
-                        ),
-                    }
-                }
-                Err(error) => process_failure_section(error),
+                Ok(stdout) => match parse_soundcloud_results(&stdout, usize::from(request.limit)) {
+                    Ok(results) => ready_provider_section(ProviderKind::Soundcloud, results),
+                    Err(error) => failed_provider_section(
+                        ProviderKind::Soundcloud,
+                        error,
+                        Some("yt-dlp returned an invalid structured response".into()),
+                    ),
+                },
+                Err(section) => section,
             }
         })
     }
-}
-
-fn soundcloud_search_args(query: &str) -> Vec<String> {
-    [
-        "--no-config".to_owned(),
-        "--dump-single-json".to_owned(),
-        "--flat-playlist".to_owned(),
-        "--skip-download".to_owned(),
-        "--no-warnings".to_owned(),
-        "--socket-timeout".to_owned(),
-        "10".to_owned(),
-        format!("scsearch25:{query}"),
-    ]
-    .to_vec()
 }
 
 fn parse_soundcloud_results(
@@ -162,8 +129,7 @@ fn parse_soundcloud_results(
         if id.is_empty() || title.is_empty() || !seen_ids.insert(id.to_owned()) {
             continue;
         }
-        let engagement_count =
-            unsigned(entry, "play_count").or_else(|| unsigned(entry, "view_count"));
+        let engagement_count = unsigned(entry, "play_count");
         results.push(SearchResult {
             provider: ProviderKind::Soundcloud,
             entity_kind: SearchEntityKind::Track,
@@ -187,13 +153,6 @@ fn parse_soundcloud_results(
         }
     }
     Ok(results)
-}
-
-fn ready_executable(status: &YtDlpToolStatus) -> Option<String> {
-    (status.status == ProviderRuntimeStatus::Ready)
-        .then_some(status.executable.as_ref())
-        .flatten()
-        .map(|path| path.to_string_lossy().into_owned())
 }
 
 fn string<'a>(entry: &'a Map<String, Value>, field: &str) -> Option<&'a str> {
@@ -227,85 +186,6 @@ fn safe_canonical_url(
     provider: ProviderKind,
 ) -> Option<crate::search::types::SafeUrl> {
     string(entry, "webpage_url").and_then(|url| validate_provider_url(provider, url).ok())
-}
-
-fn ready_section(results: Vec<SearchResult>) -> ProviderSearchSection {
-    ProviderSearchSection {
-        provider: ProviderKind::Soundcloud,
-        state: ProviderSearchState::Ready,
-        results,
-        error: None,
-    }
-}
-
-fn cancelled_section() -> ProviderSearchSection {
-    ProviderSearchSection {
-        provider: ProviderKind::Soundcloud,
-        state: ProviderSearchState::Cancelled,
-        results: Vec::new(),
-        error: Some(ProviderSearchError {
-            code: ProviderSearchErrorCode::Cancelled,
-            detail: None,
-            retry_after_seconds: None,
-        }),
-    }
-}
-
-fn status_failure_section(status: ProviderRuntimeStatus) -> ProviderSearchSection {
-    let (code, detail) = match status {
-        ProviderRuntimeStatus::Missing => (
-            ProviderSearchErrorCode::Unavailable,
-            "yt-dlp is unavailable",
-        ),
-        ProviderRuntimeStatus::Unsupported => (
-            ProviderSearchErrorCode::Unavailable,
-            "yt-dlp is unsupported",
-        ),
-        _ => (ProviderSearchErrorCode::Failed, "yt-dlp is unavailable"),
-    };
-    failed_section(code, Some(detail.to_owned()))
-}
-
-fn process_failure_section(error: YtDlpProcessError) -> ProviderSearchSection {
-    if error == YtDlpProcessError::Cancelled {
-        return cancelled_section();
-    }
-    let code = match &error {
-        YtDlpProcessError::NonZeroExit { stderr, .. } if is_rate_limited(stderr) => {
-            ProviderSearchErrorCode::RateLimited
-        }
-        _ => error.provider_error_code(),
-    };
-    let detail = match error {
-        YtDlpProcessError::NonZeroExit { stderr, .. } => redacted_diagnostic(&stderr),
-        _ => Some(error.to_string()),
-    };
-    failed_section(code, detail)
-}
-
-fn failed_section(code: ProviderSearchErrorCode, detail: Option<String>) -> ProviderSearchSection {
-    ProviderSearchSection {
-        provider: ProviderKind::Soundcloud,
-        state: ProviderSearchState::Failed,
-        results: Vec::new(),
-        error: Some(ProviderSearchError {
-            code,
-            detail,
-            retry_after_seconds: None,
-        }),
-    }
-}
-
-fn is_rate_limited(stderr: &str) -> bool {
-    let lower = stderr.to_ascii_lowercase();
-    lower.contains("429") || lower.contains("rate limit") || lower.contains("too many requests")
-}
-
-fn redacted_diagnostic(stderr: &str) -> Option<String> {
-    if stderr.trim().is_empty() {
-        return Some("yt-dlp search failed".to_owned());
-    }
-    Some("yt-dlp returned a redacted provider error".to_owned())
 }
 
 #[cfg(test)]
@@ -379,8 +259,24 @@ mod tests {
         }
     }
 
+    fn status(status: ProviderRuntimeStatus) -> YtDlpToolStatus {
+        YtDlpToolStatus {
+            status,
+            executable: None,
+            version: None,
+            detail: Some("provider diagnostic".into()),
+        }
+    }
+
     fn soundcloud_with(runner: FakeYtDlpRunner) -> SoundcloudSourceAdapter {
         SoundcloudSourceAdapter::with_runner_for_tests(ready_status(), Arc::new(runner))
+    }
+
+    fn soundcloud_with_status(
+        tool_status: YtDlpToolStatus,
+        runner: FakeYtDlpRunner,
+    ) -> SoundcloudSourceAdapter {
+        SoundcloudSourceAdapter::with_runner_for_tests(tool_status, Arc::new(runner))
     }
 
     fn test_request() -> ProviderSearchRequest {
@@ -418,7 +314,7 @@ mod tests {
     #[tokio::test]
     async fn soundcloud_plays_map_to_engagement() {
         let section = soundcloud_with(FakeYtDlpRunner::json(
-            r#"{"entries":[{"id":"s1","title":"Signal","view_count":99}]}"#,
+            r#"{"entries":[{"id":"s1","title":"Signal","play_count":99}]}"#,
         ))
         .search(test_request(), SearchCancellation::new())
         .await;
@@ -428,6 +324,18 @@ mod tests {
             section.results[0].engagement_kind,
             Some(EngagementKind::Plays)
         );
+    }
+
+    #[tokio::test]
+    async fn soundcloud_view_count_is_not_labeled_as_plays() {
+        let section = soundcloud_with(FakeYtDlpRunner::json(
+            r#"{"entries":[{"id":"s1","title":"Signal","view_count":99}]}"#,
+        ))
+        .search(test_request(), SearchCancellation::new())
+        .await;
+
+        assert_eq!(section.results[0].engagement_count, None);
+        assert_eq!(section.results[0].engagement_kind, None);
     }
 
     #[tokio::test]
@@ -464,6 +372,26 @@ mod tests {
 
         assert_eq!(section.state, ProviderSearchState::Ready);
         assert!(section.results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn soundcloud_deduplicates_before_capping_and_preserves_first_rank() {
+        let section = soundcloud_with(FakeYtDlpRunner::json(
+            r#"{"entries":[{"id":"s1","title":"First"},{"id":"s1","title":"Duplicate"},{"id":"s2","title":"Second"},{"id":"s3","title":"Third"}]}"#,
+        ))
+        .search(test_request(), SearchCancellation::new())
+        .await;
+
+        assert_eq!(
+            section
+                .results
+                .iter()
+                .map(|result| result.provider_item_id.as_str())
+                .collect::<Vec<_>>(),
+            ["s1", "s2"]
+        );
+        assert_eq!(section.results[0].original_rank, 0);
+        assert_eq!(section.results[1].original_rank, 2);
     }
 
     #[tokio::test]
@@ -504,6 +432,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn soundcloud_unsupported_version() {
+        let section = soundcloud_with_status(
+            status(ProviderRuntimeStatus::Unsupported),
+            FakeYtDlpRunner::json(r#"{"entries":[]}"#),
+        )
+        .search(test_request(), SearchCancellation::new())
+        .await;
+
+        assert_eq!(section.state, ProviderSearchState::Failed);
+        assert_eq!(
+            section.error.unwrap().code,
+            ProviderSearchErrorCode::Unavailable
+        );
+    }
+
+    #[tokio::test]
     async fn soundcloud_cancellation() {
         let section = soundcloud_with(FakeYtDlpRunner::failure(YtDlpProcessError::Cancelled))
             .search(test_request(), SearchCancellation::new())
@@ -540,6 +484,19 @@ mod tests {
         assert_eq!(
             section.error.unwrap().code,
             ProviderSearchErrorCode::Unavailable
+        );
+    }
+
+    #[tokio::test]
+    async fn soundcloud_output_too_large() {
+        let section = soundcloud_with(FakeYtDlpRunner::failure(YtDlpProcessError::StdoutTooLarge))
+            .search(test_request(), SearchCancellation::new())
+            .await;
+
+        assert_eq!(section.state, ProviderSearchState::Failed);
+        assert_eq!(
+            section.error.unwrap().code,
+            ProviderSearchErrorCode::InvalidResponse
         );
     }
 }

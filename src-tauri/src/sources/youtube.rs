@@ -1,19 +1,17 @@
+use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
-
-use serde_json::{Map, Value};
 
 use crate::domain::{ProviderKind, SourceCapabilities};
-use crate::media_tools::{MediaToolManager, YtDlpToolStatus};
 use crate::search::types::{
-    EngagementKind, ProviderRuntimeStatus, ProviderSearchError, ProviderSearchErrorCode,
-    ProviderSearchRequest, ProviderSearchSection, ProviderSearchState, SearchCancellation,
-    SearchEntityKind, SearchResult,
+    EngagementKind, ProviderRuntimeStatus, ProviderSearchErrorCode, ProviderSearchRequest,
+    ProviderSearchSection, SearchCancellation, SearchEntityKind, SearchResult,
 };
-use crate::sources::yt_dlp::{TokioYtDlpProcessRunner, YtDlpProcessError, YtDlpProcessRunner};
-use crate::sources::{sanitize_artwork_url, validate_provider_url, SourceAdapter};
+use crate::sources::{
+    cancelled_provider_section, failed_provider_section, is_cancelled, ready_provider_section,
+    sanitize_artwork_url, validate_provider_url, SourceAdapter, YtDlpAdapterRuntime,
+};
 
 const SUPPORTED_ENTITIES: &[SearchEntityKind] = &[SearchEntityKind::Track];
 const YOUTUBE_CAPABILITIES: SourceCapabilities = SourceCapabilities {
@@ -29,37 +27,24 @@ const YOUTUBE_CAPABILITIES: SourceCapabilities = SourceCapabilities {
 };
 
 pub struct YoutubeSourceAdapter {
-    media_tools: MediaToolManager,
-    runner: Arc<dyn YtDlpProcessRunner>,
-    #[cfg(test)]
-    test_status: Option<YtDlpToolStatus>,
+    runtime: YtDlpAdapterRuntime,
 }
 
 impl YoutubeSourceAdapter {
-    pub fn new(media_tools: MediaToolManager) -> Self {
+    pub fn new(media_tools: crate::media_tools::MediaToolManager) -> Self {
         Self {
-            media_tools,
-            runner: Arc::new(TokioYtDlpProcessRunner::default()),
-            #[cfg(test)]
-            test_status: None,
+            runtime: YtDlpAdapterRuntime::new(media_tools),
         }
     }
 
     #[cfg(test)]
-    fn with_runner_for_tests(status: YtDlpToolStatus, runner: Arc<dyn YtDlpProcessRunner>) -> Self {
+    fn with_runner_for_tests(
+        status: crate::media_tools::YtDlpToolStatus,
+        runner: std::sync::Arc<dyn crate::sources::yt_dlp::YtDlpProcessRunner>,
+    ) -> Self {
         Self {
-            media_tools: MediaToolManager::with_yt_dlp_override("test-only-yt-dlp".into()),
-            runner,
-            test_status: Some(status),
+            runtime: YtDlpAdapterRuntime::with_runner_for_tests(status, runner),
         }
-    }
-
-    fn tool_status(&self) -> YtDlpToolStatus {
-        #[cfg(test)]
-        if let Some(status) = &self.test_status {
-            return status.clone();
-        }
-        self.media_tools.yt_dlp_status()
     }
 }
 
@@ -77,7 +62,7 @@ impl SourceAdapter for YoutubeSourceAdapter {
     }
 
     fn runtime_status(&self) -> ProviderRuntimeStatus {
-        self.tool_status().status
+        self.runtime.runtime_status()
     }
 
     fn search(
@@ -86,54 +71,36 @@ impl SourceAdapter for YoutubeSourceAdapter {
         cancellation: SearchCancellation,
     ) -> Pin<Box<dyn Future<Output = ProviderSearchSection> + Send + '_>> {
         Box::pin(async move {
-            if *cancellation.subscribe().borrow() {
-                return cancelled_section();
+            if is_cancelled(&cancellation) {
+                return cancelled_provider_section(ProviderKind::Youtube);
             }
             if request.limit == 0
                 || request.query.trim().is_empty()
                 || !request.entities.contains(&SearchEntityKind::Track)
             {
-                return ready_section(Vec::new());
+                return ready_provider_section(ProviderKind::Youtube, Vec::new());
             }
-
-            let status = self.tool_status();
-            let Some(executable) = ready_executable(&status) else {
-                return status_failure_section(status.status);
-            };
-            let args = youtube_search_args(request.query.trim());
             match self
-                .runner
-                .run(&executable, &args, cancellation.clone())
+                .runtime
+                .execute_structured_search(
+                    ProviderKind::Youtube,
+                    request.query.trim(),
+                    cancellation,
+                )
                 .await
             {
-                Ok(_output) if *cancellation.subscribe().borrow() => cancelled_section(),
-                Ok(output) => {
-                    match parse_youtube_results(&output.stdout, usize::from(request.limit)) {
-                        Ok(results) => ready_section(results),
-                        Err(error) => failed_section(
-                            error,
-                            Some("yt-dlp returned an invalid structured response".into()),
-                        ),
-                    }
-                }
-                Err(error) => process_failure_section(error),
+                Ok(stdout) => match parse_youtube_results(&stdout, usize::from(request.limit)) {
+                    Ok(results) => ready_provider_section(ProviderKind::Youtube, results),
+                    Err(error) => failed_provider_section(
+                        ProviderKind::Youtube,
+                        error,
+                        Some("yt-dlp returned an invalid structured response".into()),
+                    ),
+                },
+                Err(section) => section,
             }
         })
     }
-}
-
-fn youtube_search_args(query: &str) -> Vec<String> {
-    [
-        "--no-config".to_owned(),
-        "--dump-single-json".to_owned(),
-        "--flat-playlist".to_owned(),
-        "--skip-download".to_owned(),
-        "--no-warnings".to_owned(),
-        "--socket-timeout".to_owned(),
-        "10".to_owned(),
-        format!("ytsearch25:{query}"),
-    ]
-    .to_vec()
 }
 
 fn parse_youtube_results(
@@ -188,13 +155,6 @@ fn parse_youtube_results(
     Ok(results)
 }
 
-fn ready_executable(status: &YtDlpToolStatus) -> Option<String> {
-    (status.status == ProviderRuntimeStatus::Ready)
-        .then_some(status.executable.as_ref())
-        .flatten()
-        .map(|path| path.to_string_lossy().into_owned())
-}
-
 fn string<'a>(entry: &'a Map<String, Value>, field: &str) -> Option<&'a str> {
     entry
         .get(field)
@@ -226,85 +186,6 @@ fn safe_canonical_url(
     provider: ProviderKind,
 ) -> Option<crate::search::types::SafeUrl> {
     string(entry, "webpage_url").and_then(|url| validate_provider_url(provider, url).ok())
-}
-
-fn ready_section(results: Vec<SearchResult>) -> ProviderSearchSection {
-    ProviderSearchSection {
-        provider: ProviderKind::Youtube,
-        state: ProviderSearchState::Ready,
-        results,
-        error: None,
-    }
-}
-
-fn cancelled_section() -> ProviderSearchSection {
-    ProviderSearchSection {
-        provider: ProviderKind::Youtube,
-        state: ProviderSearchState::Cancelled,
-        results: Vec::new(),
-        error: Some(ProviderSearchError {
-            code: ProviderSearchErrorCode::Cancelled,
-            detail: None,
-            retry_after_seconds: None,
-        }),
-    }
-}
-
-fn status_failure_section(status: ProviderRuntimeStatus) -> ProviderSearchSection {
-    let (code, detail) = match status {
-        ProviderRuntimeStatus::Missing => (
-            ProviderSearchErrorCode::Unavailable,
-            "yt-dlp is unavailable",
-        ),
-        ProviderRuntimeStatus::Unsupported => (
-            ProviderSearchErrorCode::Unavailable,
-            "yt-dlp is unsupported",
-        ),
-        _ => (ProviderSearchErrorCode::Failed, "yt-dlp is unavailable"),
-    };
-    failed_section(code, Some(detail.to_owned()))
-}
-
-fn process_failure_section(error: YtDlpProcessError) -> ProviderSearchSection {
-    if error == YtDlpProcessError::Cancelled {
-        return cancelled_section();
-    }
-    let code = match &error {
-        YtDlpProcessError::NonZeroExit { stderr, .. } if is_rate_limited(stderr) => {
-            ProviderSearchErrorCode::RateLimited
-        }
-        _ => error.provider_error_code(),
-    };
-    let detail = match error {
-        YtDlpProcessError::NonZeroExit { stderr, .. } => redacted_diagnostic(&stderr),
-        _ => Some(error.to_string()),
-    };
-    failed_section(code, detail)
-}
-
-fn failed_section(code: ProviderSearchErrorCode, detail: Option<String>) -> ProviderSearchSection {
-    ProviderSearchSection {
-        provider: ProviderKind::Youtube,
-        state: ProviderSearchState::Failed,
-        results: Vec::new(),
-        error: Some(ProviderSearchError {
-            code,
-            detail,
-            retry_after_seconds: None,
-        }),
-    }
-}
-
-fn is_rate_limited(stderr: &str) -> bool {
-    let lower = stderr.to_ascii_lowercase();
-    lower.contains("429") || lower.contains("rate limit") || lower.contains("too many requests")
-}
-
-fn redacted_diagnostic(stderr: &str) -> Option<String> {
-    if stderr.trim().is_empty() {
-        return Some("yt-dlp search failed".to_owned());
-    }
-    Some("yt-dlp returned a redacted provider error".to_owned())
 }
 
 #[cfg(test)]

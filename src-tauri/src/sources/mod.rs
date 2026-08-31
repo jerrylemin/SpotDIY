@@ -6,8 +6,14 @@ pub use crate::media_tools::yt_dlp;
 pub use local::LocalSourceAdapter;
 pub use traits::SourceAdapter;
 
+use std::sync::Arc;
+
 use crate::domain::ProviderKind;
-use crate::search::types::SafeUrl;
+use crate::media_tools::{MediaToolManager, YtDlpToolStatus};
+use crate::search::types::{
+    ProviderRuntimeStatus, ProviderSearchError, ProviderSearchErrorCode, ProviderSearchSection,
+    ProviderSearchState, SafeUrl, SearchCancellation, SearchResult,
+};
 use thiserror::Error;
 use url::Url;
 
@@ -57,6 +63,195 @@ pub fn sanitize_artwork_url(value: &str) -> Option<SafeUrl> {
         ))
     .then(|| SafeUrl::from_url(url))
     .flatten()
+}
+
+pub(crate) struct YtDlpAdapterRuntime {
+    media_tools: MediaToolManager,
+    runner: Arc<dyn yt_dlp::YtDlpProcessRunner>,
+    #[cfg(test)]
+    test_status: Option<YtDlpToolStatus>,
+}
+
+impl YtDlpAdapterRuntime {
+    pub(crate) fn new(media_tools: MediaToolManager) -> Self {
+        Self {
+            media_tools,
+            runner: Arc::new(yt_dlp::TokioYtDlpProcessRunner::default()),
+            #[cfg(test)]
+            test_status: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_runner_for_tests(
+        status: YtDlpToolStatus,
+        runner: Arc<dyn yt_dlp::YtDlpProcessRunner>,
+    ) -> Self {
+        Self {
+            media_tools: MediaToolManager::with_yt_dlp_override("test-only-yt-dlp".into()),
+            runner,
+            test_status: Some(status),
+        }
+    }
+
+    pub(crate) fn runtime_status(&self) -> ProviderRuntimeStatus {
+        self.tool_status().status
+    }
+
+    fn tool_status(&self) -> YtDlpToolStatus {
+        #[cfg(test)]
+        if let Some(status) = &self.test_status {
+            return status.clone();
+        }
+        self.media_tools.yt_dlp_status()
+    }
+
+    pub(crate) async fn execute_structured_search(
+        &self,
+        provider: ProviderKind,
+        query: &str,
+        cancellation: SearchCancellation,
+    ) -> Result<String, ProviderSearchSection> {
+        if is_cancelled(&cancellation) {
+            return Err(cancelled_provider_section(provider));
+        }
+        let status = self.tool_status();
+        let Some(executable) = ready_executable(&status) else {
+            return Err(tool_status_failure_section(provider, status.status));
+        };
+        let args = structured_search_args(provider, query);
+        match self
+            .runner
+            .run(&executable, &args, cancellation.clone())
+            .await
+        {
+            Ok(_output) if is_cancelled(&cancellation) => Err(cancelled_provider_section(provider)),
+            Ok(output) => Ok(output.stdout),
+            Err(error) => Err(process_failure_section(provider, error)),
+        }
+    }
+}
+
+pub(crate) fn ready_provider_section(
+    provider: ProviderKind,
+    results: Vec<SearchResult>,
+) -> ProviderSearchSection {
+    ProviderSearchSection {
+        provider,
+        state: ProviderSearchState::Ready,
+        results,
+        error: None,
+    }
+}
+
+pub(crate) fn failed_provider_section(
+    provider: ProviderKind,
+    code: ProviderSearchErrorCode,
+    detail: Option<String>,
+) -> ProviderSearchSection {
+    ProviderSearchSection {
+        provider,
+        state: ProviderSearchState::Failed,
+        results: Vec::new(),
+        error: Some(ProviderSearchError {
+            code,
+            detail,
+            retry_after_seconds: None,
+        }),
+    }
+}
+
+pub(crate) fn cancelled_provider_section(provider: ProviderKind) -> ProviderSearchSection {
+    ProviderSearchSection {
+        provider,
+        state: ProviderSearchState::Cancelled,
+        results: Vec::new(),
+        error: Some(ProviderSearchError {
+            code: ProviderSearchErrorCode::Cancelled,
+            detail: None,
+            retry_after_seconds: None,
+        }),
+    }
+}
+
+pub(crate) fn is_cancelled(cancellation: &SearchCancellation) -> bool {
+    *cancellation.subscribe().borrow()
+}
+
+fn structured_search_args(provider: ProviderKind, query: &str) -> Vec<String> {
+    let expression = match provider {
+        ProviderKind::Youtube => format!("ytsearch25:{query}"),
+        ProviderKind::Soundcloud => format!("scsearch25:{query}"),
+        ProviderKind::Local | ProviderKind::Spotify => unreachable!("yt-dlp search is online-only"),
+    };
+    [
+        "--no-config".to_owned(),
+        "--dump-single-json".to_owned(),
+        "--flat-playlist".to_owned(),
+        "--skip-download".to_owned(),
+        "--no-warnings".to_owned(),
+        "--socket-timeout".to_owned(),
+        "10".to_owned(),
+        expression,
+    ]
+    .to_vec()
+}
+
+fn ready_executable(status: &YtDlpToolStatus) -> Option<String> {
+    (status.status == ProviderRuntimeStatus::Ready)
+        .then_some(status.executable.as_ref())
+        .flatten()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+fn tool_status_failure_section(
+    provider: ProviderKind,
+    status: ProviderRuntimeStatus,
+) -> ProviderSearchSection {
+    let (code, detail) = match status {
+        ProviderRuntimeStatus::Missing => (
+            ProviderSearchErrorCode::Unavailable,
+            "yt-dlp is unavailable",
+        ),
+        ProviderRuntimeStatus::Unsupported => (
+            ProviderSearchErrorCode::Unavailable,
+            "yt-dlp is unsupported",
+        ),
+        _ => (ProviderSearchErrorCode::Failed, "yt-dlp is unavailable"),
+    };
+    failed_provider_section(provider, code, Some(detail.to_owned()))
+}
+
+fn process_failure_section(
+    provider: ProviderKind,
+    error: yt_dlp::YtDlpProcessError,
+) -> ProviderSearchSection {
+    if error == yt_dlp::YtDlpProcessError::Cancelled {
+        return cancelled_provider_section(provider);
+    }
+    let code = match &error {
+        yt_dlp::YtDlpProcessError::NonZeroExit { stderr, .. } if is_rate_limited(stderr) => {
+            ProviderSearchErrorCode::RateLimited
+        }
+        _ => error.provider_error_code(),
+    };
+    let detail = match error {
+        yt_dlp::YtDlpProcessError::NonZeroExit { stderr, .. } => redacted_diagnostic(&stderr),
+        _ => Some(error.to_string()),
+    };
+    failed_provider_section(provider, code, detail)
+}
+
+fn is_rate_limited(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    lower.contains("429") || lower.contains("rate limit") || lower.contains("too many requests")
+}
+
+fn redacted_diagnostic(stderr: &str) -> Option<String> {
+    if stderr.trim().is_empty() {
+        return Some("yt-dlp search failed".to_owned());
+    }
+    Some("yt-dlp returned a redacted provider error".to_owned())
 }
 
 #[cfg(test)]
