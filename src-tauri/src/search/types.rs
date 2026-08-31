@@ -5,6 +5,10 @@ use tokio::sync::watch;
 use url::Url;
 use uuid::Uuid;
 
+#[path = "mod.rs"]
+mod search;
+pub use search::*;
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct SearchId(Uuid);
@@ -21,7 +25,7 @@ impl Default for SearchId {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchLens {
     All,
@@ -35,7 +39,7 @@ pub enum SearchLens {
     Spotify,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchEntityKind {
     Track,
@@ -44,7 +48,7 @@ pub enum SearchEntityKind {
     Playlist,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchSortField {
     Relevance,
@@ -57,7 +61,7 @@ pub enum SearchSortField {
     AudioQuality,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchSortDirection {
     Ascending,
@@ -366,6 +370,28 @@ pub struct SearchCompleted {
     pub search_id: SearchId,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSearchEvent {
+    pub search_id: SearchId,
+    pub section: ProviderSearchSection,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SearchEvent {
+    ProviderSection(ProviderSearchEvent),
+    Completed(SearchCompleted),
+}
+
+pub type SearchEventSink = std::sync::Arc<dyn Fn(SearchEvent) + Send + Sync + 'static>;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchProviderStatus {
+    pub provider: ProviderKind,
+    pub runtime_status: ProviderRuntimeStatus,
+}
+
 #[derive(Clone, Debug)]
 pub struct SearchCancellation {
     sender: watch::Sender<bool>,
@@ -377,7 +403,7 @@ impl SearchCancellation {
         Self { sender }
     }
     pub fn cancel(&self) {
-        let _ = self.sender.send(true);
+        self.sender.send_replace(true);
     }
     pub fn subscribe(&self) -> watch::Receiver<bool> {
         self.sender.subscribe()

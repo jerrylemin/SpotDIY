@@ -1,8 +1,12 @@
-use super::types::{SearchEntityKind, SearchLens};
-use crate::domain::ProviderKind;
+use super::types::{
+    EngagementKind, SearchEntityKind, SearchLens, SearchResult, SearchSortDirection,
+    SearchSortField,
+};
+use crate::domain::{ProviderKind, SourceCapabilities};
+use std::cmp::Ordering;
 
 pub fn all_provider_kinds_for_lens(lens: SearchLens) -> &'static [ProviderKind] {
-    const ONLINE: &[ProviderKind] = &[
+    const TRACK_PROVIDERS: &[ProviderKind] = &[
         ProviderKind::Local,
         ProviderKind::Youtube,
         ProviderKind::Soundcloud,
@@ -16,11 +20,8 @@ pub fn all_provider_kinds_for_lens(lens: SearchLens) -> &'static [ProviderKind] 
         SearchLens::Youtube => YOUTUBE,
         SearchLens::Soundcloud => SOUNDCLOUD,
         SearchLens::Spotify => SPOTIFY,
-        SearchLens::All
-        | SearchLens::Tracks
-        | SearchLens::Artists
-        | SearchLens::Albums
-        | SearchLens::Playlists => ONLINE,
+        SearchLens::All | SearchLens::Tracks | SearchLens::Playlists => TRACK_PROVIDERS,
+        SearchLens::Artists | SearchLens::Albums => LOCAL,
     }
 }
 
@@ -48,6 +49,100 @@ pub fn entities_for_lens(lens: SearchLens) -> &'static [SearchEntityKind] {
     }
 }
 
+pub(crate) fn sort_provider_results(
+    provider: ProviderKind,
+    capabilities: SourceCapabilities,
+    results: &mut [SearchResult],
+    field: SearchSortField,
+    direction: SearchSortDirection,
+) {
+    if !sort_is_supported(provider, capabilities, results, field) {
+        results.sort_by(relevance_order);
+        return;
+    }
+    results.sort_by(|left, right| {
+        let primary = match field {
+            SearchSortField::Relevance => Ordering::Equal,
+            SearchSortField::Popularity => {
+                nullable_order(left.engagement_count, right.engagement_count, direction)
+            }
+            SearchSortField::Newest | SearchSortField::Oldest => nullable_order_by(
+                left.published_at.as_ref().map(|date| date.value()),
+                right.published_at.as_ref().map(|date| date.value()),
+                direction,
+            ),
+            SearchSortField::Duration => {
+                nullable_order(left.duration_ms, right.duration_ms, direction)
+            }
+            SearchSortField::DateAdded
+            | SearchSortField::Downloaded
+            | SearchSortField::AudioQuality => Ordering::Equal,
+        };
+        primary.then_with(|| relevance_order(left, right))
+    });
+}
+
+fn sort_is_supported(
+    provider: ProviderKind,
+    capabilities: SourceCapabilities,
+    results: &[SearchResult],
+    field: SearchSortField,
+) -> bool {
+    match field {
+        SearchSortField::Relevance | SearchSortField::Duration => true,
+        SearchSortField::Newest | SearchSortField::Oldest => capabilities.release_date,
+        SearchSortField::Popularity => {
+            let expected = match provider {
+                ProviderKind::Youtube => Some(EngagementKind::Views),
+                ProviderKind::Soundcloud => Some(EngagementKind::Plays),
+                ProviderKind::Local | ProviderKind::Spotify => None,
+            };
+            capabilities.popularity
+                && expected.is_some()
+                && results.iter().all(|result| {
+                    match (result.engagement_count, result.engagement_kind) {
+                        (None, None) => true,
+                        (Some(_), kind) => kind == expected,
+                        (None, Some(_)) => false,
+                    }
+                })
+        }
+        SearchSortField::DateAdded
+        | SearchSortField::Downloaded
+        | SearchSortField::AudioQuality => false,
+    }
+}
+
+fn relevance_order(left: &SearchResult, right: &SearchResult) -> Ordering {
+    left.original_rank
+        .cmp(&right.original_rank)
+        .then_with(|| left.provider_item_id.cmp(&right.provider_item_id))
+}
+
+fn nullable_order<T: Ord + Copy>(
+    left: Option<T>,
+    right: Option<T>,
+    direction: SearchSortDirection,
+) -> Ordering {
+    nullable_order_by(left, right, direction)
+}
+
+fn nullable_order_by<T: Ord>(
+    left: Option<T>,
+    right: Option<T>,
+    direction: SearchSortDirection,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => match direction {
+            SearchSortDirection::Ascending => left.cmp(&right),
+            SearchSortDirection::Descending => right.cmp(&left),
+        },
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -59,16 +154,21 @@ mod tests {
     }
 
     #[test]
-    fn tracks_artists_and_albums_lenses_exclude_spotify() {
-        for lens in [SearchLens::Tracks, SearchLens::Artists, SearchLens::Albums] {
-            assert_eq!(
-                all_provider_kinds_for_lens(lens),
-                &[
-                    ProviderKind::Local,
-                    ProviderKind::Youtube,
-                    ProviderKind::Soundcloud
-                ]
-            );
+    fn tracks_lens_uses_local_youtube_and_soundcloud() {
+        assert_eq!(
+            all_provider_kinds_for_lens(SearchLens::Tracks),
+            &[
+                ProviderKind::Local,
+                ProviderKind::Youtube,
+                ProviderKind::Soundcloud
+            ]
+        );
+    }
+
+    #[test]
+    fn artists_and_albums_lenses_use_local_only() {
+        for lens in [SearchLens::Artists, SearchLens::Albums] {
+            assert_eq!(all_provider_kinds_for_lens(lens), &[ProviderKind::Local]);
         }
     }
 
