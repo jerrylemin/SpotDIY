@@ -2,6 +2,7 @@ pub mod traits;
 pub use traits::SourceAdapter;
 
 use crate::domain::ProviderKind;
+use crate::search::types::SafeUrl;
 use thiserror::Error;
 use url::Url;
 
@@ -13,7 +14,10 @@ pub enum ProviderUrlError {
     HostNotAllowed,
 }
 
-pub fn validate_provider_url(provider: ProviderKind, value: &str) -> Result<Url, ProviderUrlError> {
+pub fn validate_provider_url(
+    provider: ProviderKind,
+    value: &str,
+) -> Result<SafeUrl, ProviderUrlError> {
     let url = Url::parse(value).map_err(|_| ProviderUrlError::Invalid)?;
     if url.scheme() != "https" || url.host_str().is_none() {
         return Err(ProviderUrlError::Invalid);
@@ -33,19 +37,21 @@ pub fn validate_provider_url(provider: ProviderKind, value: &str) -> Result<Url,
         ),
         ProviderKind::Local => false,
     };
-    allowed
-        .then_some(url)
-        .ok_or(ProviderUrlError::HostNotAllowed)
+    if !allowed {
+        return Err(ProviderUrlError::HostNotAllowed);
+    }
+    SafeUrl::from_url(url).ok_or(ProviderUrlError::Invalid)
 }
 
-pub fn sanitize_artwork_url(value: &str) -> Option<Url> {
+pub fn sanitize_artwork_url(value: &str) -> Option<SafeUrl> {
     let url = Url::parse(value).ok()?;
     (url.scheme() == "https"
         && matches!(
             url.host_str(),
             Some("i.ytimg.com" | "yt3.ggpht.com" | "i1.sndcdn.com" | "i.scdn.co")
         ))
-    .then_some(url)
+    .then(|| SafeUrl::from_url(url))
+    .flatten()
 }
 
 #[cfg(test)]
@@ -72,5 +78,19 @@ mod tests {
     #[test]
     fn artwork_allowlist_returns_null_for_unknown_https_cdn() {
         assert_eq!(sanitize_artwork_url("https://evil.example/art.jpg"), None);
+    }
+
+    #[test]
+    fn provider_url_rejects_userinfo_and_sensitive_query_data() {
+        assert!(validate_provider_url(
+            ProviderKind::Youtube,
+            "https://user:pass@youtube.com/watch"
+        )
+        .is_err());
+        assert!(validate_provider_url(
+            ProviderKind::Youtube,
+            "https://youtube.com/watch?access_token=secret"
+        )
+        .is_err());
     }
 }

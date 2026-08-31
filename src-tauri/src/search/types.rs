@@ -1,5 +1,5 @@
 use crate::domain::{ProviderKind, SourceId, TrackId};
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 use tokio::sync::watch;
 use url::Url;
@@ -22,7 +22,7 @@ impl Default for SearchId {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum SearchLens {
     All,
     Tracks,
@@ -36,7 +36,7 @@ pub enum SearchLens {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum SearchEntityKind {
     Track,
     Artist,
@@ -45,7 +45,7 @@ pub enum SearchEntityKind {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum SearchSortField {
     Relevance,
     Popularity,
@@ -58,7 +58,7 @@ pub enum SearchSortField {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum SearchSortDirection {
     Ascending,
     Descending,
@@ -71,7 +71,12 @@ pub struct SearchRequest {
     pub lens: SearchLens,
     pub sort_field: SearchSortField,
     pub sort_direction: SearchSortDirection,
+    #[serde(default = "default_limit")]
     pub limit: u8,
+}
+
+fn default_limit() -> u8 {
+    25
 }
 
 impl SearchRequest {
@@ -121,6 +126,7 @@ pub struct ProviderSearchRequest {
     pub entities: Vec<SearchEntityKind>,
     pub sort_field: SearchSortField,
     pub sort_direction: SearchSortDirection,
+    #[serde(default = "default_limit")]
     pub limit: u8,
     pub market: Option<String>,
 }
@@ -131,14 +137,13 @@ pub struct SearchResult {
     pub provider: ProviderKind,
     pub entity_kind: SearchEntityKind,
     pub provider_item_id: String,
-    pub canonical_url: Option<Url>,
+    pub canonical_url: Option<SafeUrl>,
     pub title: String,
     pub artists: Vec<String>,
     pub album: Option<String>,
     pub duration_ms: Option<u64>,
-    pub artwork_url: Option<Url>,
-    pub published_at: Option<String>,
-    pub published_precision: Option<PartialDatePrecision>,
+    pub artwork_url: Option<SafeUrl>,
+    pub published_at: Option<PartialDate>,
     pub engagement_count: Option<u64>,
     pub engagement_kind: Option<EngagementKind>,
     pub explicit: Option<bool>,
@@ -148,33 +153,146 @@ pub struct SearchResult {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum EngagementKind {
     Views,
     Plays,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum PartialDatePrecision {
     Year,
     Month,
     Day,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialDate {
-    pub value: String,
-    pub precision: PartialDatePrecision,
+    value: String,
+    precision: PartialDatePrecision,
 }
 
 impl PartialDate {
+    pub fn new(value: impl Into<String>, precision: PartialDatePrecision) -> Result<Self, String> {
+        let value = value.into();
+        let valid = match precision {
+            PartialDatePrecision::Year => value.len() == 4 && value.parse::<u16>().is_ok(),
+            PartialDatePrecision::Month => {
+                chrono::NaiveDate::parse_from_str(&format!("{value}-01"), "%Y-%m-%d").is_ok()
+            }
+            PartialDatePrecision::Day => {
+                chrono::NaiveDate::parse_from_str(&value, "%Y-%m-%d").is_ok()
+            }
+        };
+        valid
+            .then_some(Self { value, precision })
+            .ok_or_else(|| "date does not match its precision".to_owned())
+    }
+
     pub fn month(year: i32, month: u8) -> Self {
-        Self {
-            value: format!("{year:04}-{month:02}"),
-            precision: PartialDatePrecision::Month,
+        Self::new(format!("{year:04}-{month:02}"), PartialDatePrecision::Month)
+            .expect("valid month")
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    pub fn precision(&self) -> PartialDatePrecision {
+        self.precision
+    }
+}
+
+impl<'de> Deserialize<'de> for PartialDate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct WireDate {
+            value: String,
+            precision: PartialDatePrecision,
         }
+        let wire = WireDate::deserialize(deserializer)?;
+        Self::new(wire.value, wire.precision).map_err(D::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SafeUrl(Url);
+
+impl SafeUrl {
+    pub(crate) fn from_url(url: Url) -> Option<Self> {
+        let host = url.host_str()?;
+        let allowed = matches!(
+            host,
+            "youtube.com"
+                | "www.youtube.com"
+                | "music.youtube.com"
+                | "youtu.be"
+                | "soundcloud.com"
+                | "www.soundcloud.com"
+                | "open.spotify.com"
+                | "spotify.com"
+                | "www.spotify.com"
+                | "i.ytimg.com"
+                | "yt3.ggpht.com"
+                | "i1.sndcdn.com"
+                | "i.scdn.co"
+        );
+        (url.scheme() == "https"
+            && url.username().is_empty()
+            && url.password().is_none()
+            && !contains_sensitive_query(&url)
+            && allowed)
+            .then_some(Self(url))
+    }
+
+    pub fn as_url(&self) -> &Url {
+        &self.0
+    }
+}
+
+fn contains_sensitive_query(url: &Url) -> bool {
+    url.query_pairs().any(|(key, value)| {
+        let text = format!("{key}={value}").to_ascii_lowercase();
+        [
+            "access_token",
+            "refresh_token",
+            "client_secret",
+            "authorization",
+            "password",
+            "cookie",
+            "api_key",
+            "token",
+            "secret",
+            "oauth",
+            "code",
+        ]
+        .iter()
+        .any(|needle| text.contains(needle))
+    })
+}
+
+impl Serialize for SafeUrl {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.0.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SafeUrl {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        let url = Url::parse(&value).map_err(D::Error::custom)?;
+        Self::from_url(url).ok_or_else(|| D::Error::custom("URL is not safe for a search result"))
     }
 }
 
@@ -188,7 +306,7 @@ pub struct ProviderSearchSection {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ProviderSearchState {
     Idle,
     Loading,
@@ -198,7 +316,7 @@ pub enum ProviderSearchState {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ProviderSearchError {
     pub code: ProviderSearchErrorCode,
     pub detail: Option<String>,
@@ -206,7 +324,7 @@ pub struct ProviderSearchError {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum ProviderSearchErrorCode {
     Unavailable,
     Timeout,
@@ -217,7 +335,7 @@ pub enum ProviderSearchErrorCode {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ProviderRuntimeStatus {
     Unknown,
     Ready,
@@ -277,6 +395,15 @@ mod tests {
     }
 
     #[test]
+    fn search_request_accepts_and_returns_trimmed_query() {
+        let request = SearchRequest {
+            query: "  signal  ".into(),
+            ..SearchRequest::test_default()
+        };
+        assert_eq!(request.validate().unwrap(), "signal");
+    }
+
+    #[test]
     fn search_request_rejects_257_unicode_scalars() {
         let request = SearchRequest {
             query: "a".repeat(257),
@@ -303,8 +430,33 @@ mod tests {
     #[test]
     fn partial_date_preserves_year_and_month_precision() {
         let date = PartialDate::month(2026, 8);
-        assert_eq!(date.value, "2026-08");
-        assert_eq!(date.precision, PartialDatePrecision::Month);
+        assert_eq!(date.value(), "2026-08");
+        assert_eq!(date.precision(), PartialDatePrecision::Month);
+    }
+
+    #[test]
+    fn partial_date_rejects_inconsistent_precision() {
+        let json = r#"{"value":"2026-08","precision":"day"}"#;
+        assert!(serde_json::from_str::<PartialDate>(json).is_err());
+    }
+
+    #[test]
+    fn search_request_deserialization_defaults_limit_to_25() {
+        let json = r#"{"query":"signal","lens":"all","sortField":"relevance","sortDirection":"descending"}"#;
+        let request: SearchRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.limit, 25);
+    }
+
+    #[test]
+    fn native_enums_use_snake_case_wire_names() {
+        assert_eq!(
+            serde_json::to_string(&SearchSortField::AudioQuality).unwrap(),
+            "\"audio_quality\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ProviderSearchErrorCode::InvalidResponse).unwrap(),
+            "\"invalid_response\""
+        );
     }
 
     #[tokio::test]

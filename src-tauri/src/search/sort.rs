@@ -59,6 +59,13 @@ mod tests {
     }
 
     #[test]
+    fn tracks_artists_and_albums_lenses_exclude_spotify() {
+        for lens in [SearchLens::Tracks, SearchLens::Artists, SearchLens::Albums] {
+            assert!(!all_provider_kinds_for_lens(lens).contains(&ProviderKind::Spotify));
+        }
+    }
+
+    #[test]
     fn spotify_lens_selects_only_spotify() {
         assert_eq!(
             all_provider_kinds_for_lens(SearchLens::Spotify),
