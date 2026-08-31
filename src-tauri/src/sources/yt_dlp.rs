@@ -16,6 +16,11 @@ pub const YT_DLP_PROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+#[cfg(test)]
+const CONTROLLED_CHILD_MARKER_ENV: &str = "SPOTDIY_TASK2_CONTROLLED_CHILD";
+#[cfg(test)]
+const CONTROLLED_CHILD_MARKER_VALUE: &str = "yt-dlp-runner";
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct YtDlpProcessOutput {
     pub stdout: String,
@@ -63,7 +68,10 @@ pub trait YtDlpProcessRunner: Send + Sync {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct TokioYtDlpProcessRunner;
+pub struct TokioYtDlpProcessRunner {
+    #[cfg(test)]
+    controlled_child_marker: bool,
+}
 
 impl TokioYtDlpProcessRunner {
     pub const fn stdout_limit(&self) -> usize {
@@ -75,6 +83,15 @@ impl TokioYtDlpProcessRunner {
     }
 }
 
+#[cfg(test)]
+impl TokioYtDlpProcessRunner {
+    fn with_controlled_child_marker() -> Self {
+        Self {
+            controlled_child_marker: true,
+        }
+    }
+}
+
 impl YtDlpProcessRunner for TokioYtDlpProcessRunner {
     fn run<'a>(
         &'a self,
@@ -83,7 +100,13 @@ impl YtDlpProcessRunner for TokioYtDlpProcessRunner {
         cancellation: SearchCancellation,
     ) -> Pin<Box<dyn Future<Output = Result<YtDlpProcessOutput, YtDlpProcessError>> + Send + 'a>>
     {
-        Box::pin(run_yt_dlp(executable, args, cancellation))
+        Box::pin(run_yt_dlp(
+            executable,
+            args,
+            cancellation,
+            #[cfg(test)]
+            self.controlled_child_marker,
+        ))
     }
 }
 
@@ -105,15 +128,19 @@ async fn run_yt_dlp(
     executable: &str,
     args: &[String],
     cancellation: SearchCancellation,
+    #[cfg(test)] controlled_child_marker: bool,
 ) -> Result<YtDlpProcessOutput, YtDlpProcessError> {
     let mut cancellation_rx = cancellation.subscribe();
     if *cancellation_rx.borrow() {
         return Err(YtDlpProcessError::Cancelled);
     }
 
-    let mut child = yt_dlp_command(executable, args)
-        .spawn()
-        .map_err(|_| YtDlpProcessError::Spawn)?;
+    let mut command = yt_dlp_command(executable, args);
+    #[cfg(test)]
+    if controlled_child_marker {
+        command.env(CONTROLLED_CHILD_MARKER_ENV, CONTROLLED_CHILD_MARKER_VALUE);
+    }
+    let mut child = command.spawn().map_err(|_| YtDlpProcessError::Spawn)?;
     let stdout = child.stdout.take().ok_or(YtDlpProcessError::Read)?;
     let stderr = child.stderr.take().ok_or(YtDlpProcessError::Read)?;
     let (stdout_tx, mut stdout_rx) = oneshot::channel();
@@ -251,6 +278,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
     use std::io::Write;
     use std::path::PathBuf;
 
@@ -269,8 +297,22 @@ mod tests {
     }
 
     fn is_controlled_child(test_name: &str) -> bool {
-        std::env::args().any(|argument| argument == "--exact")
-            && std::env::args().any(|argument| argument == test_name)
+        let args = std::env::args().collect::<Vec<_>>();
+        controlled_child_is_authorized(
+            &args,
+            std::env::var_os(CONTROLLED_CHILD_MARKER_ENV).as_deref(),
+            test_name,
+        )
+    }
+
+    fn controlled_child_is_authorized(
+        args: &[String],
+        marker: Option<&OsStr>,
+        test_name: &str,
+    ) -> bool {
+        marker == Some(OsStr::new(CONTROLLED_CHILD_MARKER_VALUE))
+            && args.iter().any(|argument| argument == "--exact")
+            && args.iter().any(|argument| argument == test_name)
     }
 
     #[tokio::test]
@@ -315,6 +357,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn controlled_runner_helpers_require_marker() {
+        let test_name = "media_tools::yt_dlp::tests::controlled_runner_blocks";
+        let args = vec![
+            "--exact".to_owned(),
+            test_name.to_owned(),
+            "--nocapture".to_owned(),
+        ];
+        assert!(!controlled_child_is_authorized(&args, None, test_name));
+        assert!(!controlled_child_is_authorized(
+            &args,
+            Some(OsStr::new("wrong-marker")),
+            test_name
+        ));
+        assert!(controlled_child_is_authorized(
+            &args,
+            Some(OsStr::new(CONTROLLED_CHILD_MARKER_VALUE)),
+            test_name
+        ));
+    }
+
     #[tokio::test]
     async fn runner_bounds_stdout_at_4_mib() {
         let (mut writer, reader) = tokio::io::duplex(8 * 1024);
@@ -343,7 +406,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_cancellation_kills_and_reaps_owned_child() {
-        let runner = TokioYtDlpProcessRunner;
+        let runner = TokioYtDlpProcessRunner::with_controlled_child_marker();
         let executable = test_executable().to_string_lossy().into_owned();
         let args = controlled_test_args("media_tools::yt_dlp::tests::controlled_runner_blocks");
         let cancellation = SearchCancellation::new();

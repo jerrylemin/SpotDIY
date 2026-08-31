@@ -533,13 +533,27 @@ fn run_bounded_probe(
     stdout_limit: usize,
     stderr_limit: usize,
 ) -> Result<BoundedProbeOutput, BoundedProbeError> {
-    let mut child = Command::new(executable)
+    run_bounded_probe_with_environment(executable, args, timeout, stdout_limit, stderr_limit, None)
+}
+
+fn run_bounded_probe_with_environment(
+    executable: &Path,
+    args: &[&str],
+    timeout: Duration,
+    stdout_limit: usize,
+    stderr_limit: usize,
+    child_environment: Option<(&str, &str)>,
+) -> Result<BoundedProbeOutput, BoundedProbeError> {
+    let mut command = Command::new(executable);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|_| BoundedProbeError::Spawn)?;
+        .stderr(Stdio::piped());
+    if let Some((name, value)) = child_environment {
+        command.env(name, value);
+    }
+    let mut child = command.spawn().map_err(|_| BoundedProbeError::Spawn)?;
     let stdout_rx = child
         .stdout
         .take()
@@ -727,9 +741,12 @@ fn parse_yt_dlp_version_token(token: &str) -> Option<YtDlpVersion> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
     use std::io::Write;
 
     const CONTROLLED_PROBE_TIMEOUT: Duration = Duration::from_millis(100);
+    const CONTROLLED_CHILD_MARKER_ENV: &str = "SPOTDIY_TASK2_CONTROLLED_CHILD";
+    const CONTROLLED_CHILD_MARKER_VALUE: &str = "media-tools-probe";
 
     fn test_executable() -> PathBuf {
         std::env::current_exe().unwrap()
@@ -740,21 +757,35 @@ mod tests {
     }
 
     fn is_controlled_child(test_name: &str) -> bool {
-        let mut args = std::env::args();
-        args.any(|argument| argument == "--exact")
-            && std::env::args().any(|argument| argument == test_name)
+        let args = std::env::args().collect::<Vec<_>>();
+        controlled_child_is_authorized(
+            &args,
+            std::env::var_os(CONTROLLED_CHILD_MARKER_ENV).as_deref(),
+            test_name,
+        )
+    }
+
+    fn controlled_child_is_authorized(
+        args: &[String],
+        marker: Option<&OsStr>,
+        test_name: &str,
+    ) -> bool {
+        marker == Some(OsStr::new(CONTROLLED_CHILD_MARKER_VALUE))
+            && args.iter().any(|argument| argument == "--exact")
+            && args.iter().any(|argument| argument == test_name)
     }
 
     fn run_controlled_probe(
         test_name: &'static str,
     ) -> Result<BoundedProbeOutput, BoundedProbeError> {
         let executable = test_executable();
-        run_bounded_probe(
+        run_bounded_probe_with_environment(
             &executable,
             &controlled_test_args(test_name),
             CONTROLLED_PROBE_TIMEOUT,
             MPV_VERSION_PROBE_OUTPUT_LIMIT,
             MPV_VERSION_PROBE_OUTPUT_LIMIT,
+            Some((CONTROLLED_CHILD_MARKER_ENV, CONTROLLED_CHILD_MARKER_VALUE)),
         )
     }
 
@@ -768,6 +799,27 @@ mod tests {
             ),
             Some(PathBuf::from("test-yt-dlp"))
         );
+    }
+
+    #[test]
+    fn controlled_probe_helpers_require_marker() {
+        let test_name = "media_tools::tests::controlled_probe_blocks";
+        let args = vec![
+            "--exact".to_owned(),
+            test_name.to_owned(),
+            "--nocapture".to_owned(),
+        ];
+        assert!(!controlled_child_is_authorized(&args, None, test_name));
+        assert!(!controlled_child_is_authorized(
+            &args,
+            Some(OsStr::new("wrong-marker")),
+            test_name
+        ));
+        assert!(controlled_child_is_authorized(
+            &args,
+            Some(OsStr::new(CONTROLLED_CHILD_MARKER_VALUE)),
+            test_name
+        ));
     }
 
     #[test]
