@@ -468,6 +468,19 @@ impl SpotifyAuthService {
         }
     }
 
+    pub fn disconnect(&self) -> Result<SpotifySetupStatus, SpotifyAuthError> {
+        self.store.delete().map_err(SpotifyAuthError::Store)?;
+        self.access_token
+            .lock()
+            .map(|mut token| *token = None)
+            .map_err(|_| SpotifyAuthError::StateUnavailable)?;
+        self.pending
+            .lock()
+            .map(|mut pending| *pending = None)
+            .map_err(|_| SpotifyAuthError::StateUnavailable)?;
+        Ok(self.setup_status())
+    }
+
     pub async fn begin_authorization(
         &self,
         client_id: impl Into<String>,
