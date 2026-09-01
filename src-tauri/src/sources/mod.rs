@@ -1,9 +1,11 @@
 pub mod local;
 pub mod soundcloud;
+pub mod spotify;
 pub mod traits;
 pub mod youtube;
 pub use crate::media_tools::yt_dlp;
 pub use local::LocalSourceAdapter;
+pub use spotify::SpotifySourceAdapter;
 pub use traits::SourceAdapter;
 
 use std::sync::Arc;

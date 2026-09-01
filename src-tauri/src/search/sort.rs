@@ -37,11 +37,14 @@ pub fn entities_for_lens(lens: SearchLens) -> &'static [SearchEntityKind] {
         SearchEntityKind::Playlist,
     ];
     match lens {
-        SearchLens::Tracks
-        | SearchLens::Local
-        | SearchLens::Youtube
-        | SearchLens::Soundcloud
-        | SearchLens::Spotify => TRACKS,
+        SearchLens::Tracks | SearchLens::Local | SearchLens::Youtube | SearchLens::Soundcloud => {
+            TRACKS
+        }
+        SearchLens::Spotify => &[
+            SearchEntityKind::Track,
+            SearchEntityKind::Artist,
+            SearchEntityKind::Album,
+        ],
         SearchLens::Artists => ARTISTS,
         SearchLens::Albums => ALBUMS,
         SearchLens::Playlists => PLAYLISTS,

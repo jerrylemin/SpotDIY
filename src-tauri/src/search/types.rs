@@ -345,6 +345,8 @@ pub enum ProviderSearchErrorCode {
     Timeout,
     Cancelled,
     RateLimited,
+    QuotaExceeded,
+    Disabled,
     InvalidResponse,
     Failed,
 }
@@ -357,6 +359,7 @@ pub enum ProviderRuntimeStatus {
     Missing,
     Unsupported,
     Broken,
+    Disabled,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

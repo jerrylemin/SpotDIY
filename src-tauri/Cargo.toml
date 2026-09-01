@@ -13,9 +13,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+async-trait = "0.1.92"
+base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 chrono = { version = "0.4.45", features = ["serde"] }
+keyring = "4.2.0"
 lofty = "0.25.1"
 notify = "8.2.0"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "form", "query", "rustls"] }
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
 sha2 = "0.11.0"
 serde = { version = "1", features = ["derive"] }
