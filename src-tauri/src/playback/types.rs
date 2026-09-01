@@ -61,6 +61,9 @@ pub enum PlaybackErrorCode {
     InvalidQueuePosition,
     SnapshotNotFound,
     ShuttingDown,
+    InvalidAbLoop,
+    AbLoopPresetNotFound,
+    AbLoopPresetTrackMismatch,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Error, PartialEq, Serialize)]
@@ -124,6 +127,14 @@ pub struct PlaybackSourceOption {
     pub availability_detail: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AbLoopState {
+    pub a_ms: Option<u64>,
+    pub b_ms: Option<u64>,
+    pub active: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaybackSnapshot {
@@ -149,6 +160,7 @@ pub struct PlaybackSnapshot {
     pub backend_health: PlaybackBackendHealth,
     pub recovering: bool,
     pub error: Option<PlaybackErrorDto>,
+    pub ab_loop: AbLoopState,
 }
 
 impl Default for PlaybackSnapshot {
@@ -176,6 +188,7 @@ impl Default for PlaybackSnapshot {
             backend_health: PlaybackBackendHealth::default(),
             recovering: false,
             error: None,
+            ab_loop: AbLoopState::default(),
         }
     }
 }

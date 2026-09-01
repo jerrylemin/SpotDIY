@@ -94,6 +94,8 @@ typed_id!(PlaylistItemId);
 typed_id!(TagId);
 typed_id!(QueueSnapshotId);
 typed_id!(QueueSnapshotEntryId);
+typed_id!(BookmarkId);
+typed_id!(AbLoopPresetId);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]

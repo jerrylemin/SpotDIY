@@ -17,6 +17,8 @@ pub enum BackendCommand {
     SeekAbsoluteMs(u64),
     SetVolume(u8),
     SetMuted(bool),
+    SetAbLoop { a_ms: u64, b_ms: u64 },
+    ClearAbLoop,
     QueryAudioDevices,
     SelectAudioDevice(String),
     Stop,

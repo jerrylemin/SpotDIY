@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::watch;
 
+use crate::bookmarks::{validate_loop, AbLoopPreset, BookmarkError, BookmarkService};
 use crate::db::repository::TrackRepository;
 use crate::domain::{
     PlaylistId, PlaylistItemId, ProviderKind, QueueSnapshotId, SourceId, TrackId, TrackSource,
@@ -31,10 +32,11 @@ pub use self::backend::{
     PlaybackBackendSession,
 };
 pub use self::types::{
-    AudioDevice, PlaybackBackendHealth, PlaybackError, PlaybackErrorCode, PlaybackErrorDto,
-    PlaybackPhase, PlaybackSnapshot, PlaybackSourceOption, QueueEntry, QueueEntryId,
-    QueueRepository, QueueRepositoryError, QueueSection, QueueSnapshot, QueueSnapshotSummary,
-    QueueWorkspace, QueueWorkspaceEntry, RepeatMode, TrackPlaybackRequest, TransientQueue,
+    AbLoopState, AudioDevice, PlaybackBackendHealth, PlaybackError, PlaybackErrorCode,
+    PlaybackErrorDto, PlaybackPhase, PlaybackSnapshot, PlaybackSourceOption, QueueEntry,
+    QueueEntryId, QueueRepository, QueueRepositoryError, QueueSection, QueueSnapshot,
+    QueueSnapshotSummary, QueueWorkspace, QueueWorkspaceEntry, RepeatMode, TrackPlaybackRequest,
+    TransientQueue,
 };
 pub type BackendHealth = PlaybackBackendHealth;
 use self::backend::BackendError;
@@ -206,6 +208,60 @@ impl PlaybackService {
 
     pub fn set_playback_muted(&self, muted: bool) -> Result<PlaybackSnapshot, PlaybackError> {
         self.snapshot_command(|reply| Command::SetMuted { muted, reply })
+    }
+
+    pub fn set_ab_loop_a(&self) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.snapshot_command(|reply| Command::SetAbLoopA { reply })
+    }
+
+    pub fn set_ab_loop_b(&self) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.snapshot_command(|reply| Command::SetAbLoopB { reply })
+    }
+
+    pub fn clear_ab_loop(&self) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.snapshot_command(|reply| Command::ClearAbLoop { reply })
+    }
+
+    pub fn save_ab_loop_preset(
+        &self,
+        track_id: TrackId,
+        name: String,
+    ) -> Result<AbLoopPreset, PlaybackError> {
+        self.command(
+            |reply| Command::SaveAbLoopPreset {
+                track_id,
+                name,
+                reply,
+            },
+            false,
+        )
+    }
+
+    pub fn list_ab_loop_presets(
+        &self,
+        track_id: TrackId,
+    ) -> Result<Vec<AbLoopPreset>, PlaybackError> {
+        self.command(
+            |reply| Command::ListAbLoopPresets { track_id, reply },
+            false,
+        )
+    }
+
+    pub fn apply_ab_loop_preset(
+        &self,
+        preset_id: crate::domain::AbLoopPresetId,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.snapshot_command(|reply| Command::ApplyAbLoopPreset { preset_id, reply })
+    }
+
+    pub fn delete_ab_loop_preset(
+        &self,
+        preset_id: crate::domain::AbLoopPresetId,
+    ) -> Result<(), PlaybackError> {
+        self.command(
+            |reply| Command::DeleteAbLoopPreset { preset_id, reply },
+            false,
+        )
     }
 
     pub fn set_repeat_mode(
@@ -561,6 +617,15 @@ enum Command {
         muted: bool,
         reply: SnapshotReply,
     },
+    SetAbLoopA {
+        reply: SnapshotReply,
+    },
+    SetAbLoopB {
+        reply: SnapshotReply,
+    },
+    ClearAbLoop {
+        reply: SnapshotReply,
+    },
     SetRepeat {
         repeat_mode: RepeatMode,
         reply: SnapshotReply,
@@ -633,6 +698,23 @@ enum Command {
         snapshot_id: QueueSnapshotId,
         reply: SnapshotListReply,
     },
+    SaveAbLoopPreset {
+        track_id: TrackId,
+        name: String,
+        reply: PresetReply,
+    },
+    ListAbLoopPresets {
+        track_id: TrackId,
+        reply: PresetListReply,
+    },
+    ApplyAbLoopPreset {
+        preset_id: crate::domain::AbLoopPresetId,
+        reply: SnapshotReply,
+    },
+    DeleteAbLoopPreset {
+        preset_id: crate::domain::AbLoopPresetId,
+        reply: UnitReply,
+    },
     Shutdown {
         reply: SnapshotReply,
     },
@@ -642,6 +724,9 @@ type SnapshotReply = Sender<Result<PlaybackSnapshot, PlaybackError>>;
 type WorkspaceReply = Sender<Result<QueueWorkspace, PlaybackError>>;
 type SnapshotReplyFull = Sender<Result<QueueSnapshot, PlaybackError>>;
 type SnapshotListReply = Sender<Result<Vec<QueueSnapshotSummary>, PlaybackError>>;
+type PresetReply = Sender<Result<AbLoopPreset, PlaybackError>>;
+type PresetListReply = Sender<Result<Vec<AbLoopPreset>, PlaybackError>>;
+type UnitReply = Sender<Result<(), PlaybackError>>;
 
 struct ResolvedPlayback {
     track_id: TrackId,
@@ -708,6 +793,7 @@ struct Controller {
     snapshot: PlaybackSnapshot,
     queue: TransientQueue,
     queue_repository: QueueRepository,
+    bookmark_service: BookmarkService,
     queue_revision: u64,
     last_position_checkpoint: Instant,
     position_dirty: bool,
@@ -732,6 +818,7 @@ impl Controller {
         let backend_generation = 1;
         let PlaybackBackendSession { backend, events } = backend_factory(backend_generation);
         let queue_repository = QueueRepository::new(library.database().clone());
+        let bookmark_service = BookmarkService::new(library.database().clone());
         Self {
             library,
             resolver,
@@ -747,6 +834,7 @@ impl Controller {
             snapshot: PlaybackSnapshot::default(),
             queue: TransientQueue::new(),
             queue_repository,
+            bookmark_service,
             queue_revision: 0,
             last_position_checkpoint: Instant::now(),
             position_dirty: false,
@@ -865,6 +953,18 @@ impl Controller {
                 let result = self.set_muted(muted);
                 let _ = reply.send(result);
             }
+            Command::SetAbLoopA { reply } => {
+                let result = self.set_ab_loop_a();
+                let _ = reply.send(result);
+            }
+            Command::SetAbLoopB { reply } => {
+                let result = self.set_ab_loop_b();
+                let _ = reply.send(result);
+            }
+            Command::ClearAbLoop { reply } => {
+                let result = self.clear_ab_loop();
+                let _ = reply.send(result);
+            }
             Command::SetRepeat { repeat_mode, reply } => {
                 self.snapshot.repeat_mode = repeat_mode;
                 if let Err(error) = self.persist_queue_state(true) {
@@ -973,6 +1073,32 @@ impl Controller {
             }
             Command::DeleteQueueSnapshot { snapshot_id, reply } => {
                 let result = self.delete_queue_snapshot(snapshot_id);
+                let _ = reply.send(result);
+            }
+            Command::SaveAbLoopPreset {
+                track_id,
+                name,
+                reply,
+            } => {
+                let result = self.save_ab_loop_preset(track_id, name);
+                let _ = reply.send(result);
+            }
+            Command::ListAbLoopPresets { track_id, reply } => {
+                let result = self
+                    .bookmark_service
+                    .list_ab_loop_presets(track_id)
+                    .map_err(bookmark_error_to_playback);
+                let _ = reply.send(result);
+            }
+            Command::ApplyAbLoopPreset { preset_id, reply } => {
+                let result = self.apply_ab_loop_preset(preset_id);
+                let _ = reply.send(result);
+            }
+            Command::DeleteAbLoopPreset { preset_id, reply } => {
+                let result = self
+                    .bookmark_service
+                    .delete_ab_loop_preset(preset_id)
+                    .map_err(bookmark_error_to_playback);
                 let _ = reply.send(result);
             }
             Command::Shutdown { reply } => {
@@ -1262,6 +1388,146 @@ impl Controller {
         Ok(self.snapshot.clone())
     }
 
+    fn set_ab_loop_a(&mut self) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.reject_during_recovery()?;
+        if self.snapshot.current_track_id.is_none() {
+            return Err(queue_empty_error());
+        }
+        let a_ms = self.snapshot.position_ms;
+        let b_ms = self
+            .snapshot
+            .ab_loop
+            .b_ms
+            .filter(|b_ms| validate_loop(a_ms, *b_ms, self.snapshot.duration_ms).is_ok());
+        self.snapshot.ab_loop = crate::playback::types::AbLoopState {
+            a_ms: Some(a_ms),
+            b_ms,
+            active: b_ms.is_some(),
+        };
+        if let Some(b_ms) = b_ms {
+            self.send_ab_loop(a_ms, b_ms)?;
+        } else {
+            self.clear_ab_loop_backend()?;
+        }
+        self.publish();
+        Ok(self.snapshot.clone())
+    }
+
+    fn set_ab_loop_b(&mut self) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.reject_during_recovery()?;
+        if self.snapshot.current_track_id.is_none() {
+            return Err(queue_empty_error());
+        }
+        let a_ms = self.snapshot.ab_loop.a_ms.ok_or_else(|| {
+            PlaybackError::new(
+                PlaybackErrorCode::InvalidAbLoop,
+                "set A before setting B",
+                false,
+            )
+        })?;
+        let b_ms = self.snapshot.position_ms;
+        validate_loop(a_ms, b_ms, self.snapshot.duration_ms).map_err(bookmark_error_to_playback)?;
+        self.send_ab_loop(a_ms, b_ms)?;
+        self.snapshot.ab_loop = crate::playback::types::AbLoopState {
+            a_ms: Some(a_ms),
+            b_ms: Some(b_ms),
+            active: true,
+        };
+        self.publish();
+        Ok(self.snapshot.clone())
+    }
+
+    fn clear_ab_loop(&mut self) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.reject_during_recovery()?;
+        self.clear_ab_loop_backend()?;
+        self.snapshot.ab_loop = crate::playback::types::AbLoopState::default();
+        self.publish();
+        Ok(self.snapshot.clone())
+    }
+
+    fn send_ab_loop(&mut self, a_ms: u64, b_ms: u64) -> Result<(), PlaybackError> {
+        if !self.backend.health().connected {
+            return Err(PlaybackError::new(
+                PlaybackErrorCode::IpcDisconnected,
+                "the playback backend is unavailable for A/B looping",
+                true,
+            ));
+        }
+        self.backend.send(BackendCommand::SetAbLoop { a_ms, b_ms })
+    }
+
+    fn clear_ab_loop_backend(&mut self) -> Result<(), PlaybackError> {
+        if self.backend.health().connected {
+            self.backend.send(BackendCommand::ClearAbLoop)?;
+        }
+        Ok(())
+    }
+
+    fn save_ab_loop_preset(
+        &self,
+        track_id: TrackId,
+        name: String,
+    ) -> Result<AbLoopPreset, PlaybackError> {
+        let current_track_id = self
+            .snapshot
+            .current_track_id
+            .ok_or_else(queue_empty_error)?;
+        if current_track_id != track_id {
+            return Err(PlaybackError::new(
+                PlaybackErrorCode::AbLoopPresetTrackMismatch,
+                "the preset track does not match the current track",
+                false,
+            ));
+        }
+        let ab_loop = self.snapshot.ab_loop;
+        if !ab_loop.active {
+            return Err(PlaybackError::new(
+                PlaybackErrorCode::InvalidAbLoop,
+                "a complete A/B loop is required before saving a preset",
+                false,
+            ));
+        }
+        let (Some(a_ms), Some(b_ms)) = (ab_loop.a_ms, ab_loop.b_ms) else {
+            return Err(PlaybackError::new(
+                PlaybackErrorCode::InvalidAbLoop,
+                "a complete A/B loop is required before saving a preset",
+                false,
+            ));
+        };
+        validate_loop(a_ms, b_ms, self.snapshot.duration_ms).map_err(bookmark_error_to_playback)?;
+        self.bookmark_service
+            .save_ab_loop_preset(track_id, name, a_ms, b_ms)
+            .map_err(bookmark_error_to_playback)
+    }
+
+    fn apply_ab_loop_preset(
+        &mut self,
+        preset_id: crate::domain::AbLoopPresetId,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.reject_during_recovery()?;
+        let preset = self
+            .bookmark_service
+            .get_ab_loop_preset(preset_id)
+            .map_err(bookmark_error_to_playback)?;
+        if self.snapshot.current_track_id != Some(preset.track_id) {
+            return Err(PlaybackError::new(
+                PlaybackErrorCode::AbLoopPresetTrackMismatch,
+                "the preset track does not match the current track",
+                false,
+            ));
+        }
+        validate_loop(preset.a_ms, preset.b_ms, self.snapshot.duration_ms)
+            .map_err(bookmark_error_to_playback)?;
+        self.send_ab_loop(preset.a_ms, preset.b_ms)?;
+        self.snapshot.ab_loop = crate::playback::types::AbLoopState {
+            a_ms: Some(preset.a_ms),
+            b_ms: Some(preset.b_ms),
+            active: true,
+        };
+        self.publish();
+        Ok(self.snapshot.clone())
+    }
+
     fn set_audio_device(&mut self, name: String) -> Result<PlaybackSnapshot, PlaybackError> {
         if name.trim().is_empty() {
             return Err(PlaybackError::new(
@@ -1330,6 +1596,8 @@ impl Controller {
     fn clear_queue(&mut self) -> Result<PlaybackSnapshot, PlaybackError> {
         self.recovery = None;
         self.pending_load = None;
+        self.clear_ab_loop_backend()?;
+        self.snapshot.ab_loop = crate::playback::types::AbLoopState::default();
         if self.snapshot.current_track_id.is_some() && self.backend.health().connected {
             self.backend.send(BackendCommand::Stop)?;
         }
@@ -1606,6 +1874,10 @@ impl Controller {
         desired_paused: bool,
         purpose: LoadPurpose,
     ) -> Result<PlaybackSnapshot, PlaybackError> {
+        if self.snapshot.current_track_id != Some(resolved.track_id) {
+            self.clear_ab_loop_backend()?;
+            self.snapshot.ab_loop = crate::playback::types::AbLoopState::default();
+        }
         self.desired_paused = desired_paused;
         self.apply_resolved(&resolved);
         self.snapshot.phase = PlaybackPhase::Loading;
@@ -1665,6 +1937,13 @@ impl Controller {
         ];
         if position_ms > 0 {
             restoration.push(BackendCommand::SeekAbsoluteMs(position_ms));
+        }
+        if self.snapshot.ab_loop.active {
+            if let (Some(a_ms), Some(b_ms)) =
+                (self.snapshot.ab_loop.a_ms, self.snapshot.ab_loop.b_ms)
+            {
+                restoration.push(BackendCommand::SetAbLoop { a_ms, b_ms });
+            }
         }
         restoration.push(BackendCommand::SetPaused(pending.desired_paused));
         for command in restoration {
@@ -2389,6 +2668,8 @@ impl Controller {
             .queue_repository
             .load_snapshot(snapshot_id)
             .map_err(snapshot_repository_error)?;
+        self.clear_ab_loop_backend()?;
+        self.snapshot.ab_loop = crate::playback::types::AbLoopState::default();
         if self.snapshot.current_track_id.is_some() && self.backend.health().connected {
             self.backend.send(BackendCommand::Stop)?;
         }
@@ -2573,6 +2854,27 @@ fn persistence_error(error: QueueRepositoryError) -> PlaybackError {
         error.to_string(),
         retryable,
     )
+}
+
+fn bookmark_error_to_playback(error: BookmarkError) -> PlaybackError {
+    let code = match error {
+        BookmarkError::PresetNotFound(_) => PlaybackErrorCode::AbLoopPresetNotFound,
+        BookmarkError::PresetTrackMismatch => PlaybackErrorCode::AbLoopPresetTrackMismatch,
+        BookmarkError::InvalidLoop
+        | BookmarkError::PositionOutsideDuration
+        | BookmarkError::InvalidPresetName
+        | BookmarkError::DuplicatePresetName
+        | BookmarkError::InvalidPosition
+        | BookmarkError::NoteTooLong
+        | BookmarkError::EmptyNote => PlaybackErrorCode::InvalidAbLoop,
+        BookmarkError::TrackNotFound(_) | BookmarkError::BookmarkNotFound(_) => {
+            PlaybackErrorCode::TrackNotFound
+        }
+        BookmarkError::Database(_)
+        | BookmarkError::Sqlite(_)
+        | BookmarkError::InvalidStoredValue => PlaybackErrorCode::PersistenceFailed,
+    };
+    PlaybackError::new(code, error.to_string(), false)
 }
 
 fn persistence_error_message(detail: impl Into<String>) -> PlaybackError {
@@ -2818,6 +3120,8 @@ mod tests {
         Seek(u64),
         Volume(u8),
         Muted(bool),
+        AbLoop(u64, u64),
+        ClearAbLoop,
         ListDevices,
         Device(String),
         Stop,
@@ -3047,6 +3351,24 @@ mod tests {
                         .unwrap()
                         .operations
                         .push(FakeOperation::Muted(muted));
+                    Ok(())
+                }
+                BackendCommand::SetAbLoop { a_ms, b_ms } => {
+                    self.control
+                        .state
+                        .lock()
+                        .unwrap()
+                        .operations
+                        .push(FakeOperation::AbLoop(a_ms, b_ms));
+                    Ok(())
+                }
+                BackendCommand::ClearAbLoop => {
+                    self.control
+                        .state
+                        .lock()
+                        .unwrap()
+                        .operations
+                        .push(FakeOperation::ClearAbLoop);
                     Ok(())
                 }
                 BackendCommand::QueryAudioDevices => {
@@ -3298,6 +3620,133 @@ mod tests {
             service.toggle_play_pause().unwrap().phase,
             PlaybackPhase::Playing
         );
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn ab_loop_requires_a_valid_interval_and_routes_only_typed_backend_commands() {
+        let library = test_library(1);
+        let (service, control, _) = service_with(&library);
+        service.play_track(library.tracks[0].clone()).unwrap();
+        control.push_event(BackendEvent::FileLoaded);
+        wait_until_playing(&service);
+        control.push_event(BackendEvent::PositionChanged(1_000));
+        wait_for_snapshot(&service, |snapshot| snapshot.position_ms == 1_000);
+
+        let a_only = service.set_ab_loop_a().unwrap();
+        assert_eq!(a_only.ab_loop.a_ms, Some(1_000));
+        assert_eq!(a_only.ab_loop.b_ms, None);
+        assert!(!a_only.ab_loop.active);
+        assert!(matches!(
+            service.set_ab_loop_b(),
+            Err(PlaybackError {
+                code: PlaybackErrorCode::InvalidAbLoop,
+                ..
+            })
+        ));
+
+        control.push_event(BackendEvent::PositionChanged(1_200));
+        wait_for_snapshot(&service, |snapshot| snapshot.position_ms == 1_200);
+        assert!(matches!(
+            service.set_ab_loop_b(),
+            Err(PlaybackError {
+                code: PlaybackErrorCode::InvalidAbLoop,
+                ..
+            })
+        ));
+        control.push_event(BackendEvent::PositionChanged(1_500));
+        wait_for_snapshot(&service, |snapshot| snapshot.position_ms == 1_500);
+        let active = service.set_ab_loop_b().unwrap();
+        assert_eq!(active.ab_loop.a_ms, Some(1_000));
+        assert_eq!(active.ab_loop.b_ms, Some(1_500));
+        assert!(active.ab_loop.active);
+        assert!(control
+            .operations()
+            .contains(&FakeOperation::AbLoop(1_000, 1_500)));
+
+        let cleared = service.clear_ab_loop().unwrap();
+        assert_eq!(cleared.ab_loop, AbLoopState::default());
+        assert!(control.operations().contains(&FakeOperation::ClearAbLoop));
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn new_track_clears_live_loop_and_same_track_source_switch_preserves_it() {
+        let library = test_library(2);
+        let (service, control, _) = service_with(&library);
+        service.play_track(library.tracks[0].clone()).unwrap();
+        control.push_event(BackendEvent::FileLoaded);
+        wait_until_playing(&service);
+        control.push_event(BackendEvent::PositionChanged(1_000));
+        wait_for_snapshot(&service, |snapshot| snapshot.position_ms == 1_000);
+        service.set_ab_loop_a().unwrap();
+        control.push_event(BackendEvent::PositionChanged(1_500));
+        wait_for_snapshot(&service, |snapshot| snapshot.position_ms == 1_500);
+        service.set_ab_loop_b().unwrap();
+
+        let alternate_source = add_local_source(
+            &library,
+            library.tracks[0].track_id,
+            "alternate.wav",
+            10_000,
+        );
+        service
+            .switch_playback_source(TrackPlaybackRequest {
+                track_id: library.tracks[0].track_id,
+                source_id: Some(alternate_source),
+            })
+            .unwrap();
+        control.push_event(BackendEvent::FileLoaded);
+        let switched = wait_until_playing(&service);
+        assert!(switched.ab_loop.active);
+        assert_eq!(switched.ab_loop.a_ms, Some(1_000));
+
+        service.play_track(library.tracks[1].clone()).unwrap();
+        let loading = service.snapshot();
+        assert_eq!(loading.ab_loop, AbLoopState::default());
+        assert!(control.operations().contains(&FakeOperation::ClearAbLoop));
+        control.push_event(BackendEvent::FileLoaded);
+        wait_until_playing(&service);
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn ab_loop_presets_save_apply_and_delete_without_autoplay() {
+        let library = test_library(1);
+        let (service, control, _) = service_with(&library);
+        service.play_track(library.tracks[0].clone()).unwrap();
+        control.push_event(BackendEvent::FileLoaded);
+        wait_until_playing(&service);
+        control.push_event(BackendEvent::PositionChanged(500));
+        wait_for_snapshot(&service, |snapshot| snapshot.position_ms == 500);
+        service.set_ab_loop_a().unwrap();
+        control.push_event(BackendEvent::PositionChanged(1_000));
+        wait_for_snapshot(&service, |snapshot| snapshot.position_ms == 1_000);
+        service.set_ab_loop_b().unwrap();
+
+        let preset = service
+            .save_ab_loop_preset(
+                library.tracks[0].track_id,
+                "  Synthetic   Verse  ".to_owned(),
+            )
+            .unwrap();
+        assert_eq!(preset.name, "Synthetic Verse");
+        assert_eq!(
+            service
+                .list_ab_loop_presets(library.tracks[0].track_id)
+                .unwrap()
+                .len(),
+            1
+        );
+        service.clear_ab_loop().unwrap();
+        let applied = service.apply_ab_loop_preset(preset.id).unwrap();
+        assert!(applied.ab_loop.active);
+        assert_eq!(applied.phase, PlaybackPhase::Playing);
+        service.delete_ab_loop_preset(preset.id).unwrap();
+        assert!(service
+            .list_ab_loop_presets(library.tracks[0].track_id)
+            .unwrap()
+            .is_empty());
         service.shutdown().unwrap();
     }
 

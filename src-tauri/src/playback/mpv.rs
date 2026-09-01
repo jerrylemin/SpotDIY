@@ -423,6 +423,53 @@ impl MpvWorker {
         }
     }
 
+    fn set_ab_loop(&mut self, a_ms: u64, b_ms: u64) -> Result<(), BackendError> {
+        #[cfg(windows)]
+        {
+            self.request(
+                "set A/B loop",
+                vec![
+                    json!("set_property"),
+                    json!("ab-loop-a"),
+                    json!(a_ms as f64 / 1_000.0),
+                ],
+            )?;
+            self.request(
+                "set B loop",
+                vec![
+                    json!("set_property"),
+                    json!("ab-loop-b"),
+                    json!(b_ms as f64 / 1_000.0),
+                ],
+            )?;
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (a_ms, b_ms);
+            Err(BackendError::NotStarted)
+        }
+    }
+
+    fn clear_ab_loop(&mut self) -> Result<(), BackendError> {
+        #[cfg(windows)]
+        {
+            self.request(
+                "clear A/B loop A",
+                vec![json!("set_property"), json!("ab-loop-a"), json!(-1.0)],
+            )?;
+            self.request(
+                "clear A/B loop B",
+                vec![json!("set_property"), json!("ab-loop-b"), json!(-1.0)],
+            )?;
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(())
+        }
+    }
+
     fn list_audio_devices(&mut self) -> Result<Vec<AudioDevice>, BackendError> {
         #[cfg(windows)]
         {
@@ -614,6 +661,14 @@ fn process_backend_command(
         }
         BackendCommand::SetMuted(muted) => {
             worker.set_muted(muted)?;
+            Ok(None)
+        }
+        BackendCommand::SetAbLoop { a_ms, b_ms } => {
+            worker.set_ab_loop(a_ms, b_ms)?;
+            Ok(None)
+        }
+        BackendCommand::ClearAbLoop => {
+            worker.clear_ab_loop()?;
             Ok(None)
         }
         BackendCommand::QueryAudioDevices => Ok(Some(BackendEvent::AudioDevices(
