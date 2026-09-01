@@ -125,3 +125,22 @@ sidecar, bookmark and preset retention across restart, no automatic A/B preset
 application, queue persistence, clean close, and zero owned mpv processes. Live
 LRCLIB smoke was optional and skipped; no copyrighted lyrics, media, secrets,
 raw provider payloads, or repository-local `src-tauri\target` are retained.
+
+## Plan 10 verification
+
+Plan 10 passes 343 Rust unit tests plus one synthetic mpv integration test, 70
+Vitest tests across 18 files, and 51 Playwright tests across the 1280, 1920,
+and 2560 viewport projects. Frontend typecheck/lint/build, Rust fmt and
+all-features Clippy with warnings denied, Tauri packaging, and `git diff --check`
+also pass. Lint has three non-fatal Fast Refresh warnings; build notices for
+Browserslist data, Tailwind content discovery, and a large frontend chunk are
+non-fatal.
+
+Focused design coverage checks custom-theme schema limits and contrast,
+Dark/Light/Custom controls, invalid import recovery, export/reset, all three
+layout profiles, visible focus, pointer and keyboard context actions, reduced
+motion, icon rendering, long-content overflow, responsive widths, and the
+1080-pixel height guard. Screenshots are generated into Playwright output paths
+only. The packaged settings smoke proves restart persistence and reset for
+theme/layout settings; the packaged Plan 09 playback/lyrics smoke still passes
+with clean shutdown and no owned mpv process.

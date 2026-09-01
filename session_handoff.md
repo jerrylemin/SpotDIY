@@ -7,6 +7,8 @@ Plan 04 feature commit: `536617d` (`feat: add mpv playback service and queue tra
 Plan 04 review-fix commit: `af66127` (`fix: harden mpv playback lifecycle and event ordering`)
 Plan 05 delivery commits: `58b5adc`, `cbcb43e`, `facab20`, `0db5eac`,
 `6c16747`, `51da804`, `905f322`, `0d52f9b`, `9b2a6d8`, and `ab6169d`.
+Plan 10 implementation commits: `cc28ba1`, `f2a5995`, `850bc82`, `8c62aed`,
+and `6eb231d`.
 
 ## Completed
 
@@ -159,7 +161,25 @@ once after implementation. Live LRCLIB smoke was optional and skipped; waveform
 generation is not claimed. Cargo output remains external at
 `C:\CargoTarget\SpotDIY` and repository-local `src-tauri\target` is absent.
 
+## Plan 10 completion
+
+Plan 10 is complete through `cc28ba1`, `f2a5995`, `850bc82`, `8c62aed`, and
+`6eb231d`. It delivers the 15-token semantic theme contract, validated custom
+theme import/export/reset, Dark/Light/System/Custom resolution, persistent
+Comfortable/Compact/Dense layout profiles, reduced motion, shared accessible
+primitives, keyboard context actions, InspectorPanel/IconGallery foundations,
+and Settings APPEARANCE integration with a representative LibraryTrackRow.
+
+Verification is green: 343 Rust unit tests plus one synthetic mpv integration
+test, 70 Vitest tests, 51 Playwright tests at 1280/1920/2560, frontend quality
+gates, Rust fmt/Clippy/tests, Tauri packaging, packaged settings persistence and
+reset smoke, packaged Plan 09 playback/lyrics smoke, and clean shutdown with
+no owned mpv process. CodeGraph and Graphify were each refreshed once; the
+current stats are recorded in the verification log. Build output is external at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
+
 ## Next atomic task
 
-Plan 10/11 visual system and main-player refinement. No Plan 09 follow-up is
-required for the delivered local-first lyrics, bookmarks, and A/B boundary.
+Plan 11 main-player refinement and Track Inspector work, after external
+ChatGPT GitHub review. No Plan 09 or Plan 10 follow-up is required for the
+delivered local-first playback and design-system boundaries.

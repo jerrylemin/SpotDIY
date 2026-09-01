@@ -18,9 +18,10 @@ verification gates.
 | Downloads | 07 | COMPLETE | `6012921` | 308 Rust + 47 Vitest + 45 Playwright; fmt/clippy/build/package and smoke | Persistent yt-dlp/FFmpeg task execution, truthful provenance, progress, concurrency, cancel/retry, restart recovery, safe finalization, typed IPC, and Downloads UI. |
 | Playlists, persistent queue, likes, tags | 08 | COMPLETE | `0a62cad` | 318 Rust + 51 Vitest + 48 Playwright; fmt/clippy/build/package and persistence smoke | Durable playlists, seeded Inbox, one-shot branches, likes/ratings/tags, typed collection IPC, PlaybackService-owned queue sections, snapshots, restart restore, and queue drawer are delivered. |
 | Lyrics, bookmarks, and A/B loop | 09 | COMPLETE | `7b1a097` | 337 Rust + 56 Vitest + 48 Playwright; parser/provider/package persistence smoke | Local-first LRC/embedded lyrics, explicit LRCLIB, synchronized display, durable bookmarks/presets, and PlaybackService-owned A/B loop are delivered. Waveform generation is not claimed. |
-| UI design system and main player | 10, 11 | IN PROGRESS | af66127 | frontend quality gates and Playwright matrix | The functional transport/player slice is delivered; later visual system work remains. |
+| UI design system | 10 | COMPLETE | `6eb231d` | 70 Vitest, 51 Playwright; typecheck/lint/build | Semantic themes, layout profiles, accessible primitives, context actions, inspector/gallery foundation, and Settings APPEARANCE are delivered. |
+| Main-player refinement | 11 | NOT STARTED | â€” | â€” | Plan 10 is complete; awaits external ChatGPT GitHub review before work begins. |
 | Overlays and Windows integration | 12 | NOT STARTED | — | — | Overlay feasibility requires Tauri/Win32 validation. |
 | Import/export and portable mode | 13 | NOT STARTED | — | — | Transactional `.spotdiy` archive and deterministic portable startup. |
 | Smart features and analytics | 14 | NOT STARTED | — | — | Local-only listening analytics. |
 | Advanced visual exploration | 15 | NOT STARTED | — | — | Music Map, Galaxy, radial menu, Theme Studio. |
-| Quality, performance, release | 16 | IN PROGRESS | `7b1a097` | 337 Rust + 56 Vitest + 48 Playwright; fmt/clippy/build/smoke | Plan 09 verification gates pass locally; clean-install and later performance/accessibility work remain. |
+| Quality, performance, release | 16 | IN PROGRESS | `6eb231d` | 343 Rust + 70 Vitest + 51 Playwright; fmt/clippy/build/smoke | Plan 10 verification gates pass locally; clean-install and later performance/accessibility work remain. |

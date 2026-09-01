@@ -162,3 +162,23 @@
   native-free and no waveform generation was added.
 - The implementation boundary is committed as `1bc7108`, `e4d62d8`,
   `c25f954`, and `7b1a097`; documentation closure follows the final gates.
+
+## 2026-09-02 - Plan 10 UI design system and theme foundations
+
+- Integrated the schema-version-1 custom theme contract with exactly 15
+  semantic colors, strict hex values, size/name limits, and WCAG contrast
+  validation in both TypeScript/Zod and Rust. Added Dark, Light, System, and
+  Custom resolution with root `data-theme` and `data-layout` attributes.
+- Integrated persistent `layout_profile` and `custom_theme` ordinary settings
+  keys without adding migration 7; native persistence remains in
+  `SettingsRepository` and browser preview uses a bounded in-memory adapter.
+- Integrated semantic CSS tokens, foundations/primitives, reduced-motion
+  configuration, shared accessible components, keyboard context actions,
+  InspectorPanel/IconGallery foundations, and custom SpotDIY icon additions.
+- Integrated Settings APPEARANCE controls for theme/layout selection,
+  custom-theme import/export/reset/status/errors and representative
+  `LibraryTrackRow` context actions. Added the three-width Playwright design
+  matrix and screenshot-output coverage without committing screenshots.
+- The implementation boundary is committed as `cc28ba1`, `f2a5995`,
+  `850bc82`, `8c62aed`, and `6eb231d`; documentation closure follows the final
+  verification gates.

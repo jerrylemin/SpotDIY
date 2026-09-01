@@ -306,3 +306,33 @@ below.
 - No copyrighted lyrics, media, credentials, tokens, raw provider payloads,
   runtime database, cache temp, or generated test artifact is part of the
   repository changes; `src-tauri\target` remains absent.
+
+## 2026-09-02 - Plan 10 final verification
+
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` - passed. Vitest
+  reports 70 tests across 18 files. Lint retains three non-fatal Fast Refresh
+  warnings; build retains non-fatal Browserslist, Tailwind content, and large
+  chunk notices.
+- `pnpm exec playwright test` - passed: 51 tests across the 1280, 1920, and
+  2560 viewport projects. Plan 10 coverage verifies theme/layout controls,
+  custom-theme validation and reset, focus, context-menu keyboard paths,
+  reduced motion, responsive overflow, icon rendering, and the 1080 height
+  guard. Screenshots use Playwright output paths and are not committed.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`,
+  `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+  --all-features -- -D warnings`, and
+  `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` - passed.
+  The final Rust run reports 343 unit tests plus one synthetic mpv integration
+  test.
+- `pnpm tauri build` - passed; release executable and NSIS output are under
+  external `C:\CargoTarget\SpotDIY`. A packaged settings smoke passed startup,
+  default Dark/Comfortable values, Dark/Light/Custom writes, all layout
+  profiles, custom-theme persistence across restart, reset, and clean close.
+  The packaged Plan 09 playback/lyrics persistence smoke also passed; no owned
+  mpv process remained.
+- `git diff --check` - passed. Storage remains schema 6 with ordinary
+  `layout_profile` and `custom_theme` settings keys; no migration 7 was added.
+  CodeGraph was refreshed once and reports 138 files, 4,655 nodes, and 17,004
+  edges. Graphify was refreshed once with the code-only update and reports 4,023
+  nodes, 7,913 edges, and 245 communities. Repository-local `src-tauri\target`
+  remains absent.

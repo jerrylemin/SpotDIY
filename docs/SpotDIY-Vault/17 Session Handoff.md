@@ -105,6 +105,30 @@ real-mpv smoke, packaged Plan 08/09 persistence smokes, and v5-to-v6 migration
 coverage. Cargo output remains external at `C:\CargoTarget\SpotDIY`; live LRCLIB
 smoke was optional and skipped; waveform generation is not claimed.
 
+## Plan 10 handoff
+
+Plan 10 is complete through implementation commits `cc28ba1`, `f2a5995`,
+`850bc82`, `8c62aed`, and `6eb231d`. The frontend now has a shared semantic
+token layer, Dark/Light/System/Custom themes, schema-validated custom theme
+import/export/reset, persistent Comfortable/Compact/Dense layout profiles,
+reduced motion, accessible primitives, keyboard context actions, custom icons,
+and InspectorPanel/IconGallery foundations. Settings APPEARANCE owns the
+controls and `LibraryTrackRow` demonstrates context-action adoption.
+
+Verification: 343 Rust unit tests plus one synthetic mpv integration test, 70
+Vitest tests, 51 Playwright tests at 1280/1920/2560, frontend/native quality
+gates, Tauri packaging, packaged theme/layout persistence across restart,
+custom reset, packaged Plan 09 playback/lyrics persistence, and clean shutdown
+with no owned mpv process. Storage remains schema 6 with no migration 7;
+CodeGraph and Graphify were each refreshed once. Build output is external at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
+
+Known limits: browser preview settings are session-scoped in memory, existing
+older v6 databases retain the base migration's historical settings allowlist
+because Plan 10 adds no migration 7, and full Track Inspector/Theme Studio,
+mobile UI, and Plan 11 player refinement remain future work.
+
 ## Next atomic task
 
-Plan 10/11 visual system and main-player refinement.
+Plan 11 main-player refinement and Track Inspector work, after external
+ChatGPT GitHub review.

@@ -100,6 +100,23 @@ PlaybackService-owned A/B controls. Final verification and packaged restart,
 queue, no-autoplay, and owned-process cleanup evidence are recorded in the
 execution logs. Waveform generation is not claimed.
 
+## Plan 10 completion
+
+Plan 10 is complete through implementation commits `cc28ba1`, `f2a5995`,
+`850bc82`, `8c62aed`, and `6eb231d`. It delivers semantic tokens, the
+Dark/Light/System/Custom theme controller, validated custom theme
+import/export/reset, Comfortable/Compact/Dense layout profiles, reduced motion,
+accessible shared primitives, keyboard context actions, InspectorPanel and
+IconGallery foundations, and Settings APPEARANCE integration with a
+representative LibraryTrackRow.
+
+The final boundary keeps storage at schema 6 with ordinary `layout_profile` and
+`custom_theme` settings keys and no migration 7. Full Track Inspector, Theme
+Studio, mobile UI, and Plan 11 main-player refinement remain out of scope.
+Final verification and packaged settings persistence/reset evidence are recorded
+in `docs/execution/verification-log.md`.
+
 ## Next atomic task
 
-Plan 10/11 visual system and main-player refinement.
+Plan 11 main-player refinement and Track Inspector work, after external
+ChatGPT GitHub review.

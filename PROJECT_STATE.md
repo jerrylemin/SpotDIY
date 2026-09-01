@@ -11,7 +11,8 @@ State date: 2026-09-02
 - Plan 07 implementation commits: `0dbb628`, `22438a0`, and `6012921`.
 - Plan 08 implementation commits: `525da8c`, `e5f7161`, `1f31d6a`, and `0a62cad`.
 - Plan 09 implementation commits: `1bc7108`, `e4d62d8`, `c25f954`, and `7b1a097`.
-- Delivery status: Plan 09 implementation and final verification are complete; this document is part of the documentation closure boundary.
+- Plan 10 implementation commits: `cc28ba1`, `f2a5995`, `850bc82`, `8c62aed`, and `6eb231d`.
+- Delivery status: Plan 10 implementation and final verification are complete; this document is part of the documentation closure boundary.
 
 ## Runtime
 
@@ -167,7 +168,7 @@ Plan 08 is the completed follow-on delivery recorded below.
   provider boundary. Bookmarks persist notes and positions; A/B commands stay
   inside `PlaybackService`, clear at a new-track boundary, restore on same-track
   source/recovery paths, and presets do not autoplay.
-- Final evidence: 337 Rust unit tests plus one synthetic mpv integration test,
+- Plan 09 final evidence: 337 Rust unit tests plus one synthetic mpv integration test,
   56 Vitest tests, 48 Playwright runs, typecheck/lint/build, Rust fmt/clippy,
   Tauri release packaging, explicit real-mpv smoke, packaged Plan 08 and Plan
   09 persistence smokes, and the named v5-to-v6 migration smoke all pass.
@@ -175,7 +176,35 @@ Plan 08 is the completed follow-on delivery recorded below.
   output remains external at `C:\CargoTarget\SpotDIY`; repository-local
   `src-tauri\target` remains absent. Live LRCLIB smoke was optional and skipped.
 
-## Next slice after Plan 09
+## Plan 10 delivery snapshot
 
-Plan 10/11 visual system and main-player refinement remain future work. Waveform
-generation is not claimed by Plan 09.
+Plan 10 is complete through implementation commits `cc28ba1`, `f2a5995`,
+`850bc82`, `8c62aed`, and `6eb231d`. The delivery adds the validated 15-token
+semantic theme contract, Dark/Light/System/Custom themes, persistent
+Comfortable/Compact/Dense layout profiles, root theme/layout attributes,
+system-theme synchronization, reduced-motion handling, accessible shared
+primitives, keyboard context actions, the InspectorPanel/IconGallery
+foundation, and Settings APPEARANCE controls for import/export/reset/status.
+Library track actions provide the representative context-menu adoption.
+
+Final Plan 10 evidence is 343 Rust unit tests plus one synthetic mpv integration
+test, 70 Vitest tests across 18 files, and 51 Playwright tests across the 1280,
+1920, and 2560 viewport projects. Typecheck, lint, build, Rust fmt, all-features
+Clippy with warnings denied, all-target Rust tests, Tauri release packaging,
+and `git diff --check` pass. Packaged settings smoke proves default values,
+Dark/Light/Custom writes, all three layout profiles, custom-theme persistence
+across restart, and reset behavior; the packaged Plan 09 playback/lyrics smoke
+also passes.
+
+Storage remains schema version 6 with `layout_profile` and `custom_theme` as
+ordinary settings keys; no migration 7 was added. CodeGraph was refreshed once
+and is up to date at 138 files, 4,655 nodes, and 17,004 edges. Graphify was
+refreshed once with the code-only update at 4,023 nodes, 7,913 edges, and 245
+communities. Build output remains external at `C:\CargoTarget\SpotDIY`; the
+repository-local `src-tauri\target` remains absent.
+
+## Next slice after Plan 10
+
+Plan 11 main-player refinement and Track Inspector work remain future work.
+Await external ChatGPT GitHub review before beginning Plan 11. Waveform
+generation is not claimed by Plan 09 or Plan 10.

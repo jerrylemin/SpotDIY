@@ -4,18 +4,18 @@
 |---|---|---|
 | Frontend type safety | `pnpm typecheck` | Pass. Strict playback/library/settings DTOs and command arguments are checked. |
 | Frontend lint | `pnpm lint` | Pass. |
-| Frontend behavior | `pnpm test` | Pass: 26 Vitest tests, including typed playback IPC, stale revisions, bridge ordering/race handling, PlayerBar, local-library actions, and Ctrl+K transport. |
+| Frontend behavior | `pnpm test` | Pass: 70 Vitest tests across 18 files, including settings/theme schemas, design-system primitives, appearance controls, and existing playback/library/lyrics behavior. |
 | Frontend build | `pnpm build` | Pass. Existing Browserslist/Tailwind content notices are non-fatal. |
 | Rust formatting | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | Pass. |
 | Rust quality | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | Pass. |
-| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | Pass: 117 tests, including playback contracts, protocol framing/correlation, queue policy, managed source resolution, state races/recovery, and library behavior. |
-| Browser playback | `pnpm exec playwright test` | Pass: 9 runs across 1280, 1920, and 2560 viewport projects; includes source-switch queue identity preservation and no console errors. |
+| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | Pass: 343 unit tests plus one synthetic mpv integration test, including settings/theme validation, playback, persistence, and existing service behavior. |
+| Browser playback | `pnpm exec playwright test` | Pass: 51 tests across 1280, 1920, and 2560 viewport projects; includes design-system appearance, context-menu keyboard paths, responsive overflow, and existing playback coverage. |
 | Real mpv | Windows `mpv_smoke` integration gate | Pass with local `v0.41.0-dev-g41f6a6450`; synthetic WAV transport, device, EOF, shutdown, and process-exit behavior verified. |
 | Packaged lifecycle | `scripts/packaged-playback-smoke.ps1` | Pass with release executable: local indexing, playback transport, graceful close, owned-mpv cleanup, restart persistence, and empty transient queue. |
 | Release | `pnpm tauri build` | Pass. Release executable and NSIS bundle built with external `C:\CargoTarget\SpotDIY`; no repository-local `src-tauri\target`. |
 | Provider contracts | Plan 05 native adapter/search tests and metadata smoke | Pass: 250 Rust tests include provider registry, local search, yt-dlp adapters, Spotify PKCE/error mapping, timeouts, cancellation, sorting, and cache bounds; opt-in YouTube/SoundCloud metadata smoke returned 25 entries each. |
 | Persistence boundary | Schema and restart smoke | Pass: Plan 04 adds no migration; library roots persist while the transient playback queue restarts empty. |
-| Visual follow-up | Playwright screenshots | The matrix exercises responsive widths, long titles, missing artwork, and accessible controls; later full visual/design QA remains part of the UI/release plans. |
+| Visual follow-up | Playwright screenshots | Plan 10 covers appearance, focus, reduced motion, context actions, icon rendering, and responsive guards; Plan 11 main-player refinement remains pending external review. |
 
 ## Plan 05 verification
 
@@ -136,3 +136,31 @@
   local reads are read-only, media and raw provider payloads are not retained,
   build output remains at `C:\CargoTarget\SpotDIY`, and
   `src-tauri\target` remains absent.
+
+## Plan 10 verification
+
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass.
+  Vitest reports 70 tests across 18 files. Lint has three non-fatal Fast Refresh
+  warnings; build has non-fatal Browserslist, Tailwind content, and chunk-size
+  notices.
+- Browser: `pnpm exec playwright test` passes 51 tests across the 1280, 1920,
+  and 2560 viewport projects. Design coverage verifies Dark/Light/Custom theme
+  controls, invalid import recovery, export/reset, all layout profiles, focus,
+  keyboard and pointer context actions, reduced motion, responsive overflow,
+  long-content handling, and the 1080-pixel height guard. Screenshots are
+  written to Playwright output paths and are not repository artifacts.
+- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`,
+  all-features Clippy with warnings denied, and
+  `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` pass. The
+  final run reports 343 Rust unit tests plus one synthetic mpv integration test.
+- Runtime: `pnpm tauri build` passes with release output under external
+  `C:\CargoTarget\SpotDIY`. The packaged settings smoke proves startup,
+  default Dark/Comfortable values, Dark/Light/Custom writes, all three layout
+  profiles, custom-theme persistence across restart, reset, and clean close.
+  The packaged Plan 09 playback/lyrics persistence smoke also passes and leaves
+  no owned mpv process.
+- Storage and graphs: schema version remains 6; `layout_profile` and
+  `custom_theme` are ordinary settings keys and no migration 7 was added.
+  CodeGraph was refreshed once and is up to date at 138 files, 4,655 nodes,
+  and 17,004 edges. Graphify was refreshed once at 4,023 nodes, 7,913 edges,
+  and 245 communities. Repository-local `src-tauri\target` remains absent.

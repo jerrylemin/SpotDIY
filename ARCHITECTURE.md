@@ -264,3 +264,28 @@ track clears the active loop, same-track source switching and recovery restore
 it, and applying a preset never starts playback. The synchronized lyrics page
 selects the active cue by playback position and shows source/attribution state;
 waveform generation is outside this boundary.
+
+## Plan 10 UI design-system boundary
+
+The frontend design system is token-first. `tokens.css` defines the semantic
+surface, text, accent, status, focus, and waveform variables; `foundations.css`
+and `primitives.css` provide the shared interaction and component layer.
+`ThemeController` resolves Dark, Light, System, or validated Custom themes and
+applies `data-theme="dark|light|custom"` plus
+`data-layout="comfortable|compact|dense"` to the document root. System-theme
+changes are subscribed through `matchMedia`, and invalid custom data falls back
+to dark with a recoverable Settings error.
+
+The custom theme contract is schema version 1, contains exactly 15 semantic
+color tokens, accepts strict `#RRGGBB` values, and is checked for byte, name,
+and WCAG contrast limits in both Zod and Rust. `layout_profile` and
+`custom_theme` are ordinary typed settings keys in schema 6; no migration 7 was
+introduced. The browser E2E adapter is an in-memory preview seam, while native
+settings continue through `SettingsRepository`.
+
+Shared Button, IconButton, Surface, StatusChip, Field, SegmentedControl,
+Tooltip, EmptyState, ProviderBadge, and ContextActionMenu primitives centralize
+labels, focus, disabled explanations, keyboard actions, and reduced motion.
+InspectorPanel/IconGallery is a development/design surface. Context actions
+are caller-supplied and are adopted by `LibraryTrackRow`; permanent navigation,
+full Track Inspector, and Plan 11 player refinement remain outside this boundary.

@@ -73,3 +73,29 @@ deliberately keeps queue ownership inside `PlaybackService` instead of adding a
 separate `QueueService`; `BackupService` and `AnalyticsService` remain
 later-plan boundaries with no empty facade modules. Plan 07 downloads do not
 create library tracks, move media, or inject paths into playback.
+
+## Plan 10 frontend structure
+
+The Plan 10 design-system boundary is organized as follows:
+
+```text
+src/styles/tokens.css, foundations.css, primitives.css
+        |
+        +--> src/features/theme/theme-schema.ts
+        +--> src/features/theme/theme-presets.ts
+        +--> src/features/theme/theme-controller.tsx
+        +--> src/features/layout/layout-profiles.ts
+        +--> src/components/common/* (Button, Field, Surface, menus, etc.)
+        +--> src/components/icons/SpotIcon.tsx, IconGallery.tsx
+        `--> src/components/inspector/InspectorPanel.tsx
+```
+
+`ThemeController` owns resolved Dark/Light/System/Custom presentation state
+and applies `data-theme`/`data-layout` attributes at the document root. The
+validated custom-theme definition is shared by the frontend Zod boundary and
+the Rust settings DTOs. `SettingsPage` owns the user-facing appearance
+controls; native persistence remains behind `SettingsRepository`, while the
+browser preview uses its bounded in-memory adapter. The shared primitives own
+focus, labels, disabled explanations, keyboard behavior, and reduced-motion
+defaults. The InspectorPanel/IconGallery is a development/design surface and
+does not add permanent navigation.
