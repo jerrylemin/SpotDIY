@@ -1,6 +1,6 @@
 # SpotDIY project state
 
-State date: 2026-09-01
+State date: 2026-09-02
 
 ## Repository
 
@@ -10,7 +10,8 @@ State date: 2026-09-01
 - Plan 04 review-fix commit: `af66127` (`fix: harden mpv playback lifecycle and event ordering`)
 - Plan 07 implementation commits: `0dbb628`, `22438a0`, and `6012921`.
 - Plan 08 implementation commits: `525da8c`, `e5f7161`, `1f31d6a`, and `0a62cad`.
-- Delivery status: Plan 08 implementation and final verification are complete; this document is part of the documentation closure boundary.
+- Plan 09 implementation commits: `1bc7108`, `e4d62d8`, `c25f954`, and `7b1a097`.
+- Delivery status: Plan 09 implementation and final verification are complete; this document is part of the documentation closure boundary.
 
 ## Runtime
 
@@ -19,10 +20,13 @@ State date: 2026-09-01
 - Library: `LibraryService` owns persistent folder roots, recursive local indexing, metadata/artwork/fingerprint evidence, watcher reconciliation, and managed-source path validation.
 - Playback: `PlaybackService` is the sole serialized controller. It owns the persistent ID-only queue, checkpointed position, immutable snapshots, transport, repeat/shuffle/previous/EOF policy, source switching, recovery, and shutdown.
 - Playlists: `PlaylistService` owns durable playlists, seeded Inbox, playlist items, one-shot branches, likes, ratings, tags, and bounded collection reads.
+- Lyrics: `LyricsService` owns local-first precedence, bounded LRC/embedded metadata reads, manual overrides, explicit LRCLIB lookup/cache, and typed lyrics DTOs. Local media reads are read-only through `LibraryService`.
+- Bookmarks and loops: `BookmarkService` owns durable bookmarks and A/B presets; `PlaybackService` owns active A/B transport state and clears it at a new-track boundary.
 - Backend: `MpvBackend` starts one external `mpv.exe` child over one fresh Windows named pipe and keeps JSON protocol/process details behind the backend boundary. Discovery is `SPOTDIY_MPV_PATH`, then PATH.
 - Tauri playback surface: `get_playback_snapshot`, `play_track`, `enqueue_track`, `play_track_next`, `toggle_play_pause`, `seek_playback`, `next_track`, `previous_track`, `set_playback_volume`, `set_playback_muted`, `set_repeat_mode`, `set_shuffle_enabled`, `get_audio_devices`, `set_audio_device`, `switch_playback_source`, `retry_playback_backend`, `clear_playback_queue`, playlist playback/queue commands, queue workspace mutations, and queue snapshot commands; state events use `playback://state` and `queue://state`.
 - Downloads: `DownloadService` owns schema-v4 task persistence, yt-dlp/FFmpeg execution, bounded progress, scheduling, cancellation, retry, restart recovery, destination-side finalization, and `downloads://state` snapshots. Tasks support YouTube and SoundCloud only; Spotify and Local are rejected.
 - Tauri download surface: `get_download_snapshot`, `queue_search_result_download`, `queue_source_download`, `cancel_download`, `retry_download`, `set_download_concurrency`, and `open_download_location`.
+- Tauri lyrics/playback surface: typed lyrics load/save/delete/import/provider/cache commands, bookmark and A/B preset commands, and `set_ab_loop`/`clear_ab_loop`; lyrics state is presentation-owned while active loop state remains in `playback://state`.
 - Build cache: Rust/Tauri output is external at `C:\CargoTarget\SpotDIY`; `src-tauri\target` is absent and the path is not committed.
 
 ## Decisions in force
@@ -35,6 +39,9 @@ State date: 2026-09-01
 - Keep standard data under `%LOCALAPPDATA%\SpotDIY`; `SPOTDIY_PACKAGED_DATA_ROOT` is a smoke-only isolation seam because Windows known-folder resolution does not follow a child `LOCALAPPDATA` override.
 - Keep download task temp files under `%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>`, create final names inside the user-selected `downloads_directory`, and never expose arbitrary paths through IPC.
 - Preserve provider-encoded provenance for YouTube/SoundCloud downloads; no lossy-to-FLAC claim, raw provider payload, credential, token, or automatic library mutation is allowed.
+- Resolve lyrics with the explicit precedence manual override, exact local `.lrc` sidecar, embedded timed text, embedded plain text, then cached LRCLIB. Local reads never mutate media or metadata.
+- Keep LRCLIB opt-in and metadata-safe: no automatic lookup, no raw provider payload persistence, no full copyrighted lyrics in fixtures or logs, and no provider result is sent to playback.
+- Keep bookmarks and A/B loop state ID-based. `PlaybackService` owns loop commands; a new track clears A/B, same-track source switching and recovery restore it, and presets never autoplay.
 - Keep provider playback/search, lyrics, overlays, media keys/SMTC, portable mode, analytics, EQ, normalization, crossfade, ReplayGain, and unrelated refactors outside the Plan 08 boundary.
 
 ## Plan 04 verification snapshot
@@ -143,6 +150,32 @@ Plan 08 is the completed follow-on delivery recorded below.
 - CodeGraph and Graphify were refreshed once after implementation. Their final
   counts are recorded in `docs/execution/verification-log.md`.
 
-## Next slice after Plan 08
+## Plan 09 delivery snapshot (2026-09-02)
 
-STOPPED AFTER PLAN 08. Awaiting external ChatGPT GitHub review before Plan 09.
+- Schema version 6 adds lyrics records, bookmarks, and A/B loop presets with
+  foreign keys, bounded fields, normalized preset names, and migration tests
+  preserving Plan 08 collections/queue/snapshots and Plan 07 downloads.
+- `LyricsService` implements manual override, exact local `.lrc` sidecar,
+  embedded timed text, embedded plain text, and cached LRCLIB precedence.
+  Sidecar reads are regular-file, size-bounded, managed-path reads; manual
+  import uses the native picker and never accepts an arbitrary frontend path.
+- Timed LRC parsing covers integer, 1/2/3-digit fractions, multiple
+  timestamps, metadata, signed offsets, inline timestamps, stable ordering,
+  malformed-line fallback, and bounded input/cue counts. Embedded ID3 plain
+  and SYLT text are read without media mutation.
+- LRCLIB is an explicit HTTPS-only, bounded, rate-gated, metadata-only
+  provider boundary. Bookmarks persist notes and positions; A/B commands stay
+  inside `PlaybackService`, clear at a new-track boundary, restore on same-track
+  source/recovery paths, and presets do not autoplay.
+- Final evidence: 337 Rust unit tests plus one synthetic mpv integration test,
+  56 Vitest tests, 48 Playwright runs, typecheck/lint/build, Rust fmt/clippy,
+  Tauri release packaging, explicit real-mpv smoke, packaged Plan 08 and Plan
+  09 persistence smokes, and the named v5-to-v6 migration smoke all pass.
+- CodeGraph and Graphify were each refreshed once after implementation. Build
+  output remains external at `C:\CargoTarget\SpotDIY`; repository-local
+  `src-tauri\target` remains absent. Live LRCLIB smoke was optional and skipped.
+
+## Next slice after Plan 09
+
+Plan 10/11 visual system and main-player refinement remain future work. Waveform
+generation is not claimed by Plan 09.

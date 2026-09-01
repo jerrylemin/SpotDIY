@@ -101,3 +101,20 @@ snapshots are bounded and immutable except for deletion; restoring one stops
 the current transport, creates fresh live queue IDs, and never autoplays.
 Playlist playback and queueing accept playlist item IDs and resolve their
 requested source through the existing `SourceResolver` boundary.
+
+## Plan 09 A/B loop and bookmark boundary
+
+`PlaybackService` remains the sole owner of active A/B state. Typed `set A`,
+`set B`, and `clear` commands update the revisioned playback snapshot and map
+to mpv `ab-loop-a`, `ab-loop-b`, and bounded clear commands. A new track clears
+the active loop; same-track source switching and backend recovery restore it.
+Applying a named preset persists or restores loop values without starting
+playback. Invalid durations, reversed bounds, and gaps under 250 ms are
+rejected.
+
+`BookmarkService` persists track/source-aware positions and bounded notes in
+schema 6. Bookmarks and loop presets use typed IDs through IPC, while queue
+ownership, source resolution, and all filesystem path handling remain on the
+Rust side. The packaged Plan 09 smoke covers bookmark/preset restart retention,
+queue persistence, no-autoplay behavior, track-boundary clearing, and owned
+mpv cleanup.

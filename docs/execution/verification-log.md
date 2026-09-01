@@ -272,3 +272,37 @@ below.
   3,596 nodes, 7,012 edges, and 233 communities.
 - Repository-local `src-tauri\target` remains absent; no media, credentials,
   tokens, runtime database, cache temp, or generated test artifact is staged.
+
+## 2026-09-02 - Plan 09 local-first lyrics, bookmarks, and A/B loop
+
+- Baseline: `main` was clean and aligned at `4940ebe6ae473507569093629c8f863ce381f990`; `CARGO_TARGET_DIR` was set to `C:\CargoTarget\SpotDIY` and repository-local `src-tauri\target` was absent.
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` -
+  passed. Vitest reports 56 tests across 16 files.
+- Browser: `pnpm exec playwright test` - passed: 48 runs across the 1280,
+  1920, and 2560 viewport projects.
+- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`,
+  `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+  --all-features -- -D warnings`, and `cargo test --manifest-path
+  src-tauri/Cargo.toml --all-targets` - passed. The final Rust run reports
+  337 unit tests plus one synthetic `mpv_smoke` integration test.
+- Focused coverage: parser timestamp variants/bounds and malformed fallback,
+  embedded plain/SYLT metadata, local/manual/provider precedence, LRCLIB
+  validation/rate limits/cache, bookmark persistence, safe A/B bounds,
+  source/recovery restoration, and new-track clearing - passed.
+- Named migration smoke `schema_five_fixture_upgrades_to_six_preserving_plan_eight_collections_and_queue` - passed; the fixture also preserves Plan 07 downloads.
+- `SPOTDIY_REAL_MPV_SMOKE=1 cargo test --manifest-path src-tauri/Cargo.toml
+  --test mpv_smoke -- --nocapture` - passed with owned-process cleanup.
+- `pnpm tauri build` - passed; release output is under external
+  `C:\CargoTarget\SpotDIY`. The regular packaged playback/restart/cleanup
+  smoke, packaged Plan 08 persistence smoke, and packaged Plan 09 lyrics,
+  bookmarks, A/B, preset, restart, queue, no-autoplay, and cleanup smoke all
+  passed; zero SpotDIY-owned mpv processes remained.
+- `git diff --check` - passed. The live LRCLIB smoke was optional and skipped.
+  Non-fatal existing build notices remain for Browserslist data, Tailwind
+  content discovery, and a large frontend chunk.
+- `codegraph sync .` plus status - passed once after implementation: 121 files,
+  4,472 nodes, 16,503 edges, index up to date. `graphify update .` - passed
+  once after implementation: 3,883 nodes, 7,668 edges, 237 communities.
+- No copyrighted lyrics, media, credentials, tokens, raw provider payloads,
+  runtime database, cache temp, or generated test artifact is part of the
+  repository changes; `src-tauri\target` remains absent.

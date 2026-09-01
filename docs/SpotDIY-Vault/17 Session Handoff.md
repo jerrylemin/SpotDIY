@@ -89,6 +89,22 @@ packaged restart/cleanup, explicit Plan 08 persistence/resume, and v4-to-v5
 migration coverage. Cargo output remains external at
 `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
 
+## Plan 09 handoff
+
+Plan 09 is complete through implementation commits `1bc7108`, `e4d62d8`,
+`c25f954`, and `7b1a097`. Schema 6 preserves Plan 07 downloads and Plan 08
+collections/queue/snapshots while adding lyrics, bookmarks, and A/B presets.
+Local-first precedence is manual, sidecar, embedded timed, embedded plain,
+then cached LRCLIB; local reads are read-only and provider lookup is explicit.
+`PlaybackService` owns active A/B state, clears it at a new-track boundary,
+restores same-track source/recovery state, and never autoplay-applies presets.
+
+Verified evidence: 337 Rust unit tests plus one synthetic mpv integration test,
+56 Vitest tests, 48 Playwright runs, strict quality gates, Tauri packaging,
+real-mpv smoke, packaged Plan 08/09 persistence smokes, and v5-to-v6 migration
+coverage. Cargo output remains external at `C:\CargoTarget\SpotDIY`; live LRCLIB
+smoke was optional and skipped; waveform generation is not claimed.
+
 ## Next atomic task
 
-STOPPED AFTER PLAN 08. Awaiting external ChatGPT GitHub review before Plan 09.
+Plan 10/11 visual system and main-player refinement.

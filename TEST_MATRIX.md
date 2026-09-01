@@ -111,3 +111,28 @@
   tables with foreign-key and ownership checks. Build output remains at
   `C:\CargoTarget\SpotDIY`; no repository-local `src-tauri\target`, media,
   credentials, tokens, or raw provider payloads are retained.
+
+## Plan 09 verification
+
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass;
+  Vitest reports 56 tests across 16 files, including lyrics DTOs, local-first
+  source actions, synchronized cue selection, bookmark and A/B controls.
+- Browser: `pnpm exec playwright test` passes 48 runs across the 1280, 1920,
+  and 2560 viewport projects.
+- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`,
+  all-features Clippy with warnings denied, and `cargo test --all-targets`
+  pass. The final suite reports 337 unit tests plus one synthetic `mpv_smoke`
+  integration test; explicit real mpv smoke also passes.
+- Focused Plan 09 coverage includes schema v5-to-v6 preservation, LRC
+  timestamp variants and bounds, malformed-line fallback, embedded plain/SYLT
+  metadata, local/manual/provider precedence, LRCLIB validation/rate limits,
+  cache behavior, bookmark validation/persistence, loop bounds, source/recovery
+  restoration, and new-track clearing.
+- Runtime: `pnpm tauri build`, the regular packaged playback/restart/cleanup
+  smoke, the packaged Plan 08 persistence smoke, and the packaged Plan 09
+  lyrics/bookmark/A-B/preset/restart/queue/no-autoplay smoke pass. No owned
+  mpv process remained. Live LRCLIB smoke was optional and skipped.
+- Storage: schema version 6 adds `lyrics`, `bookmarks`, and `ab_loop_presets`;
+  local reads are read-only, media and raw provider payloads are not retained,
+  build output remains at `C:\CargoTarget\SpotDIY`, and
+  `src-tauri\target` remains absent.

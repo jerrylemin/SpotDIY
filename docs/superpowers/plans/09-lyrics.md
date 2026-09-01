@@ -30,4 +30,9 @@ No-lyrics states provide import/search/edit actions; timed lyrics follow playbac
 
 ## Commit boundary
 
-`feat: add local and synchronized lyrics`
+Implementation boundary: `1bc7108` (`feat: add local-first lyrics service`),
+`e4d62d8` (`feat: add optional LRCLIB lyrics lookup`), `c25f954` (`feat: add
+playback bookmarks and ab loop`), and `7b1a097` (`feat: add synchronized
+lyrics interface`). Final evidence is recorded in
+`docs/execution/verification-log.md`; waveform generation and live LRCLIB
+smoke remain outside this delivery.

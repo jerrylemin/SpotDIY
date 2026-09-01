@@ -107,3 +107,21 @@ missing-yt-dlp packaged provider-search race was intentionally not triggered;
 live provider/download smoke remains opt-in. CodeGraph and Graphify were each
 refreshed once after implementation, and repository-local `src-tauri\target`
 remains absent.
+
+## Plan 09 verification
+
+Plan 09 passes 337 Rust unit tests plus one synthetic mpv integration test, 56
+Vitest tests, 48 Playwright runs, frontend typecheck/lint/build, Rust fmt and
+all-features Clippy with warnings denied, the external-target Tauri release
+build, explicit real-mpv smoke, and packaged Plan 08 and Plan 09 persistence
+smokes. Focused coverage includes v5-to-v6 migration preservation, LRC variants
+and bounds, embedded plain/SYLT metadata, local/manual/provider precedence,
+LRCLIB validation and cache behavior, synchronized cue selection, bookmark
+validation/persistence, safe loop bounds, recovery/source restoration, and
+new-track clearing.
+
+The Plan 09 packaged smoke also proves manual override/delete fallback to the
+sidecar, bookmark and preset retention across restart, no automatic A/B preset
+application, queue persistence, clean close, and zero owned mpv processes. Live
+LRCLIB smoke was optional and skipped; no copyrighted lyrics, media, secrets,
+raw provider payloads, or repository-local `src-tauri\target` are retained.

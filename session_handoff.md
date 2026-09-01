@@ -139,6 +139,27 @@ packaged playback/restart/cleanup, explicit Plan 08 persistence/resume, and
 v4-to-v5 migration coverage. Build output remains at
 `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` remains absent.
 
+## Plan 09 completion
+
+Plan 09 is complete through implementation commits `1bc7108`, `e4d62d8`,
+`c25f954`, and `7b1a097`. Schema 6 persists lyrics records, bookmarks, and
+A/B presets while preserving Plan 08 collections/queue/snapshots and Plan 07
+downloads. `LyricsService` implements bounded local-first LRC and embedded
+metadata handling, manual override/import/delete, synchronized DTOs, and an
+explicit HTTPS-only LRCLIB boundary. `BookmarkService` owns durable bookmarks
+and presets; `PlaybackService` owns active A/B state, clears it for a new
+track, restores it for same-track source/recovery paths, and never autoplay
+applies a preset.
+
+Final evidence records 337 Rust unit tests plus one synthetic mpv integration
+test, 56 Vitest tests, 48 Playwright runs, strict frontend/native gates, Tauri
+packaging, real-mpv smoke, packaged Plan 08 and Plan 09 persistence smokes, and
+the named v5-to-v6 migration smoke. CodeGraph and Graphify were each refreshed
+once after implementation. Live LRCLIB smoke was optional and skipped; waveform
+generation is not claimed. Cargo output remains external at
+`C:\CargoTarget\SpotDIY` and repository-local `src-tauri\target` is absent.
+
 ## Next atomic task
 
-STOPPED AFTER PLAN 08. Awaiting external ChatGPT GitHub review before Plan 09.
+Plan 10/11 visual system and main-player refinement. No Plan 09 follow-up is
+required for the delivered local-first lyrics, bookmarks, and A/B boundary.

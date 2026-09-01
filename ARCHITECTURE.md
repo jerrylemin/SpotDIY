@@ -230,3 +230,37 @@ persist through the typed repository. Startup restores queue state without
 autoplay; the first Play resumes the saved current item and position. Queue
 snapshots are immutable records whose restore creates fresh live queue IDs and
 does not autoplay.
+
+## Plan 09 lyrics, bookmarks, and A/B boundary
+
+```text
+React LyricsPage / PlayerBar controls
+              |
+              v
+typed lyrics + bookmark + loop IPC
+              |
+              +--> LyricsService -> local metadata / managed .lrc -> schema 6 cache
+              +--> explicit LRCLIB lookup (metadata-only candidates)
+              +--> BookmarkService -> bookmarks / A-B presets
+              `--> PlaybackService -> SetAbLoop/ClearAbLoop -> mpv ab-loop-a/b
+```
+
+`LyricsService` applies the deterministic precedence manual override, exact
+sidecar `.lrc`, embedded timed text, embedded plain text, then cached LRCLIB.
+Local reads use the existing `LibraryService` managed-path boundary, verify a
+regular non-link file, enforce bounded input, and never mutate media or library
+metadata. Embedded plain and ID3 SYLT text are read-only metadata evidence.
+
+LRCLIB is an explicit user action behind an HTTPS-only, bounded, rate-gated
+provider boundary. Only validated metadata and selected lyric text enter the
+local cache; raw provider responses, credentials, and automatic background
+lookups do not cross the boundary. Frontend commands use typed track/source
+identifiers and native file selection for manual import.
+
+`BookmarkService` persists bounded notes and positions and normalized named
+loop presets in schema 6. `PlaybackService` remains the sole owner of active
+A/B state: setting A/B and clearing the loop are typed backend commands, a new
+track clears the active loop, same-track source switching and recovery restore
+it, and applying a preset never starts playback. The synchronized lyrics page
+selects the active cue by playback position and shows source/attribution state;
+waveform generation is outside this boundary.

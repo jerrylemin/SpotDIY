@@ -140,3 +140,25 @@
   dnd-kit handles while browser preview remains native-free.
 - The implementation boundary is committed as `525da8c`, `e5f7161`, `1f31d6a`,
   and `0a62cad`; documentation closure follows the final verification gates.
+
+## 2026-09-02 - Plan 09 local-first lyrics, bookmarks, and A/B loop
+
+- Integrated migration 6 with `lyrics`, `bookmarks`, and `ab_loop_presets`.
+  Foreign keys, bounded text/notes, normalized preset names, loop-gap and
+  duration validation, and v5 fixture preservation remain enforced.
+- Integrated `LyricsService` with manual, exact sidecar `.lrc`, embedded timed,
+  embedded plain, and cached LRCLIB precedence. Managed local reads are
+  read-only and bounded; native file selection is the only manual import path.
+- Integrated bounded LRC parsing, ID3 plain/SYLT metadata extraction, typed
+  lyrics DTOs, synchronized cue selection, manual override/delete, explicit
+  LRCLIB lookup/search/select/cache actions, and attribution-safe provider data.
+- Integrated `BookmarkService` persistence and typed bookmark/preset IPC.
+  `PlaybackService` owns active A/B state and sends only typed set/clear
+  commands to mpv; new tracks clear the loop, same-track source/recovery paths
+  restore it, and presets do not autoplay.
+- Integrated `/lyrics`, player markers/controls, manual edit/import/delete,
+  explicit online actions, bookmark and A/B/preset controls, strict Zod IPC,
+  and the Plan 09 packaged persistence/restart smoke. Browser preview remains
+  native-free and no waveform generation was added.
+- The implementation boundary is committed as `1bc7108`, `e4d62d8`,
+  `c25f954`, and `7b1a097`; documentation closure follows the final gates.

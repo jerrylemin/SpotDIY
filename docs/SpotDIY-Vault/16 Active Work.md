@@ -90,6 +90,16 @@ throttled checkpoints, immutable snapshots, restart restore, and the queue
 drawer. Final verification evidence is recorded in
 `docs/execution/verification-log.md`.
 
+## Plan 09 completion
+
+Plan 09 is complete through implementation commits `1bc7108`, `e4d62d8`,
+`c25f954`, and `7b1a097`. It delivers schema-6 local-first lyrics, bounded LRC
+and embedded metadata handling, explicit LRCLIB lookup/cache, synchronized
+lyrics presentation, durable bookmarks and loop presets, and
+PlaybackService-owned A/B controls. Final verification and packaged restart,
+queue, no-autoplay, and owned-process cleanup evidence are recorded in the
+execution logs. Waveform generation is not claimed.
+
 ## Next atomic task
 
-STOPPED AFTER PLAN 08. Awaiting external ChatGPT GitHub review before Plan 09.
+Plan 10/11 visual system and main-player refinement.
