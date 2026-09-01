@@ -1279,6 +1279,19 @@ function browserSearchResult(provider: ProviderKind, query: string, track?: Libr
 }
 
 function browserSearchSection(provider: ProviderKind, request: SearchRequest): ProviderSearchSection {
+  if (provider === "spotify") {
+    return {
+      provider,
+      state: "failed",
+      results: [],
+      error: {
+        code: "disabled",
+        detail: "Spotify catalog search is disabled by default.",
+        retryAfterSeconds: null,
+      },
+    };
+  }
+
   if (provider === "soundcloud") {
     return {
       provider,
