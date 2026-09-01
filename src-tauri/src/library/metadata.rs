@@ -2,13 +2,24 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use lofty::file::{AudioFile, FileType, TaggedFileExt};
+use lofty::id3::v2::{
+    Frame, Id3v2Tag, SyncTextContentType, SynchronizedTextFrame, TimestampFormat,
+};
 use lofty::probe::Probe;
-use lofty::tag::ItemKey;
+use lofty::tag::{ItemKey, TagType};
+
+use crate::lyrics::parser::{parse_lrc, LyricsCue};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EmbeddedArtwork {
     pub mime_type: Option<String>,
     pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbeddedLyrics {
+    pub plain_text: Option<String>,
+    pub cues: Vec<LyricsCue>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,6 +115,125 @@ pub fn extract_metadata(path: impl AsRef<Path>) -> Result<ExtractedMetadata, Met
         bit_depth: properties.bit_depth().map(u16::from),
         artwork,
     })
+}
+
+/// Read lyrics without changing the media file or including lyrics in the
+/// library scanner's persisted metadata.
+pub fn read_embedded_lyrics(path: impl AsRef<Path>) -> Result<Vec<EmbeddedLyrics>, MetadataError> {
+    let path = path.as_ref();
+    let tagged_file = Probe::open(path)
+        .map_err(|error| MetadataError::Parse {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })?
+        .guess_file_type()
+        .map_err(|error| MetadataError::Parse {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })?
+        .read()
+        .map_err(|error| MetadataError::Parse {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })?;
+
+    let mut lyrics = Vec::new();
+    for tag in tagged_file.tags() {
+        for value in tag.get_strings(ItemKey::Lyrics) {
+            if let Some(document) = embedded_text(value) {
+                lyrics.push(document);
+            }
+        }
+        for value in tag.get_strings(ItemKey::UnsyncLyrics) {
+            if let Some(text) = clean_string(value) {
+                lyrics.push(EmbeddedLyrics {
+                    plain_text: Some(text),
+                    cues: Vec::new(),
+                });
+            }
+        }
+
+        if tag.tag_type() == TagType::Id3v2 {
+            let id3v2: Id3v2Tag = tag.clone().into();
+            for frame in &id3v2 {
+                let Frame::Binary(binary) = frame else {
+                    continue;
+                };
+                if frame.id_str() != "SYLT" {
+                    continue;
+                }
+                let Ok(frame) = SynchronizedTextFrame::parse(&binary.data, frame.flags()) else {
+                    continue;
+                };
+                if frame.timestamp_format != TimestampFormat::MS
+                    || frame.content_type != SyncTextContentType::Lyrics
+                {
+                    continue;
+                }
+                if let Some(document) = embedded_synchronized(frame.content) {
+                    lyrics.push(document);
+                }
+            }
+        }
+    }
+    Ok(lyrics)
+}
+
+fn embedded_text(value: &str) -> Option<EmbeddedLyrics> {
+    let parsed = parse_lrc(value).ok()?;
+    if !parsed.cues.is_empty() {
+        Some(EmbeddedLyrics {
+            plain_text: non_empty(parsed.plain_text),
+            cues: parsed.cues,
+        })
+    } else {
+        non_empty(parsed.plain_text).map(|plain_text| EmbeddedLyrics {
+            plain_text: Some(plain_text),
+            cues: Vec::new(),
+        })
+    }
+}
+
+fn embedded_synchronized(content: Vec<(u32, String)>) -> Option<EmbeddedLyrics> {
+    let mut entries = content
+        .into_iter()
+        .filter_map(|(start_ms, text)| {
+            let text = clean_string(&text)?;
+            Some((u64::from(start_ms), text))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(start_ms, _)| *start_ms);
+    if entries.is_empty() {
+        return None;
+    }
+    let mut cues: Vec<LyricsCue> = Vec::new();
+    for (start_ms, text) in entries {
+        if let Some(cue) = cues.last_mut() {
+            if cue.start_ms == start_ms {
+                cue.lines.push(text);
+                continue;
+            }
+        }
+        cues.push(LyricsCue {
+            start_ms,
+            lines: vec![text],
+        });
+    }
+    let plain_text = cues
+        .iter()
+        .flat_map(|cue| cue.lines.iter())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(EmbeddedLyrics {
+        plain_text: non_empty(plain_text),
+        cues,
+    })
+}
+
+fn non_empty(value: impl Into<String>) -> Option<String> {
+    let value = value.into();
+    (!value.trim().is_empty()).then_some(value)
 }
 
 fn artist_values(tag: &lofty::tag::Tag) -> Vec<String> {

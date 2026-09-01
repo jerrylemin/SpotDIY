@@ -14,8 +14,10 @@ const SOURCE_FUSION_MIGRATION_SQL: &str = include_str!("../../migrations/0003_so
 const DOWNLOADS_MIGRATION_SQL: &str = include_str!("../../migrations/0004_downloads.sql");
 const COLLECTIONS_AND_QUEUE_MIGRATION_SQL: &str =
     include_str!("../../migrations/0005_collections_and_queue.sql");
+const LYRICS_BOOKMARKS_MIGRATION_SQL: &str =
+    include_str!("../../migrations/0006_lyrics_bookmarks.sql");
 
-pub const LATEST_SCHEMA_VERSION: u32 = 5;
+pub const LATEST_SCHEMA_VERSION: u32 = 6;
 pub const DATABASE_FILE_NAME: &str = "spotdiy.sqlite3";
 pub const APPLICATION_DATA_DIRECTORY: &str = "SpotDIY";
 
@@ -63,6 +65,12 @@ const MIGRATIONS: &[Migration] = &[
         version: 5,
         name: "0005_collections_and_queue",
         sql: COLLECTIONS_AND_QUEUE_MIGRATION_SQL,
+        destructive: false,
+    },
+    Migration {
+        version: 6,
+        name: "0006_lyrics_bookmarks",
+        sql: LYRICS_BOOKMARKS_MIGRATION_SQL,
         destructive: false,
     },
 ];
@@ -496,6 +504,9 @@ mod tests {
             "queue_entries",
             "queue_snapshots",
             "queue_snapshot_entries",
+            "lyrics",
+            "bookmarks",
+            "ab_loop_presets",
         ] {
             let exists: i64 = database
                 .with_connection(|connection| {
@@ -589,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_two_fixture_upgrades_to_five_without_losing_tracks_sources_or_settings() {
+    fn schema_two_fixture_upgrades_to_six_without_losing_tracks_sources_or_settings() {
         let path = TempDatabasePath::new("migration-five-fixture");
         let mut connection = Connection::open(path.path()).unwrap();
         configure_connection(&connection).unwrap();
@@ -696,7 +707,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_four_fixture_upgrades_to_five_preserving_plan_seven_data() {
+    fn schema_four_fixture_upgrades_to_six_preserving_plan_seven_data() {
         let path = TempDatabasePath::new("migration-four-to-five");
         let mut connection = Connection::open(path.path()).unwrap();
         configure_connection(&connection).unwrap();
@@ -787,7 +798,7 @@ mod tests {
         let schema_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema_version, 5);
+        assert_eq!(schema_version, 6);
         let track_count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM tracks WHERE id = ?1",
@@ -844,6 +855,171 @@ mod tests {
         assert_eq!(inbox_count, 1);
         assert_eq!(queue_state_count, 1);
         assert_eq!(folder_count, 1);
+        assert_eq!(foreign_key_rows, 0);
+    }
+
+    #[test]
+    fn schema_five_fixture_upgrades_to_six_preserving_plan_eight_collections_and_queue() {
+        let path = TempDatabasePath::new("migration-five-to-six");
+        let mut connection = Connection::open(path.path()).unwrap();
+        configure_connection(&connection).unwrap();
+        run_migrations(&mut connection, None, &MIGRATIONS[..5]).unwrap();
+
+        let now = "2026-01-01T00:00:00Z";
+        let track_id = uuid::Uuid::new_v4().to_string();
+        let source_id = uuid::Uuid::new_v4().to_string();
+        let playlist_id = uuid::Uuid::new_v4().to_string();
+        let branch_id = uuid::Uuid::new_v4().to_string();
+        let playlist_item_id = uuid::Uuid::new_v4().to_string();
+        let queue_entry_id = uuid::Uuid::new_v4().to_string();
+        let snapshot_id = uuid::Uuid::new_v4().to_string();
+        let snapshot_entry_id = uuid::Uuid::new_v4().to_string();
+
+        connection
+            .execute(
+                "INSERT INTO tracks (id, title, normalized_title, version_qualifiers_json, created_at, updated_at)
+                 VALUES (?1, 'Migration Track', 'migration track', '[\"standard\"]', ?2, ?2)",
+                params![track_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO track_sources (id, track_id, provider_kind, provider_item_id, created_at, updated_at)
+                 VALUES (?1, ?2, 'local', 'migration-local', ?3, ?3)",
+                params![source_id, track_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO playlists (id, name, kind, revision, created_at, updated_at)
+                 VALUES (?1, 'Migration Playlist', 'normal', 2, ?2, ?2)",
+                params![playlist_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO playlists (id, name, kind, parent_playlist_id, base_parent_revision, branch_status, revision, created_at, updated_at)
+                 VALUES (?1, 'Migration Branch', 'branch', ?2, 2, 'open', 0, ?3, ?3)",
+                params![branch_id, playlist_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO playlist_items (id, playlist_id, track_id, requested_source_id, position, added_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)",
+                params![playlist_item_id, playlist_id, track_id, source_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO playlist_branch_base_items (branch_playlist_id, base_item_id, track_id, requested_source_id, position)
+                 VALUES (?1, ?2, ?3, ?4, 0)",
+                params![branch_id, playlist_item_id, track_id, source_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO likes (track_id, liked_at) VALUES (?1, ?2)",
+                params![track_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO ratings (track_id, rating, updated_at) VALUES (?1, 5, ?2)",
+                params![track_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO tags (id, name, normalized_name, created_at, updated_at)
+                 VALUES ('migration-tag', 'Migration Tag', 'migration tag', ?1, ?1)",
+                params![now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO track_tags (track_id, tag_id, created_at) VALUES (?1, 'migration-tag', ?2)",
+                params![track_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO queue_entries (id, track_id, requested_source_id, section, position, pinned, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'up_next', 0, 1, ?4, ?4)",
+                params![queue_entry_id, track_id, source_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE queue_state SET current_entry_id = ?1, current_position_ms = 321, revision = 4, updated_at = ?2 WHERE id = 1",
+                params![queue_entry_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO queue_snapshots (id, name, current_track_id, current_source_id, current_position_ms, repeat_mode, shuffle_enabled, history_order_json, shuffle_order_json, created_at)
+                 VALUES (?1, 'Migration Snapshot', ?2, ?3, 321, 'off', 0, '[]', '[]', ?4)",
+                params![snapshot_id, track_id, source_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO queue_snapshot_entries (id, snapshot_id, track_id, requested_source_id, section, position, pinned, traversal_position)
+                 VALUES (?1, ?2, ?3, ?4, 'up_next', 0, 1, 0)",
+                params![snapshot_entry_id, snapshot_id, track_id, source_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE queue_snapshots SET current_snapshot_entry_id = ?1 WHERE id = ?2",
+                params![snapshot_entry_id, snapshot_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO user_track_overrides (provider_kind, provider_item_id, target_track_id, decision, created_at, updated_at)
+                 VALUES ('local', 'migration-local', ?1, 'merge', ?2, ?2)",
+                params![track_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO downloads (id, provider_kind, provider_item_id, canonical_url, title, artists_json, mode, state, destination_directory, source_quality_provenance, created_at, updated_at)
+                 VALUES ('migration-download', 'youtube', 'migration-video', 'https://youtube.example/migration', 'Migration Track', '[]', 'audio', 'queued', 'C:\\Downloads', 'unknown', ?1, ?1)",
+                params![now],
+            )
+            .unwrap();
+
+        run_migrations(&mut connection, None, &MIGRATIONS[5..]).unwrap();
+        let schema_version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(schema_version, 6);
+        for (table, expected) in [
+            ("playlists", 3_i64),
+            ("playlist_branch_base_items", 1),
+            ("likes", 1),
+            ("ratings", 1),
+            ("tags", 1),
+            ("track_tags", 1),
+            ("queue_entries", 1),
+            ("queue_snapshots", 1),
+            ("queue_snapshot_entries", 1),
+            ("downloads", 1),
+            ("user_track_overrides", 1),
+        ] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, expected, "rows lost from {table}");
+        }
+        let foreign_key_rows: i64 = connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert_eq!(foreign_key_rows, 0);
     }
 
