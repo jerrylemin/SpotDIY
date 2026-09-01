@@ -178,6 +178,14 @@ pub fn source_capabilities() -> Vec<ProviderCapabilities> {
     ]
 }
 
+pub(crate) fn provider_capabilities(provider: ProviderKind) -> SourceCapabilities {
+    match provider {
+        ProviderKind::Local => LOCAL_CAPABILITIES,
+        ProviderKind::Youtube | ProviderKind::Soundcloud => VIDEO_CAPABILITIES,
+        ProviderKind::Spotify => SPOTIFY_CAPABILITIES,
+    }
+}
+
 pub fn provider_statuses(
     music_folders: &[String],
     yt_dlp: Option<YtDlpToolStatus>,

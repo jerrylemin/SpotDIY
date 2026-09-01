@@ -380,6 +380,164 @@ impl<'database> SourceRepository<'database> {
         }
         Ok(source)
     }
+
+    pub fn find_by_provider_identity(
+        &self,
+        provider_kind: ProviderKind,
+        provider_item_id: &str,
+    ) -> Result<Option<TrackSource>, RepositoryError> {
+        let connection = self.database.connection()?;
+        let source = connection
+            .query_row(
+                "SELECT id, track_id, provider_kind, provider_item_id, source_uri, duration_ms,
+                        version_qualifiers_json, available, availability_detail, can_search,
+                        can_metadata, can_artwork, can_playback, can_lyrics, can_downloads,
+                        can_popularity, can_release_date, can_lyrics_metadata, created_at, updated_at
+                 FROM track_sources
+                 WHERE provider_kind = ?1 AND provider_item_id = ?2",
+                params![provider_kind.as_str(), provider_item_id],
+                map_source_row_raw,
+            )
+            .optional()?;
+        let mut source = source.map(parse_source_row).transpose()?;
+        if let Some(source) = &mut source {
+            source.local_file = load_local_file(&connection, source.id)?;
+        }
+        Ok(source)
+    }
+
+    pub fn attach_source_to_track(&self, source: &TrackSource) -> Result<(), RepositoryError> {
+        validate_source_for_attachment(source)?;
+        if TrackRepository::new(self.database)
+            .get(source.track_id)?
+            .is_none()
+        {
+            return Err(RepositoryError::TrackNotFound(source.track_id));
+        }
+
+        let mut connection = self.database.connection()?;
+        let transaction = connection.transaction()?;
+        let existing: Option<(String, String)> = transaction
+            .query_row(
+                "SELECT id, track_id FROM track_sources
+                 WHERE provider_kind = ?1 AND provider_item_id = ?2",
+                params![source.provider_kind.as_str(), source.provider_item_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((_, existing_track_id)) = existing {
+            let existing_track_id = parse_id(&existing_track_id, "track_sources.track_id")?;
+            if existing_track_id == source.track_id {
+                return Ok(());
+            }
+            return Err(RepositoryError::DuplicateProviderIdentity {
+                provider_kind: source.provider_kind,
+                provider_item_id: source.provider_item_id.clone(),
+                track_id: existing_track_id,
+            });
+        }
+
+        let insert_result = transaction.execute(
+            "INSERT INTO track_sources (
+                id, track_id, provider_kind, provider_item_id, source_uri, duration_ms,
+                version_qualifiers_json, available, availability_detail, can_search,
+                can_metadata, can_artwork, can_playback, can_lyrics, can_downloads,
+                can_popularity, can_release_date, can_lyrics_metadata, created_at, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20
+             )",
+            params![
+                source.id.to_string(),
+                source.track_id.to_string(),
+                source.provider_kind.as_str(),
+                source.provider_item_id,
+                source.source_uri.as_ref().map(ToString::to_string),
+                source
+                    .duration_ms
+                    .map(|value| numeric_i64(value, "source.duration_ms"))
+                    .transpose()?,
+                version_json(&source.version)?,
+                bool_integer(source.available),
+                source.availability_detail,
+                bool_integer(source.capabilities.search),
+                bool_integer(source.capabilities.metadata),
+                bool_integer(source.capabilities.artwork),
+                bool_integer(source.capabilities.playback),
+                bool_integer(source.capabilities.lyrics),
+                bool_integer(source.capabilities.downloads),
+                bool_integer(source.capabilities.popularity),
+                bool_integer(source.capabilities.release_date),
+                bool_integer(source.capabilities.lyrics_metadata),
+                timestamp(source.created_at),
+                timestamp(source.updated_at),
+            ],
+        );
+        insert_result.map_err(|error| {
+            if is_unique_constraint(&error) {
+                RepositoryError::DuplicateProviderIdentity {
+                    provider_kind: source.provider_kind,
+                    provider_item_id: source.provider_item_id.clone(),
+                    track_id: source.track_id,
+                }
+            } else {
+                RepositoryError::Sqlite(error)
+            }
+        })?;
+
+        if let Some(local_file) = &source.local_file {
+            transaction.execute(
+                "INSERT INTO local_files (
+                    source_id, path, file_size_bytes, modified_at, content_fingerprint,
+                    codec, bitrate_kbps, sample_rate_hz, bit_depth, created_at, updated_at,
+                    library_folder_id, normalized_path_key, container, index_status,
+                    status_detail, last_seen_at, last_indexed_at, last_seen_generation,
+                    artwork_cache_key, artwork_mime_type
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                           ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                params![
+                    local_file.source_id.to_string(),
+                    local_file.path.to_string_lossy().into_owned(),
+                    local_file
+                        .file_size_bytes
+                        .map(|value| numeric_i64(value, "local_file.file_size_bytes"))
+                        .transpose()?,
+                    local_file.modified_at.map(timestamp),
+                    local_file.content_fingerprint,
+                    local_file.codec,
+                    local_file
+                        .bitrate_kbps
+                        .map(|value| numeric_i64(value, "local_file.bitrate_kbps"))
+                        .transpose()?,
+                    local_file
+                        .sample_rate_hz
+                        .map(|value| numeric_i64(value, "local_file.sample_rate_hz"))
+                        .transpose()?,
+                    local_file
+                        .bit_depth
+                        .map(|value| numeric_i64(value.into(), "local_file.bit_depth"))
+                        .transpose()?,
+                    timestamp(source.created_at),
+                    timestamp(source.updated_at),
+                    local_file.library_folder_id.map(|value| value.to_string()),
+                    local_file.normalized_path_key,
+                    local_file.container,
+                    local_file_index_status(local_file.index_status),
+                    local_file.status_detail,
+                    local_file.last_seen_at.map(timestamp),
+                    local_file.last_indexed_at.map(timestamp),
+                    numeric_i64(
+                        local_file.last_seen_generation,
+                        "local_file.last_seen_generation",
+                    )?,
+                    local_file.artwork_cache_key,
+                    local_file.artwork_mime_type,
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
 }
 
 struct TrackRow {
@@ -453,6 +611,29 @@ fn validate_track(track: &UnifiedTrack) -> Result<(), RepositoryError> {
         }
     }
     Ok(())
+}
+
+fn validate_source_for_attachment(source: &TrackSource) -> Result<(), RepositoryError> {
+    if source.provider_kind == ProviderKind::Spotify
+        && (source.capabilities.playback
+            || source.capabilities.downloads
+            || source.capabilities.lyrics
+            || source.capabilities.lyrics_metadata)
+    {
+        return Err(RepositoryError::InvalidValue {
+            field: "track_sources.spotify_capabilities",
+            value: "Spotify sources can advertise metadata only".to_owned(),
+        });
+    }
+    match (source.provider_kind, source.local_file.is_some()) {
+        (ProviderKind::Local, false) => Err(RepositoryError::MissingLocalFile {
+            source_id: source.id,
+        }),
+        (ProviderKind::Local, true) | (_, false) => Ok(()),
+        (_, true) => Err(RepositoryError::UnexpectedLocalFile {
+            source_id: source.id,
+        }),
+    }
 }
 
 fn load_album(connection: &Connection, album_id: AlbumId) -> Result<Album, RepositoryError> {
@@ -1222,5 +1403,65 @@ mod tests {
         });
 
         assert!(matches!(source_move, Err(DatabaseError::Query(_))));
+    }
+
+    #[test]
+    fn source_repository_finds_and_attaches_remote_source_idempotently() {
+        let path = TempDatabasePath::new("source-attach");
+        let database = Database::open(path.path()).unwrap();
+        let first_id = TrackId::new();
+        let second_id = TrackId::new();
+        for track_id in [first_id, second_id] {
+            TrackRepository::new(&database)
+                .create(
+                    &UnifiedTrack::new(
+                        track_id,
+                        "Target",
+                        vec![],
+                        None,
+                        Some(180_000),
+                        VersionInfo::standard(),
+                        vec![],
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+        }
+
+        let source = TrackSource::new(
+            SourceId::new(),
+            first_id,
+            ProviderKind::Youtube,
+            "video-attach",
+            crate::ipc::provider_capabilities(ProviderKind::Youtube),
+        )
+        .unwrap();
+        let repository = SourceRepository::new(&database);
+        repository.attach_source_to_track(&source).unwrap();
+        repository.attach_source_to_track(&source).unwrap();
+        let attached = repository
+            .find_by_provider_identity(ProviderKind::Youtube, "video-attach")
+            .unwrap()
+            .unwrap();
+        assert_eq!(attached.track_id, first_id);
+        let source_count: i64 = database
+            .with_connection(|connection| {
+                connection.query_row("SELECT COUNT(*) FROM track_sources", [], |row| row.get(0))
+            })
+            .unwrap();
+        assert_eq!(source_count, 1);
+
+        let conflicting = TrackSource::new(
+            SourceId::new(),
+            second_id,
+            ProviderKind::Youtube,
+            "video-attach",
+            crate::ipc::provider_capabilities(ProviderKind::Youtube),
+        )
+        .unwrap();
+        assert!(matches!(
+            repository.attach_source_to_track(&conflicting),
+            Err(RepositoryError::DuplicateProviderIdentity { track_id, .. }) if track_id == first_id
+        ));
     }
 }
