@@ -5,6 +5,11 @@ import { z } from "zod";
 
 import type {
   AppStatus,
+  AbLoopPreset,
+  AbLoopPresetId,
+  AbLoopState,
+  Bookmark,
+  BookmarkId,
   DownloadMode,
   DownloadSnapshot,
   DownloadTask,
@@ -16,6 +21,11 @@ import type {
   LibraryPageRequest,
   LibraryTrack,
   LibraryStatus,
+  LyricsCandidate,
+  LyricsDocument,
+  LyricsSourceKind,
+  LyricsSyncKind,
+  ManualLyricsMode,
   PlaybackAudioDevice,
   PlaybackBackendHealth,
   PlaybackErrorCode,
@@ -355,6 +365,8 @@ const libraryPageSchema = z.object({
 });
 const trackIdSchema = z.string().transform((value) => value as TrackId);
 const sourceIdSchema = z.string().transform((value) => value as SourceId);
+const bookmarkIdSchema = z.string().min(1).transform((value) => value as BookmarkId);
+const abLoopPresetIdSchema = z.string().min(1).transform((value) => value as AbLoopPresetId);
 const playlistIdSchema = z.string().min(1).transform((value) => value as PlaylistId);
 const playlistItemIdSchema = z.string().min(1).transform((value) => value as PlaylistItemId);
 const tagIdSchema = z.string().min(1).transform((value) => value as TagId);
@@ -595,6 +607,105 @@ const queueSnapshotSchema = queueSnapshotSummarySchema.extend({
   traversalOrder: z.array(queueSnapshotEntryIdSchema),
   entries: z.array(queueSnapshotEntrySchema),
 }).strict();
+
+const lyricsSourceKindSchema = z.enum(["manual", "sidecar", "embedded", "lrclib"]);
+const lyricsSyncKindSchema = z.enum(["plain", "timed", "instrumental"]);
+const lyricsCueSchema = z.object({
+  startMs: z.number().int().nonnegative(),
+  lines: z.array(z.string()),
+}).strict();
+const lyricsAttributionSchema = z.object({
+  label: z.string().min(1),
+  provider: z.string().min(1),
+  url: z.string().url().refine((value) => {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "lrclib.net" && url.username === "" && url.password === "" && url.port === "";
+  }, "Attribution links must use the LRCLIB HTTPS host.").nullable(),
+}).strict();
+const lyricsDocumentSchema = z.object({
+  trackId: trackIdSchema,
+  source: lyricsSourceKindSchema,
+  syncKind: lyricsSyncKindSchema,
+  plainText: z.string().nullable(),
+  cues: z.array(lyricsCueSchema),
+  instrumental: z.boolean(),
+  editable: z.boolean(),
+  attribution: lyricsAttributionSchema.nullable(),
+}).strict().transform((value): LyricsDocument => ({
+  ...value,
+  source: value.source as LyricsSourceKind,
+  syncKind: value.syncKind as LyricsSyncKind,
+  cues: value.cues as LyricsDocument["cues"],
+}));
+const lyricsCandidateSchema = z.object({
+  providerRecordId: z.number().int().positive(),
+  trackName: z.string().min(1),
+  artistName: z.string().min(1),
+  albumName: z.string().nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  instrumental: z.boolean(),
+  hasPlain: z.boolean(),
+  hasSynced: z.boolean(),
+}).strict().transform((value): LyricsCandidate => value);
+const lyricsErrorCodeSchema = z.enum([
+  "trackNotFound",
+  "sourceNotFound",
+  "sourceMismatch",
+  "invalidLyrics",
+  "inputTooLarge",
+  "invalidUtf8",
+  "unsupportedImport",
+  "importRead",
+  "importCancelled",
+  "notFound",
+  "rateLimited",
+  "provider",
+  "invalidCandidate",
+  "cacheNotFound",
+  "database",
+  "local",
+]);
+const lyricsErrorSchema = z.object({
+  code: lyricsErrorCodeSchema,
+  detail: z.string().min(1),
+  retryAfterSeconds: z.number().int().nonnegative().nullable(),
+}).strict();
+const bookmarkSchema = z.object({
+  id: bookmarkIdSchema,
+  trackId: trackIdSchema,
+  positionMs: z.number().int().nonnegative(),
+  note: z.string().max(500),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}).strict().transform((value): Bookmark => value);
+const abLoopPresetSchema = z.object({
+  id: abLoopPresetIdSchema,
+  trackId: trackIdSchema,
+  name: z.string().min(1).max(80),
+  aMs: z.number().int().nonnegative(),
+  bMs: z.number().int().positive(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}).strict().transform((value): AbLoopPreset => value);
+const bookmarkErrorCodeSchema = z.enum([
+  "trackNotFound",
+  "bookmarkNotFound",
+  "presetNotFound",
+  "invalidPosition",
+  "positionOutsideDuration",
+  "noteTooLong",
+  "emptyNote",
+  "invalidPresetName",
+  "duplicatePresetName",
+  "invalidLoop",
+  "presetTrackMismatch",
+  "database",
+  "invalidStoredValue",
+]);
+const bookmarkErrorSchema = z.object({
+  code: bookmarkErrorCodeSchema,
+  detail: z.string().min(1),
+}).strict();
 const playbackErrorCodeSchema = z.enum([
   "toolMissing",
   "toolBroken",
@@ -621,6 +732,9 @@ const playbackErrorCodeSchema = z.enum([
   "invalidQueuePosition",
   "snapshotNotFound",
   "shuttingDown",
+  "invalidAbLoop",
+  "abLoopPresetNotFound",
+  "abLoopPresetTrackMismatch",
 ]);
 const playbackBackendHealthSchema = z.object({
   ready: z.boolean(),
@@ -640,6 +754,11 @@ const playbackSourceOptionSchema = z.object({
   available: z.boolean(),
   availabilityDetail: z.string().nullable(),
 }).strict();
+const abLoopStateSchema = z.object({
+  aMs: z.number().int().nonnegative().nullable(),
+  bMs: z.number().int().nonnegative().nullable(),
+  active: z.boolean(),
+}).strict().transform((value): AbLoopState => value);
 const playbackErrorSchema = z.object({
   code: playbackErrorCodeSchema,
   summary: z.string().min(1),
@@ -672,6 +791,7 @@ const playbackSnapshotSchema = z.object({
   backendHealth: playbackBackendHealthSchema,
   recovering: z.boolean(),
   error: playbackErrorSchema.nullable(),
+  abLoop: abLoopStateSchema,
 }).strict().transform((value): PlaybackSnapshot => ({
   revision: value.revision,
   phase: value.phase as PlaybackPhase,
@@ -695,6 +815,7 @@ const playbackSnapshotSchema = z.object({
   backendHealth: value.backendHealth as PlaybackBackendHealth,
   recovering: value.recovering,
   error: value.error,
+  abLoop: value.abLoop,
 }));
 const trackPlaybackRequestSchema = z.object({
   trackId: trackIdSchema,
@@ -707,6 +828,7 @@ const playbackSourceRequestSchema = z.object({
 const playbackDeviceNameSchema = z.string().trim().min(1);
 const playbackSeekSchema = z.number().int().nonnegative();
 const playbackVolumeSchema = z.number().int().min(0).max(100);
+const manualLyricsModeSchema = z.enum(["plain", "lrc"]);
 
 export class IpcError extends Error {
   public constructor(message: string, public readonly cause?: unknown) {
@@ -753,6 +875,9 @@ const playbackErrorSummary: Record<PlaybackErrorCode, string> = {
   invalidQueuePosition: "That queue position is invalid.",
   snapshotNotFound: "That queue snapshot could not be found.",
   shuttingDown: "SpotDIY is shutting down playback.",
+  invalidAbLoop: "That A/B loop is invalid.",
+  abLoopPresetNotFound: "That A/B loop preset could not be found.",
+  abLoopPresetTrackMismatch: "That A/B loop preset belongs to another track.",
 };
 
 const emptyPlaybackSnapshot = (): PlaybackSnapshot => ({
@@ -783,6 +908,11 @@ const emptyPlaybackSnapshot = (): PlaybackSnapshot => ({
   },
   recovering: false,
   error: null,
+  abLoop: {
+    aMs: null,
+    bMs: null,
+    active: false,
+  },
 });
 
 function isPlaybackE2EAdapterEnabled(): boolean {
@@ -2625,6 +2755,168 @@ export async function addTrackToInbox(trackId: TrackId): Promise<PlaylistItem> {
   return invokePlaylist("add_track_to_inbox", { trackId: trackIdSchema.parse(trackId) }, (value) => playlistItemSchema.parse(value) as PlaylistItem, "SpotDIY could not add that track to the Inbox.");
 }
 
+export async function getLyrics(trackId: TrackId, currentSourceId: SourceId | null = null): Promise<LyricsDocument | null> {
+  const parsedTrackId = trackIdSchema.parse(trackId);
+  const parsedSourceId = currentSourceId === null ? null : sourceIdSchema.parse(currentSourceId);
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  return invokeLyrics(
+    "get_lyrics",
+    { trackId: parsedTrackId, currentSourceId: parsedSourceId },
+    (value) => value === null ? null : lyricsDocumentSchema.parse(value),
+    "SpotDIY could not read lyrics for that track.",
+  );
+}
+
+export async function saveManualLyrics(
+  trackId: TrackId,
+  mode: ManualLyricsMode,
+  text: string,
+): Promise<LyricsDocument> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Editing lyrics requires the native SpotDIY runtime.");
+  }
+  const parsedTrackId = trackIdSchema.parse(trackId);
+  const parsedMode = manualLyricsModeSchema.parse(mode);
+  const parsedText = z.string().parse(text);
+  return invokeLyrics(
+    "save_manual_lyrics",
+    { trackId: parsedTrackId, mode: parsedMode, text: parsedText },
+    (value) => lyricsDocumentSchema.parse(value),
+    "SpotDIY could not save those lyrics.",
+  );
+}
+
+export async function deleteManualLyrics(trackId: TrackId): Promise<void> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Editing lyrics requires the native SpotDIY runtime.");
+  }
+  await invokeLyrics(
+    "delete_manual_lyrics",
+    { trackId: trackIdSchema.parse(trackId) },
+    () => undefined,
+    "SpotDIY could not delete the manual lyrics.",
+  );
+}
+
+export async function pickAndImportLyricsFile(trackId: TrackId): Promise<LyricsDocument> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Lyrics file import requires the native SpotDIY runtime.");
+  }
+  return invokeLyrics(
+    "pick_and_import_lyrics_file",
+    { trackId: trackIdSchema.parse(trackId) },
+    (value) => lyricsDocumentSchema.parse(value),
+    "SpotDIY could not import that lyrics file.",
+  );
+}
+
+export async function findLrclibBest(trackId: TrackId): Promise<LyricsDocument> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Online lyrics lookup requires the native SpotDIY runtime.");
+  }
+  return invokeLyrics(
+    "find_lrclib_best",
+    { trackId: trackIdSchema.parse(trackId) },
+    (value) => lyricsDocumentSchema.parse(value),
+    "SpotDIY could not look up lyrics from LRCLIB.",
+  );
+}
+
+export async function searchLrclib(trackId: TrackId): Promise<LyricsCandidate[]> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Online lyrics search requires the native SpotDIY runtime.");
+  }
+  return invokeLyrics(
+    "search_lrclib",
+    { trackId: trackIdSchema.parse(trackId) },
+    (value) => z.array(lyricsCandidateSchema).parse(value),
+    "SpotDIY could not search LRCLIB.",
+  );
+}
+
+export async function selectLrclibCandidate(trackId: TrackId, providerRecordId: number): Promise<LyricsDocument> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Online lyrics selection requires the native SpotDIY runtime.");
+  }
+  const parsedRecordId = z.number().int().positive().parse(providerRecordId);
+  return invokeLyrics(
+    "select_lrclib_candidate",
+    { trackId: trackIdSchema.parse(trackId), providerRecordId: parsedRecordId },
+    (value) => lyricsDocumentSchema.parse(value),
+    "SpotDIY could not select those LRCLIB lyrics.",
+  );
+}
+
+export async function clearCachedLrclib(trackId: TrackId): Promise<void> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Lyrics cache controls require the native SpotDIY runtime.");
+  }
+  await invokeLyrics(
+    "clear_cached_lrclib",
+    { trackId: trackIdSchema.parse(trackId) },
+    () => undefined,
+    "SpotDIY could not clear the LRCLIB cache.",
+  );
+}
+
+export async function listBookmarks(trackId: TrackId): Promise<Bookmark[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokeBookmarks(
+    "list_bookmarks",
+    { trackId: trackIdSchema.parse(trackId) },
+    (value) => z.array(bookmarkSchema).parse(value),
+    "SpotDIY could not read bookmarks for that track.",
+  );
+}
+
+export async function createBookmark(trackId: TrackId, positionMs: number, note: string): Promise<Bookmark> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Bookmarks require the native SpotDIY runtime.");
+  }
+  return invokeBookmarks(
+    "create_bookmark",
+    {
+      trackId: trackIdSchema.parse(trackId),
+      positionMs: playbackSeekSchema.parse(positionMs),
+      note: z.string().parse(note),
+    },
+    (value) => bookmarkSchema.parse(value),
+    "SpotDIY could not create that bookmark.",
+  );
+}
+
+export async function updateBookmark(bookmarkId: BookmarkId, positionMs: number, note: string): Promise<Bookmark> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Bookmarks require the native SpotDIY runtime.");
+  }
+  return invokeBookmarks(
+    "update_bookmark",
+    {
+      bookmarkId: bookmarkIdSchema.parse(bookmarkId),
+      positionMs: playbackSeekSchema.parse(positionMs),
+      note: z.string().parse(note),
+    },
+    (value) => bookmarkSchema.parse(value),
+    "SpotDIY could not update that bookmark.",
+  );
+}
+
+export async function deleteBookmark(bookmarkId: BookmarkId): Promise<void> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Bookmarks require the native SpotDIY runtime.");
+  }
+  await invokeBookmarks(
+    "delete_bookmark",
+    { bookmarkId: bookmarkIdSchema.parse(bookmarkId) },
+    () => undefined,
+    "SpotDIY could not delete that bookmark.",
+  );
+}
+
 export async function revealLocalFile(sourceId: SourceId): Promise<void> {
   if (!isTauriRuntime()) {
     throw new IpcError("File locations require the native SpotDIY runtime.");
@@ -2653,6 +2945,42 @@ async function invokePlayback<T>(
     const typedError = playbackErrorSchema.safeParse(error);
     if (typedError.success) {
       throw new IpcError(typedError.data.summary, typedError.data);
+    }
+    throw new IpcError(message, error);
+  }
+}
+
+async function invokeLyrics<T>(
+  command: string,
+  args: Record<string, unknown> | undefined,
+  parse: (value: unknown) => T,
+  message: string,
+): Promise<T> {
+  try {
+    const response = args ? await invoke<unknown>(command, args) : await invoke<unknown>(command);
+    return parse(response);
+  } catch (error) {
+    const typedError = lyricsErrorSchema.safeParse(error);
+    if (typedError.success) {
+      throw new IpcError(typedError.data.detail, typedError.data);
+    }
+    throw new IpcError(message, error);
+  }
+}
+
+async function invokeBookmarks<T>(
+  command: string,
+  args: Record<string, unknown> | undefined,
+  parse: (value: unknown) => T,
+  message: string,
+): Promise<T> {
+  try {
+    const response = args ? await invoke<unknown>(command, args) : await invoke<unknown>(command);
+    return parse(response);
+  } catch (error) {
+    const typedError = bookmarkErrorSchema.safeParse(error);
+    if (typedError.success) {
+      throw new IpcError(typedError.data.detail, typedError.data);
     }
     throw new IpcError(message, error);
   }
@@ -2844,6 +3172,75 @@ export async function seekPlayback(positionMs: number): Promise<PlaybackSnapshot
     }
     throw new IpcError("SpotDIY could not seek within that track.", error);
   }
+}
+
+export async function setAbLoopA(): Promise<PlaybackSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("A/B loop controls require the native SpotDIY runtime.");
+  }
+  return invokePlayback("set_ab_loop_a", undefined, parsePlaybackSnapshot, "SpotDIY could not set the A loop point.");
+}
+
+export async function setAbLoopB(): Promise<PlaybackSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("A/B loop controls require the native SpotDIY runtime.");
+  }
+  return invokePlayback("set_ab_loop_b", undefined, parsePlaybackSnapshot, "SpotDIY could not set the B loop point.");
+}
+
+export async function clearAbLoop(): Promise<PlaybackSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("A/B loop controls require the native SpotDIY runtime.");
+  }
+  return invokePlayback("clear_ab_loop", undefined, parsePlaybackSnapshot, "SpotDIY could not clear the A/B loop.");
+}
+
+export async function saveAbLoopPreset(trackId: TrackId, name: string): Promise<AbLoopPreset> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("A/B loop presets require the native SpotDIY runtime.");
+  }
+  return invokePlayback(
+    "save_ab_loop_preset",
+    { trackId: trackIdSchema.parse(trackId), name: z.string().parse(name) },
+    (value) => abLoopPresetSchema.parse(value),
+    "SpotDIY could not save that A/B loop preset.",
+  );
+}
+
+export async function listAbLoopPresets(trackId: TrackId): Promise<AbLoopPreset[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokePlayback(
+    "list_ab_loop_presets",
+    { trackId: trackIdSchema.parse(trackId) },
+    (value) => z.array(abLoopPresetSchema).parse(value),
+    "SpotDIY could not read A/B loop presets.",
+  );
+}
+
+export async function applyAbLoopPreset(presetId: AbLoopPresetId): Promise<PlaybackSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("A/B loop presets require the native SpotDIY runtime.");
+  }
+  return invokePlayback(
+    "apply_ab_loop_preset",
+    { presetId: abLoopPresetIdSchema.parse(presetId) },
+    parsePlaybackSnapshot,
+    "SpotDIY could not apply that A/B loop preset.",
+  );
+}
+
+export async function deleteAbLoopPreset(presetId: AbLoopPresetId): Promise<void> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("A/B loop presets require the native SpotDIY runtime.");
+  }
+  await invokePlayback(
+    "delete_ab_loop_preset",
+    { presetId: abLoopPresetIdSchema.parse(presetId) },
+    () => undefined,
+    "SpotDIY could not delete that A/B loop preset.",
+  );
 }
 
 export async function nextTrack(): Promise<PlaybackSnapshot> {

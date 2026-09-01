@@ -11,6 +11,8 @@ export type PlaylistItemId = string & { readonly __brand: "PlaylistItemId" };
 export type TagId = string & { readonly __brand: "TagId" };
 export type QueueSnapshotId = string & { readonly __brand: "QueueSnapshotId" };
 export type QueueSnapshotEntryId = string & { readonly __brand: "QueueSnapshotEntryId" };
+export type BookmarkId = string & { readonly __brand: "BookmarkId" };
+export type AbLoopPresetId = string & { readonly __brand: "AbLoopPresetId" };
 
 export type RouteId =
   | "home"
@@ -18,6 +20,7 @@ export type RouteId =
   | "library"
   | "playlists"
   | "downloads"
+  | "lyrics"
   | "settings";
 
 export interface SourceCapabilities {
@@ -115,6 +118,63 @@ export interface UnifiedTrack {
   version: VersionInfo;
   sources: TrackSource[];
   preferredSourceId: SourceId | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type LyricsSourceKind = "manual" | "sidecar" | "embedded" | "lrclib";
+export type LyricsSyncKind = "plain" | "timed" | "instrumental";
+
+export interface LyricsCue {
+  startMs: number;
+  lines: string[];
+}
+
+export interface LyricsAttribution {
+  label: string;
+  provider: string;
+  url: string | null;
+}
+
+export interface LyricsDocument {
+  trackId: TrackId;
+  source: LyricsSourceKind;
+  syncKind: LyricsSyncKind;
+  plainText: string | null;
+  cues: LyricsCue[];
+  instrumental: boolean;
+  editable: boolean;
+  attribution: LyricsAttribution | null;
+}
+
+export interface LyricsCandidate {
+  providerRecordId: number;
+  trackName: string;
+  artistName: string;
+  albumName: string | null;
+  durationMs: number | null;
+  instrumental: boolean;
+  hasPlain: boolean;
+  hasSynced: boolean;
+}
+
+export type ManualLyricsMode = "plain" | "lrc";
+
+export interface Bookmark {
+  id: BookmarkId;
+  trackId: TrackId;
+  positionMs: number;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AbLoopPreset {
+  id: AbLoopPresetId;
+  trackId: TrackId;
+  name: string;
+  aMs: number;
+  bMs: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -656,7 +716,10 @@ export type PlaybackErrorCode =
   | "queueEntryImmutable"
   | "invalidQueuePosition"
   | "snapshotNotFound"
-  | "shuttingDown";
+  | "shuttingDown"
+  | "invalidAbLoop"
+  | "abLoopPresetNotFound"
+  | "abLoopPresetTrackMismatch";
 
 export interface PlaybackErrorDto {
   code: PlaybackErrorCode;
@@ -685,6 +748,12 @@ export interface PlaybackSourceOption {
   label: string;
   available: boolean;
   availabilityDetail: string | null;
+}
+
+export interface AbLoopState {
+  aMs: number | null;
+  bMs: number | null;
+  active: boolean;
 }
 
 export type SourceResolutionReason =
@@ -738,11 +807,12 @@ export interface PlaybackSnapshot {
   backendHealth: PlaybackBackendHealth;
   recovering: boolean;
   error: PlaybackErrorDto | null;
+  abLoop: AbLoopState;
 }
 
 export interface NavItem {
   id: RouteId;
   label: string;
   shortLabel: string;
-  icon: "home" | "search" | "library" | "playlist" | "download" | "settings";
+  icon: "home" | "search" | "library" | "playlist" | "download" | "lyrics" | "settings";
 }

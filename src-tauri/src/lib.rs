@@ -1,3 +1,4 @@
+pub mod bookmarks;
 pub mod credentials;
 pub mod db;
 pub mod domain;
@@ -5,6 +6,7 @@ pub mod downloads;
 pub mod fusion;
 pub mod ipc;
 pub mod library;
+pub mod lyrics;
 pub mod media_tools;
 pub mod playback;
 pub mod playlists;
@@ -19,11 +21,13 @@ pub mod search {
 }
 pub mod sources;
 
+use bookmarks::{AbLoopPreset, Bookmark, BookmarkErrorDto, BookmarkService};
 use db::{standard_database_path, Database};
 use downloads::{DownloadMode, DownloadService, DownloadSnapshot, DownloadTask, DownloadTaskId};
 use fusion::{FusionEvaluation, FusionOverride, FusionOverrideDecision, SourceFusionService};
 use ipc::{app_status_with_runtime, source_capabilities, AppStatus, ProviderCapabilities};
 use library::{LibraryService, ProgressSink, LIBRARY_PROGRESS_EVENT};
+use lyrics::{LyricsCandidate, LyricsDocument, LyricsErrorDto, LyricsService, ManualLyricsMode};
 use media_tools::MediaToolManager;
 use playback::{
     AudioDevice, PlaybackErrorDto, PlaybackService, PlaybackSnapshot, QueueSection, RepeatMode,
@@ -34,6 +38,7 @@ use settings::{SettingValue, SettingsRepository, SettingsSnapshot};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::db::repository::TrackRepository;
@@ -54,6 +59,8 @@ struct AppState {
     media_tools: MediaToolManager,
     downloads: DownloadService,
     playback: PlaybackService,
+    lyrics: LyricsService,
+    bookmarks: BookmarkService,
     playlists: PlaylistService,
     search: search::SearchService,
     spotify_auth: sources::spotify::SpotifyAuthService,
@@ -670,6 +677,162 @@ fn add_track_to_inbox(
 }
 
 #[tauri::command]
+fn get_lyrics(
+    track_id: crate::domain::TrackId,
+    current_source_id: Option<crate::domain::SourceId>,
+    state: State<'_, AppState>,
+) -> Result<Option<LyricsDocument>, LyricsErrorDto> {
+    state
+        .lyrics
+        .get_lyrics(track_id, current_source_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn save_manual_lyrics(
+    track_id: crate::domain::TrackId,
+    mode: ManualLyricsMode,
+    text: String,
+    state: State<'_, AppState>,
+) -> Result<LyricsDocument, LyricsErrorDto> {
+    state
+        .lyrics
+        .save_manual_lyrics(track_id, mode, text)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn delete_manual_lyrics(
+    track_id: crate::domain::TrackId,
+    state: State<'_, AppState>,
+) -> Result<(), LyricsErrorDto> {
+    state
+        .lyrics
+        .delete_manual_lyrics(track_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn pick_and_import_lyrics_file(
+    track_id: crate::domain::TrackId,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<LyricsDocument, LyricsErrorDto> {
+    let Some(file) = app
+        .dialog()
+        .file()
+        .add_filter("Lyrics", &["lrc", "txt"])
+        .blocking_pick_file()
+    else {
+        return Err(lyrics::LyricsError::ImportCancelled.dto());
+    };
+    let path = file
+        .into_path()
+        .map_err(|_| lyrics::LyricsError::ImportRead)
+        .map_err(|error| error.dto())?;
+    state
+        .lyrics
+        .import_lyrics_file(track_id, path)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+async fn find_lrclib_best(
+    track_id: crate::domain::TrackId,
+    state: State<'_, AppState>,
+) -> Result<LyricsDocument, LyricsErrorDto> {
+    state
+        .lyrics
+        .find_lrclib_best(track_id)
+        .await
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+async fn search_lrclib(
+    track_id: crate::domain::TrackId,
+    state: State<'_, AppState>,
+) -> Result<Vec<LyricsCandidate>, LyricsErrorDto> {
+    state
+        .lyrics
+        .search_lrclib(track_id)
+        .await
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+async fn select_lrclib_candidate(
+    track_id: crate::domain::TrackId,
+    provider_record_id: i64,
+    state: State<'_, AppState>,
+) -> Result<LyricsDocument, LyricsErrorDto> {
+    state
+        .lyrics
+        .select_lrclib_candidate(track_id, provider_record_id)
+        .await
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn clear_cached_lrclib(
+    track_id: crate::domain::TrackId,
+    state: State<'_, AppState>,
+) -> Result<(), LyricsErrorDto> {
+    state
+        .lyrics
+        .clear_cached_lrclib(track_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn list_bookmarks(
+    track_id: crate::domain::TrackId,
+    state: State<'_, AppState>,
+) -> Result<Vec<Bookmark>, BookmarkErrorDto> {
+    state
+        .bookmarks
+        .list_bookmarks(track_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn create_bookmark(
+    track_id: crate::domain::TrackId,
+    position_ms: u64,
+    note: String,
+    state: State<'_, AppState>,
+) -> Result<Bookmark, BookmarkErrorDto> {
+    state
+        .bookmarks
+        .create_bookmark(track_id, position_ms, note)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn update_bookmark(
+    bookmark_id: crate::domain::BookmarkId,
+    position_ms: u64,
+    note: String,
+    state: State<'_, AppState>,
+) -> Result<Bookmark, BookmarkErrorDto> {
+    state
+        .bookmarks
+        .update_bookmark(bookmark_id, position_ms, note)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn delete_bookmark(
+    bookmark_id: crate::domain::BookmarkId,
+    state: State<'_, AppState>,
+) -> Result<(), BookmarkErrorDto> {
+    state
+        .bookmarks
+        .delete_bookmark(bookmark_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
 fn reveal_local_file(
     source_id: crate::domain::SourceId,
     app: AppHandle,
@@ -750,6 +913,66 @@ fn seek_playback(
     state
         .playback
         .seek_playback(position_ms)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn set_ab_loop_a(state: State<'_, AppState>) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.playback.set_ab_loop_a().map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn set_ab_loop_b(state: State<'_, AppState>) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.playback.set_ab_loop_b().map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn clear_ab_loop(state: State<'_, AppState>) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.playback.clear_ab_loop().map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn save_ab_loop_preset(
+    track_id: crate::domain::TrackId,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<AbLoopPreset, PlaybackErrorDto> {
+    state
+        .playback
+        .save_ab_loop_preset(track_id, name)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn list_ab_loop_presets(
+    track_id: crate::domain::TrackId,
+    state: State<'_, AppState>,
+) -> Result<Vec<AbLoopPreset>, PlaybackErrorDto> {
+    state
+        .playback
+        .list_ab_loop_presets(track_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn apply_ab_loop_preset(
+    preset_id: crate::domain::AbLoopPresetId,
+    state: State<'_, AppState>,
+) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state
+        .playback
+        .apply_ab_loop_preset(preset_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn delete_ab_loop_preset(
+    preset_id: crate::domain::AbLoopPresetId,
+    state: State<'_, AppState>,
+) -> Result<(), PlaybackErrorDto> {
+    state
+        .playback
+        .delete_ab_loop_preset(preset_id)
         .map_err(|error| error.dto())
 }
 
@@ -1045,6 +1268,8 @@ pub fn run() {
                 playback_sink,
                 queue_sink,
             );
+            let lyrics = LyricsService::new(database.clone(), library.clone())?;
+            let bookmarks = BookmarkService::new(database.clone());
             library.register_watchers(sink.clone())?;
             app.manage(AppState {
                 database,
@@ -1052,6 +1277,8 @@ pub fn run() {
                 media_tools,
                 downloads,
                 playback,
+                lyrics,
+                bookmarks,
                 playlists: PlaylistService::new(library.database().clone()),
                 search,
                 spotify_auth,
@@ -1119,12 +1346,31 @@ pub fn run() {
             add_track_tag,
             remove_track_tag,
             add_track_to_inbox,
+            get_lyrics,
+            save_manual_lyrics,
+            delete_manual_lyrics,
+            pick_and_import_lyrics_file,
+            find_lrclib_best,
+            search_lrclib,
+            select_lrclib_candidate,
+            clear_cached_lrclib,
+            list_bookmarks,
+            create_bookmark,
+            update_bookmark,
+            delete_bookmark,
             get_playback_snapshot,
             play_track,
             enqueue_track,
             play_track_next,
             toggle_play_pause,
             seek_playback,
+            set_ab_loop_a,
+            set_ab_loop_b,
+            clear_ab_loop,
+            save_ab_loop_preset,
+            list_ab_loop_presets,
+            apply_ab_loop_preset,
+            delete_ab_loop_preset,
             next_track,
             previous_track,
             set_playback_volume,

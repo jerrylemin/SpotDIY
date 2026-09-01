@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [int]$TimeoutSeconds = 45,
-    [switch]$Plan08Persistence
+    [switch]$Plan08Persistence,
+    [switch]$Plan09Lyrics
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,10 +12,14 @@ if ($env:SPOTDIY_PACKAGED_SMOKE -ne "1") {
     exit 0
 }
 
+if ($Plan08Persistence -and $Plan09Lyrics) {
+    throw "choose one packaged smoke mode"
+}
+
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
-$smokeLabel = if ($Plan08Persistence) { "Plan08" } else { "Plan04" }
-$flowMode = if ($Plan08Persistence) { "plan08" } else { "flow" }
-$restartMode = if ($Plan08Persistence) { "plan08-restart" } else { "restart" }
+$smokeLabel = if ($Plan09Lyrics) { "Plan09" } elseif ($Plan08Persistence) { "Plan08" } else { "Plan04" }
+$flowMode = if ($Plan09Lyrics) { "plan09" } elseif ($Plan08Persistence) { "plan08" } else { "flow" }
+$restartMode = if ($Plan09Lyrics) { "plan09-restart" } elseif ($Plan08Persistence) { "plan08-restart" } else { "restart" }
 $targetRoot = $env:CARGO_TARGET_DIR
 if ([string]::IsNullOrWhiteSpace($targetRoot)) {
     throw "CARGO_TARGET_DIR must point outside the repository before packaged verification"
@@ -67,7 +72,7 @@ function Stop-ExactOwnedMpv([int[]]$processIds) {
 
 function New-SilentWav([string]$path, [int]$frequency) {
     $sampleRate = 44100
-    $seconds = 4
+    $seconds = 30
     $channels = 1
     $bitsPerSample = 16
     $sampleCount = $sampleRate * $seconds
@@ -184,6 +189,13 @@ try {
     New-Item -ItemType Directory -Path $fixtureFolder -Force | Out-Null
     New-SilentWav (Join-Path $fixtureFolder "01-night-drive.wav") 440
     New-SilentWav (Join-Path $fixtureFolder "02-static-bloom.wav") 660
+    if ($Plan09Lyrics) {
+        [System.IO.File]::WriteAllText(
+            (Join-Path $fixtureFolder "01-night-drive.lrc"),
+            "[00:00.50]First synthetic line`r`n[00:02.00]Second synthetic line`r`n",
+            [System.Text.UTF8Encoding]::new($false)
+        )
+    }
 
     $beforeFirstLaunch = Get-MpvProcesses
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
@@ -229,7 +241,9 @@ try {
 
     Close-PackagedApp "second packaged app" $secondApp
     Wait-ForProcessExit $secondApp ($TimeoutSeconds * 1000)
-    if ($Plan08Persistence) {
+    if ($Plan09Lyrics) {
+        Write-Output "PASS: packaged Plan 09 lyrics, bookmarks, A/B loop, presets, queue, restart, and owned-process persistence"
+    } elseif ($Plan08Persistence) {
         Write-Output "PASS: packaged Plan 08 playlist, collection, queue, snapshot, restart, and owned-process persistence"
     } else {
         Write-Output "PASS: packaged playback, restart boundary, and owned-process cleanup"

@@ -8,6 +8,7 @@ const navItems: NavItem[] = [
   { id: "home", label: "Home", shortLabel: "Home", icon: "home" },
   { id: "search", label: "Search", shortLabel: "Search", icon: "search" },
   { id: "library", label: "Your library", shortLabel: "Library", icon: "library" },
+  { id: "lyrics", label: "Lyrics & notes", shortLabel: "Lyrics", icon: "lyrics" },
   { id: "playlists", label: "Playlists", shortLabel: "Playlists", icon: "playlist" },
   { id: "downloads", label: "Downloads", shortLabel: "Downloads", icon: "download" },
 ];

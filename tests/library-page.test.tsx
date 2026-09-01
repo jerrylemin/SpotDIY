@@ -36,6 +36,7 @@ const playbackResult = vi.hoisted(() => ({
     backendHealth: { ready: false, connected: false, detail: null, recoveryAction: null },
     recovering: false,
     error: null,
+    abLoop: { aMs: null, bMs: null, active: false },
   },
   audioDevices: [],
   hydrated: true,

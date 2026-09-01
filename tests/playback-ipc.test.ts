@@ -41,6 +41,7 @@ const snapshot: PlaybackSnapshot = {
   backendHealth: { ready: true, connected: true, detail: null, recoveryAction: null },
   recovering: false,
   error: null,
+  abLoop: { aMs: null, bMs: null, active: false },
 };
 
 function enableNativeRuntime() {

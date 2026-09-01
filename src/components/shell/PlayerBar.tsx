@@ -1,4 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { ProviderBadge } from "../common/ProviderBadge";
@@ -9,6 +10,7 @@ import { VolumeControl } from "../player/VolumeControl";
 import { SpotIcon } from "../icons/SpotIcon";
 import { isTauriRuntime } from "../../services/ipc";
 import { usePlayback } from "../../hooks/usePlayback";
+import { useBookmarks } from "../../hooks/useLyrics";
 import { useUiStore } from "../../stores/ui-store";
 
 function phaseCaption(phase: ReturnType<typeof usePlayback>["snapshot"]["phase"]): string {
@@ -36,6 +38,7 @@ function phaseCaption(phase: ReturnType<typeof usePlayback>["snapshot"]["phase"]
 
 export function PlayerBar() {
   const playback = usePlayback();
+  const bookmarks = useBookmarks(playback.snapshot.currentTrackId);
   const queueDrawerOpen = useUiStore((state) => state.queueDrawerOpen);
   const setQueueDrawerOpen = useUiStore((state) => state.setQueueDrawerOpen);
   const [artworkFailed, setArtworkFailed] = useState(false);
@@ -123,6 +126,8 @@ export function PlayerBar() {
           snapshot={playback.snapshot}
         />
         <ProgressControl
+          abLoop={playback.snapshot.abLoop}
+          bookmarkPositions={bookmarks.data?.map((bookmark) => bookmark.positionMs)}
           disabled={!hasCurrentTrack || playback.snapshot.phase === "failed" || playback.snapshot.phase === "recovering"}
           durationMs={playback.snapshot.durationMs}
           onSeek={(positionMs) => { void playback.seekPlayback(positionMs); }}
@@ -143,6 +148,10 @@ export function PlayerBar() {
           <SpotIcon name="queue" size={14} />
           Queue {playback.snapshot.queueLength > 0 ? `· ${playback.snapshot.queueLength}` : ""}
         </button>
+        <Link aria-label="Open lyrics" className="button button-quiet button-small player-lyrics-link" to="/lyrics">
+          <SpotIcon name="lyrics" size={14} />
+          Lyrics
+        </Link>
         <AudioDeviceMenu
           devices={playback.audioDevices}
           disabled={playback.snapshot.phase === "failed" || playback.snapshot.phase === "recovering"}

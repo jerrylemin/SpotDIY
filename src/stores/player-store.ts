@@ -31,6 +31,11 @@ function emptyPlaybackSnapshot(): PlaybackSnapshot {
     },
     recovering: false,
     error: null,
+    abLoop: {
+      aMs: null,
+      bMs: null,
+      active: false,
+    },
   };
 }
 

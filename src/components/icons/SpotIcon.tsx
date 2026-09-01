@@ -4,6 +4,7 @@ export type SpotIconName =
   | "home"
   | "search"
   | "library"
+  | "lyrics"
   | "playlist"
   | "download"
   | "settings"
@@ -37,6 +38,7 @@ const paths: Record<SpotIconName, string> = {
   home: "M4 10.5 12 4l8 6.5v8a1.5 1.5 0 0 1-1.5 1.5h-4v-5h-5v5h-4A1.5 1.5 0 0 1 4 18.5z",
   search: "m19 19-4.4-4.4M10.8 17a6.2 6.2 0 1 1 0-12.4 6.2 6.2 0 0 1 0 12.4Z",
   library: "M4 5.5A1.5 1.5 0 0 1 5.5 4H18a2 2 0 0 1 2 2v12.5A1.5 1.5 0 0 1 18.5 20H5.5A1.5 1.5 0 0 1 4 18.5zM8 4v16M12 4v16",
+  lyrics: "M7 4.5h10A1.5 1.5 0 0 1 18.5 6v12A1.5 1.5 0 0 1 17 19.5H7A1.5 1.5 0 0 1 5.5 18V6A1.5 1.5 0 0 1 7 4.5ZM8.5 8h7M8.5 12h7M8.5 16h4",
   playlist: "M5 6h9M5 11h9M5 16h5m8-8v8m0 0-3-3m3 3 3-3",
   download: "M12 4v10m0 0 3.5-3.5M12 14 8.5 10.5M5 18.5h14",
   settings: "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0-4v2m0 11v2M5.6 6.6 7 8m10-1.4-1.4 1.4M5.6 18.4 7 17m10 1.4-1.4-1.4M4 12h2m12 0h2",

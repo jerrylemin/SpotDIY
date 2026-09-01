@@ -2,6 +2,8 @@ import { useCallback, useEffect } from "react";
 
 import {
   clearPlaybackQueue,
+  clearAbLoop,
+  applyAbLoopPreset,
   enqueueTrack,
   getAudioDevices,
   getPlaybackSnapshot,
@@ -11,6 +13,8 @@ import {
   previousTrack,
   retryPlaybackBackend,
   seekPlayback,
+  setAbLoopA,
+  setAbLoopB,
   setAudioDevice,
   setPlaybackMuted,
   setPlaybackVolume,
@@ -241,6 +245,22 @@ export function usePlayback() {
     seekPlayback: useCallback((positionMs: number) => runSnapshotAction(
       () => seekPlayback(positionMs),
       "SpotDIY could not seek within the current track.",
+    ), [runSnapshotAction]),
+    setAbLoopA: useCallback(() => runSnapshotAction(
+      setAbLoopA,
+      "SpotDIY could not set the A loop point.",
+    ), [runSnapshotAction]),
+    setAbLoopB: useCallback(() => runSnapshotAction(
+      setAbLoopB,
+      "SpotDIY could not set the B loop point.",
+    ), [runSnapshotAction]),
+    clearAbLoop: useCallback(() => runSnapshotAction(
+      clearAbLoop,
+      "SpotDIY could not clear the A/B loop.",
+    ), [runSnapshotAction]),
+    applyAbLoopPreset: useCallback((presetId: Parameters<typeof applyAbLoopPreset>[0]) => runSnapshotAction(
+      () => applyAbLoopPreset(presetId),
+      "SpotDIY could not apply that A/B loop preset.",
     ), [runSnapshotAction]),
     setVolume: useCallback((volumePercent: number) => runSnapshotAction(
       () => setPlaybackVolume(volumePercent),
