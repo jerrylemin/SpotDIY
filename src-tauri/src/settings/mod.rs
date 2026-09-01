@@ -103,7 +103,7 @@ pub struct SettingsSnapshot {
 pub enum SettingValue {
     Theme(Theme),
     LayoutProfile(LayoutProfile),
-    CustomTheme(Option<SpotThemeDefinition>),
+    CustomTheme(Box<Option<SpotThemeDefinition>>),
     DownloadsDirectory(Option<PathBuf>),
     SourcePreferenceOrder(Vec<ProviderKind>),
 }
@@ -427,14 +427,14 @@ impl<'database> SettingsRepository<'database> {
                     });
                 }
             }
-            SettingValue::CustomTheme(None) => {
-                if self.get_snapshot()?.theme == Theme::Custom {
-                    return Err(SettingsError::InvalidValue {
-                        key: "custom_theme",
-                        reason: "select another theme before clearing the active custom theme"
-                            .to_owned(),
-                    });
-                }
+            SettingValue::CustomTheme(value)
+                if value.is_none() && self.get_snapshot()?.theme == Theme::Custom =>
+            {
+                return Err(SettingsError::InvalidValue {
+                    key: "custom_theme",
+                    reason: "select another theme before clearing the active custom theme"
+                        .to_owned(),
+                });
             }
             _ => {}
         }
@@ -520,7 +520,7 @@ fn encode_setting(
             })?,
         )),
         SettingValue::CustomTheme(value) => {
-            if let Some(theme) = value {
+            if let Some(theme) = value.as_ref() {
                 theme.validate()?;
             }
             let value_json =
@@ -663,7 +663,7 @@ mod tests {
         let theme = valid_theme(ThemeBaseMode::Dark);
 
         repository
-            .set_setting(SettingValue::CustomTheme(Some(theme.clone())))
+            .set_setting(SettingValue::CustomTheme(Box::new(Some(theme.clone()))))
             .unwrap();
         repository
             .set_setting(SettingValue::Theme(Theme::Custom))
@@ -684,7 +684,7 @@ mod tests {
         let theme = valid_theme(ThemeBaseMode::Light);
         assert!(theme.validate().is_ok());
         assert_eq!(
-            SettingValue::CustomTheme(Some(theme)).class(),
+            SettingValue::CustomTheme(Box::new(Some(theme))).class(),
             SettingClass::Ordinary
         );
     }
@@ -769,9 +769,9 @@ mod tests {
         let repository = SettingsRepository::new(&database);
 
         repository
-            .set_setting(SettingValue::CustomTheme(Some(valid_theme(
+            .set_setting(SettingValue::CustomTheme(Box::new(Some(valid_theme(
                 ThemeBaseMode::Dark,
-            ))))
+            )))))
             .unwrap();
         repository
             .set_setting(SettingValue::Theme(Theme::Custom))
@@ -780,7 +780,7 @@ mod tests {
             .set_setting(SettingValue::Theme(Theme::Dark))
             .unwrap();
         let snapshot = repository
-            .set_setting(SettingValue::CustomTheme(None))
+            .set_setting(SettingValue::CustomTheme(Box::new(None)))
             .unwrap();
 
         assert_eq!(snapshot.theme, Theme::Dark);
