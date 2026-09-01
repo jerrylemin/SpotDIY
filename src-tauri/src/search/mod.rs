@@ -206,7 +206,7 @@ impl SearchService {
             let task_sink = sink.clone();
             let task_cancellation = cancellation.clone();
             let inner = self.inner.clone();
-            tasks.push(tokio::spawn(async move {
+            tasks.push(tauri::async_runtime::spawn(async move {
                 let section = run_provider(
                     adapter,
                     provider,
@@ -224,7 +224,7 @@ impl SearchService {
         }
 
         let inner = self.inner.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             for task in tasks {
                 let _ = task.await;
             }
