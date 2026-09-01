@@ -56,6 +56,16 @@ pub struct YtDlpToolStatus {
     pub detail: Option<String>,
 }
 
+/// Backend-only FFmpeg discovery result. The executable path is retained for
+/// yt-dlp post-processing and never crosses the frontend boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FfmpegToolStatus {
+    pub health: MediaToolHealth,
+    pub executable: Option<PathBuf>,
+    pub version: Option<String>,
+    pub detail: Option<String>,
+}
+
 /// Compatibility diagnostics consumed by the existing mpv worker. This is
 /// deliberately not serialized or exposed to the frontend.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -95,6 +105,7 @@ pub struct YtDlpVersion {
 struct ManagerState {
     mpv_status: MpvToolStatus,
     yt_dlp_status: YtDlpToolStatus,
+    ffmpeg_status: FfmpegToolStatus,
     diagnostic: MediaToolDiagnostic,
 }
 
@@ -106,6 +117,9 @@ pub struct MediaToolManager {
     /// This seam is only used by deterministic Rust tests. Production
     /// discovery is environment override followed by PATH.
     yt_dlp_override_path: Option<PathBuf>,
+    /// This seam is only used by deterministic Rust tests. Production
+    /// discovery is environment override followed by PATH.
+    ffmpeg_override_path: Option<PathBuf>,
     state: Arc<Mutex<ManagerState>>,
 }
 
@@ -114,10 +128,12 @@ impl MediaToolManager {
         let manager = Self {
             override_path: None,
             yt_dlp_override_path: None,
+            ffmpeg_override_path: None,
             state: Arc::new(Mutex::new(initial_state())),
         };
         manager.refresh_mpv();
         manager.refresh_yt_dlp();
+        manager.refresh_ffmpeg();
         manager
     }
 
@@ -127,10 +143,12 @@ impl MediaToolManager {
         let manager = Self {
             override_path: Some(path),
             yt_dlp_override_path: None,
+            ffmpeg_override_path: None,
             state: Arc::new(Mutex::new(initial_state())),
         };
         manager.refresh_mpv();
         manager.refresh_yt_dlp();
+        manager.refresh_ffmpeg();
         manager
     }
 
@@ -140,11 +158,44 @@ impl MediaToolManager {
         let manager = Self {
             override_path: None,
             yt_dlp_override_path: Some(path),
+            ffmpeg_override_path: None,
             state: Arc::new(Mutex::new(initial_state())),
         };
         manager.refresh_mpv();
         manager.refresh_yt_dlp();
+        manager.refresh_ffmpeg();
         manager
+    }
+
+    /// Construct a manager with an explicit FFmpeg test candidate. This does
+    /// not represent a frontend-selectable executable path.
+    pub fn with_ffmpeg_override(path: PathBuf) -> Self {
+        let manager = Self {
+            override_path: None,
+            yt_dlp_override_path: None,
+            ffmpeg_override_path: Some(path),
+            state: Arc::new(Mutex::new(initial_state())),
+        };
+        manager.refresh_mpv();
+        manager.refresh_yt_dlp();
+        manager.refresh_ffmpeg();
+        manager
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_statuses(
+        yt_dlp_status: YtDlpToolStatus,
+        ffmpeg_status: FfmpegToolStatus,
+    ) -> Self {
+        let mut state = initial_state();
+        state.yt_dlp_status = yt_dlp_status;
+        state.ffmpeg_status = ffmpeg_status;
+        Self {
+            override_path: None,
+            yt_dlp_override_path: None,
+            ffmpeg_override_path: None,
+            state: Arc::new(Mutex::new(state)),
+        }
     }
 
     pub fn refresh_mpv(&self) -> MpvToolStatus {
@@ -225,6 +276,32 @@ impl MediaToolManager {
             .unwrap_or_else(|_| missing_yt_dlp_status("yt-dlp status is unavailable"))
     }
 
+    pub fn refresh_ffmpeg(&self) -> FfmpegToolStatus {
+        let candidate = choose_ffmpeg_candidate(
+            self.ffmpeg_override_path.clone(),
+            env::var_os("SPOTDIY_FFMPEG_PATH").map(PathBuf::from),
+            find_ffmpeg_on_path(),
+        );
+        let status = match candidate.as_deref() {
+            None => missing_ffmpeg_status("FFmpeg was not found on PATH"),
+            Some(path) if !path.is_file() => {
+                missing_ffmpeg_status("FFmpeg executable was not found")
+            }
+            Some(path) => inspect_ffmpeg(path),
+        };
+        if let Ok(mut state) = self.state.lock() {
+            state.ffmpeg_status = status.clone();
+        }
+        status
+    }
+
+    pub fn ffmpeg_status(&self) -> FfmpegToolStatus {
+        self.state
+            .lock()
+            .map(|state| state.ffmpeg_status.clone())
+            .unwrap_or_else(|_| missing_ffmpeg_status("FFmpeg status is unavailable"))
+    }
+
     pub fn require_yt_dlp(&self) -> Result<PathBuf, crate::search::types::ProviderSearchErrorCode> {
         let status = self.yt_dlp_status();
         match (status.status, status.executable) {
@@ -270,6 +347,7 @@ fn initial_state() -> ManagerState {
         diagnostic: diagnostic_from_status(&status),
         mpv_status: status,
         yt_dlp_status: missing_yt_dlp_status("yt-dlp was not checked yet"),
+        ffmpeg_status: missing_ffmpeg_status("FFmpeg was not checked yet"),
     }
 }
 
@@ -284,6 +362,15 @@ fn missing_yt_dlp_status(detail: &str) -> YtDlpToolStatus {
 
 fn missing_status(detail: &str) -> MpvToolStatus {
     MpvToolStatus {
+        health: MediaToolHealth::Missing,
+        executable: None,
+        version: None,
+        detail: Some(detail.to_owned()),
+    }
+}
+
+fn missing_ffmpeg_status(detail: &str) -> FfmpegToolStatus {
+    FfmpegToolStatus {
         health: MediaToolHealth::Missing,
         executable: None,
         version: None,
@@ -340,6 +427,23 @@ fn find_yt_dlp_on_path() -> Option<PathBuf> {
     find_yt_dlp_in_paths(&path_entries)
 }
 
+fn find_ffmpeg_on_path() -> Option<PathBuf> {
+    let path_entries = env::var_os("PATH")?;
+    find_ffmpeg_in_paths(&path_entries)
+}
+
+fn find_ffmpeg_in_paths(path_entries: &std::ffi::OsStr) -> Option<PathBuf> {
+    for directory in env::split_paths(path_entries) {
+        for file_name in ffmpeg_executable_names() {
+            let candidate = directory.join(file_name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 fn find_yt_dlp_in_paths(path_entries: &std::ffi::OsStr) -> Option<PathBuf> {
     for directory in env::split_paths(path_entries) {
         for file_name in yt_dlp_executable_names() {
@@ -360,6 +464,14 @@ fn choose_yt_dlp_candidate(
     test_override.or(environment_override).or(path_candidate)
 }
 
+fn choose_ffmpeg_candidate(
+    test_override: Option<PathBuf>,
+    environment_override: Option<PathBuf>,
+    path_candidate: Option<PathBuf>,
+) -> Option<PathBuf> {
+    test_override.or(environment_override).or(path_candidate)
+}
+
 #[cfg(windows)]
 fn executable_names() -> &'static [&'static str] {
     &["mpv.exe", "mpv"]
@@ -368,6 +480,16 @@ fn executable_names() -> &'static [&'static str] {
 #[cfg(windows)]
 fn yt_dlp_executable_names() -> &'static [&'static str] {
     &["yt-dlp.exe", "yt-dlp"]
+}
+
+#[cfg(windows)]
+fn ffmpeg_executable_names() -> &'static [&'static str] {
+    &["ffmpeg.exe", "ffmpeg"]
+}
+
+#[cfg(not(windows))]
+fn ffmpeg_executable_names() -> &'static [&'static str] {
+    &["ffmpeg"]
 }
 
 #[cfg(not(windows))]
@@ -449,6 +571,62 @@ fn inspect_yt_dlp(path: &Path) -> YtDlpToolStatus {
             version: None,
             detail: Some(probe_error_detail("yt-dlp", error)),
         },
+    }
+}
+
+fn inspect_ffmpeg(path: &Path) -> FfmpegToolStatus {
+    match run_bounded_probe(
+        path,
+        &["-version"],
+        MPV_VERSION_PROBE_TIMEOUT,
+        MPV_VERSION_PROBE_OUTPUT_LIMIT,
+        MPV_VERSION_PROBE_OUTPUT_LIMIT,
+    ) {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            inspect_ffmpeg_output(path, &stdout, &stderr, output.success)
+        }
+        Err(error) => FfmpegToolStatus {
+            health: MediaToolHealth::Broken,
+            executable: None,
+            version: None,
+            detail: Some(probe_error_detail("ffmpeg", error)),
+        },
+    }
+}
+
+fn inspect_ffmpeg_output(
+    path: &Path,
+    stdout: &str,
+    stderr: &str,
+    success: bool,
+) -> FfmpegToolStatus {
+    let mut output = stdout.to_owned();
+    output.push('\n');
+    output.push_str(stderr);
+    let version = parse_ffmpeg_version(&output);
+    if !success {
+        return FfmpegToolStatus {
+            health: MediaToolHealth::Broken,
+            executable: None,
+            version,
+            detail: Some("ffmpeg -version failed".to_owned()),
+        };
+    }
+    let Some(version) = version else {
+        return FfmpegToolStatus {
+            health: MediaToolHealth::Broken,
+            executable: None,
+            version: None,
+            detail: Some("ffmpeg -version did not report a recognizable version".to_owned()),
+        };
+    };
+    FfmpegToolStatus {
+        health: MediaToolHealth::Ready,
+        executable: Some(path.to_path_buf()),
+        version: Some(version),
+        detail: None,
     }
 }
 
@@ -738,6 +916,26 @@ fn parse_yt_dlp_version_token(token: &str) -> Option<YtDlpVersion> {
     (month > 0 && month <= 12 && day > 0 && day <= 31).then_some(YtDlpVersion { year, month, day })
 }
 
+fn parse_ffmpeg_version(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let marker = "ffmpeg version ";
+        let value = line.trim().strip_prefix(marker)?;
+        let version = value
+            .split_whitespace()
+            .next()?
+            .trim_matches(|character| matches!(character, '(' | ')' | ',' | ';'));
+        (!version.is_empty()
+            && version
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_digit())
+            && version.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
+            }))
+        .then(|| version.to_owned())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -834,6 +1032,38 @@ mod tests {
         assert_eq!(
             status.status,
             crate::search::types::ProviderRuntimeStatus::Unsupported
+        );
+    }
+
+    #[test]
+    fn ffmpeg_version_probe_marks_recognized_output_ready() {
+        let status = inspect_ffmpeg_output(
+            Path::new("ffmpeg"),
+            "ffmpeg version 9.0.1-full_build Copyright (c)",
+            "",
+            true,
+        );
+        assert_eq!(status.health, MediaToolHealth::Ready);
+        assert_eq!(status.executable, Some(PathBuf::from("ffmpeg")));
+        assert_eq!(status.version.as_deref(), Some("9.0.1-full_build"));
+    }
+
+    #[test]
+    fn ffmpeg_version_probe_rejects_unrecognized_output() {
+        let status = inspect_ffmpeg_output(Path::new("ffmpeg"), "not ffmpeg", "", true);
+        assert_eq!(status.health, MediaToolHealth::Broken);
+        assert!(status.executable.is_none());
+    }
+
+    #[test]
+    fn ffmpeg_path_override_has_priority() {
+        assert_eq!(
+            choose_ffmpeg_candidate(
+                Some(PathBuf::from("test-ffmpeg")),
+                Some(PathBuf::from("environment-ffmpeg")),
+                Some(PathBuf::from("path-ffmpeg")),
+            ),
+            Some(PathBuf::from("test-ffmpeg"))
         );
     }
 

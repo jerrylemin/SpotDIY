@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -371,6 +372,14 @@ impl DownloadTask {
         self.output_missing = false;
         self.updated_at = Utc::now();
         Ok(())
+    }
+
+    pub(crate) fn requeue_after_interruption(&mut self) {
+        if self.state.is_active() {
+            self.state = DownloadState::Queued;
+            self.updated_at = Utc::now();
+            self.completed_at = None;
+        }
     }
 }
 
@@ -775,6 +784,20 @@ fn parse_download_row(row: RawDownloadRow) -> Result<DownloadTask, DownloadRepos
                 value: row.provider_kind.clone(),
             })?;
     let artists = serde_json::from_str(&row.artists_json)?;
+    let state = row
+        .state
+        .parse()
+        .map_err(|_| DownloadRepositoryError::InvalidValue {
+            field: "downloads.state",
+            value: row.state.clone(),
+        })?;
+    let output_path = row.output_path.map(PathBuf::from);
+    let output_missing = state == DownloadState::Completed
+        && output_path.as_ref().map_or(true, |path| {
+            fs::symlink_metadata(path)
+                .map(|metadata| metadata.file_type().is_symlink() || !metadata.is_file())
+                .unwrap_or(true)
+        });
     let task = DownloadTask {
         id: row
             .id
@@ -798,15 +821,9 @@ fn parse_download_row(row: RawDownloadRow) -> Result<DownloadTask, DownloadRepos
                 field: "downloads.mode",
                 value: row.mode.clone(),
             })?,
-        state: row
-            .state
-            .parse()
-            .map_err(|_| DownloadRepositoryError::InvalidValue {
-                field: "downloads.state",
-                value: row.state.clone(),
-            })?,
+        state,
         destination_directory: PathBuf::from(row.destination_directory),
-        output_path: row.output_path.map(PathBuf::from),
+        output_path,
         output_extension: row.output_extension,
         output_codec: row.output_codec,
         source_quality_provenance: row.source_quality_provenance.parse().map_err(|_| {
@@ -857,7 +874,7 @@ fn parse_download_row(row: RawDownloadRow) -> Result<DownloadTask, DownloadRepos
             .completed_at
             .map(|value| parse_timestamp(value, "downloads.completed_at"))
             .transpose()?,
-        output_missing: false,
+        output_missing,
     };
     Ok(task)
 }

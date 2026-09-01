@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 use std::process::Stdio;
 use std::time::Duration;
@@ -6,13 +7,16 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::search::types::{ProviderSearchErrorCode, SearchCancellation};
 
 pub const YT_DLP_STDOUT_LIMIT: usize = 4 * 1024 * 1024;
 pub const YT_DLP_STDERR_LIMIT: usize = 256 * 1024;
 pub const YT_DLP_PROCESS_TIMEOUT: Duration = Duration::from_secs(15);
+pub const YT_DLP_DOWNLOAD_LINE_LIMIT: usize = 16 * 1024;
+pub const YT_DLP_DOWNLOAD_STDERR_RING_LIMIT: usize = 256 * 1024;
+pub const YT_DLP_DOWNLOAD_EVENT_CHANNEL_CAPACITY: usize = 128;
 
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
@@ -26,6 +30,37 @@ pub struct YtDlpProcessOutput {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: Option<i32>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum YtDlpDownloadEvent {
+    StdoutLine(String),
+    StderrLine(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct YtDlpDownloadProcessOutput {
+    pub exit_code: Option<i32>,
+    pub diagnostic: String,
+}
+
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum YtDlpDownloadProcessError {
+    #[error("yt-dlp download could not be started")]
+    Spawn,
+    #[error("yt-dlp download output could not be read")]
+    Read,
+    #[error("yt-dlp download stdout line exceeded 16 KiB")]
+    StdoutLineTooLong,
+    #[error("yt-dlp download stderr line exceeded 16 KiB")]
+    StderrLineTooLong,
+    #[error("yt-dlp download was cancelled")]
+    Cancelled,
+    #[error("yt-dlp download exited unsuccessfully")]
+    NonZeroExit {
+        code: Option<i32>,
+        diagnostic: String,
+    },
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -67,6 +102,22 @@ pub trait YtDlpProcessRunner: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<YtDlpProcessOutput, YtDlpProcessError>> + Send + 'a>>;
 }
 
+pub trait YtDlpDownloadRunner: Send + Sync {
+    fn run_download<'a>(
+        &'a self,
+        executable: &'a Path,
+        args: &'a [String],
+        cancellation: SearchCancellation,
+        events: mpsc::Sender<YtDlpDownloadEvent>,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<YtDlpDownloadProcessOutput, YtDlpDownloadProcessError>>
+                + Send
+                + 'a,
+        >,
+    >;
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TokioYtDlpProcessRunner {
     #[cfg(test)]
@@ -104,6 +155,31 @@ impl YtDlpProcessRunner for TokioYtDlpProcessRunner {
             executable,
             args,
             cancellation,
+            #[cfg(test)]
+            self.controlled_child_marker,
+        ))
+    }
+}
+
+impl YtDlpDownloadRunner for TokioYtDlpProcessRunner {
+    fn run_download<'a>(
+        &'a self,
+        executable: &'a Path,
+        args: &'a [String],
+        cancellation: SearchCancellation,
+        events: mpsc::Sender<YtDlpDownloadEvent>,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<YtDlpDownloadProcessOutput, YtDlpDownloadProcessError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(run_yt_dlp_download(
+            executable,
+            args,
+            cancellation,
+            events,
             #[cfg(test)]
             self.controlled_child_marker,
         ))
@@ -232,7 +308,225 @@ async fn run_yt_dlp(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DownloadStream {
+    Stdout,
+    Stderr,
+}
+
+enum DownloadReaderEvent {
+    Line(DownloadStream, String),
+    Finished(DownloadStream, Result<(), YtDlpDownloadProcessError>),
+}
+
+async fn run_yt_dlp_download(
+    executable: &Path,
+    args: &[String],
+    cancellation: SearchCancellation,
+    events: mpsc::Sender<YtDlpDownloadEvent>,
+    #[cfg(test)] controlled_child_marker: bool,
+) -> Result<YtDlpDownloadProcessOutput, YtDlpDownloadProcessError> {
+    let mut cancellation_rx = cancellation.subscribe();
+    if *cancellation_rx.borrow() {
+        return Err(YtDlpDownloadProcessError::Cancelled);
+    }
+
+    let mut command = yt_dlp_download_command(executable, args);
+    #[cfg(test)]
+    if controlled_child_marker {
+        command.env(CONTROLLED_CHILD_MARKER_ENV, CONTROLLED_CHILD_MARKER_VALUE);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|_| YtDlpDownloadProcessError::Spawn)?;
+    let stdout = child.stdout.take().ok_or(YtDlpDownloadProcessError::Read)?;
+    let stderr = child.stderr.take().ok_or(YtDlpDownloadProcessError::Read)?;
+    let (reader_tx, mut reader_rx) = mpsc::channel(YT_DLP_DOWNLOAD_EVENT_CHANNEL_CAPACITY);
+    let stdout_reader = tokio::spawn(read_download_lines(
+        stdout,
+        DownloadStream::Stdout,
+        reader_tx.clone(),
+    ));
+    let stderr_reader = tokio::spawn(read_download_lines(
+        stderr,
+        DownloadStream::Stderr,
+        reader_tx,
+    ));
+
+    let mut stdout_finished = false;
+    let mut stderr_finished = false;
+    let mut exit_status = None;
+    let mut diagnostic = String::new();
+    let mut poll = tokio::time::interval(PROCESS_POLL_INTERVAL);
+
+    loop {
+        if exit_status.is_none() {
+            exit_status = match child.try_wait() {
+                Ok(status) => status,
+                Err(_) => {
+                    terminate_owned_child(&mut child).await;
+                    drop(reader_rx);
+                    let _ = stdout_reader.await;
+                    let _ = stderr_reader.await;
+                    return Err(YtDlpDownloadProcessError::Read);
+                }
+            };
+        }
+
+        if exit_status.is_some() && stdout_finished && stderr_finished {
+            let status = exit_status.take().expect("exit status was checked");
+            let output = YtDlpDownloadProcessOutput {
+                exit_code: status.code(),
+                diagnostic,
+            };
+            return if status.success() {
+                Ok(output)
+            } else {
+                Err(YtDlpDownloadProcessError::NonZeroExit {
+                    code: output.exit_code,
+                    diagnostic: output.diagnostic,
+                })
+            };
+        }
+
+        tokio::select! {
+            reader_event = reader_rx.recv() => {
+                let Some(reader_event) = reader_event else {
+                    terminate_owned_child(&mut child).await;
+                    let _ = stdout_reader.await;
+                    let _ = stderr_reader.await;
+                    return Err(YtDlpDownloadProcessError::Read);
+                };
+                match reader_event {
+                    DownloadReaderEvent::Line(stream, line) => {
+                        if stream == DownloadStream::Stderr {
+                            append_diagnostic(&mut diagnostic, &line);
+                        }
+                        let event = match stream {
+                            DownloadStream::Stdout => YtDlpDownloadEvent::StdoutLine(line),
+                            DownloadStream::Stderr => YtDlpDownloadEvent::StderrLine(line),
+                        };
+                        if events.send(event).await.is_err() {
+                            terminate_owned_child(&mut child).await;
+                            drop(reader_rx);
+                            let _ = stdout_reader.await;
+                            let _ = stderr_reader.await;
+                            return Err(YtDlpDownloadProcessError::Read);
+                        }
+                    }
+                    DownloadReaderEvent::Finished(stream, result) => {
+                        if let Err(error) = result {
+                            terminate_owned_child(&mut child).await;
+                            drop(reader_rx);
+                            let _ = stdout_reader.await;
+                            let _ = stderr_reader.await;
+                            return Err(error);
+                        }
+                        match stream {
+                            DownloadStream::Stdout => stdout_finished = true,
+                            DownloadStream::Stderr => stderr_finished = true,
+                        }
+                    }
+                }
+            }
+            changed = cancellation_rx.changed() => {
+                if changed.is_ok() && *cancellation_rx.borrow() {
+                    terminate_owned_child(&mut child).await;
+                    drop(reader_rx);
+                    let _ = stdout_reader.await;
+                    let _ = stderr_reader.await;
+                    return Err(YtDlpDownloadProcessError::Cancelled);
+                }
+            }
+            _ = poll.tick() => {}
+        }
+    }
+}
+
+async fn read_download_lines<R>(
+    mut reader: R,
+    stream: DownloadStream,
+    events: mpsc::Sender<DownloadReaderEvent>,
+) where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut line = Vec::with_capacity(1024);
+    let mut chunk = [0_u8; 4 * 1024];
+    let result = 'read: loop {
+        let read = match reader.read(&mut chunk).await {
+            Ok(read) => read,
+            Err(_) => break Err(YtDlpDownloadProcessError::Read),
+        };
+        if read == 0 {
+            if !line.is_empty() {
+                if line.last().copied() == Some(b'\r') {
+                    line.pop();
+                }
+                let value = String::from_utf8_lossy(&line).into_owned();
+                if events
+                    .send(DownloadReaderEvent::Line(stream, value))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            break Ok(());
+        }
+        for byte in &chunk[..read] {
+            if *byte == b'\n' {
+                if line.last().copied() == Some(b'\r') {
+                    line.pop();
+                }
+                let value = String::from_utf8_lossy(&line).into_owned();
+                if events
+                    .send(DownloadReaderEvent::Line(stream, value))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+                line.clear();
+            } else {
+                if line.len() >= YT_DLP_DOWNLOAD_LINE_LIMIT {
+                    break 'read Err(match stream {
+                        DownloadStream::Stdout => YtDlpDownloadProcessError::StdoutLineTooLong,
+                        DownloadStream::Stderr => YtDlpDownloadProcessError::StderrLineTooLong,
+                    });
+                }
+                line.push(*byte);
+            }
+        }
+    };
+    let _ = events
+        .send(DownloadReaderEvent::Finished(stream, result))
+        .await;
+}
+
+fn append_diagnostic(diagnostic: &mut String, line: &str) {
+    diagnostic.push_str(line);
+    diagnostic.push('\n');
+    if diagnostic.len() > YT_DLP_DOWNLOAD_STDERR_RING_LIMIT {
+        let excess = diagnostic.len() - YT_DLP_DOWNLOAD_STDERR_RING_LIMIT;
+        let split_at = diagnostic
+            .char_indices()
+            .find_map(|(index, _)| (index >= excess).then_some(index))
+            .unwrap_or(diagnostic.len());
+        diagnostic.drain(..split_at);
+    }
+}
+
 fn yt_dlp_command(executable: &str, args: &[String]) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
+}
+
+pub fn yt_dlp_download_command(executable: &Path, args: &[String]) -> Command {
     let mut command = Command::new(executable);
     command
         .args(args)
@@ -424,6 +718,43 @@ mod tests {
             Err(YtDlpProcessError::Cancelled)
         ));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn download_reader_rejects_an_oversized_line() {
+        let (mut writer, reader) = tokio::io::duplex(YT_DLP_DOWNLOAD_LINE_LIMIT * 2);
+        writer
+            .write_all(&vec![b'x'; YT_DLP_DOWNLOAD_LINE_LIMIT + 1])
+            .await
+            .unwrap();
+        drop(writer);
+        let (events, mut received) = mpsc::channel(2);
+        read_download_lines(reader, DownloadStream::Stdout, events).await;
+        assert!(matches!(
+            received.recv().await,
+            Some(DownloadReaderEvent::Finished(
+                DownloadStream::Stdout,
+                Err(YtDlpDownloadProcessError::StdoutLineTooLong)
+            ))
+        ));
+    }
+
+    #[test]
+    fn download_command_keeps_each_argument_structured() {
+        let args = vec!["--output".to_owned(), "a & b".to_owned()];
+        let command = yt_dlp_download_command(Path::new("C:/yt-dlp.exe"), &args);
+        assert_eq!(
+            command.as_std().get_program(),
+            std::ffi::OsStr::new("C:/yt-dlp.exe")
+        );
+        assert_eq!(
+            command
+                .as_std()
+                .get_args()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            args
+        );
     }
 
     #[test]
