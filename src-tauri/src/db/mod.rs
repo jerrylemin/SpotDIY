@@ -10,8 +10,9 @@ use thiserror::Error;
 
 const INITIAL_MIGRATION_SQL: &str = include_str!("../../migrations/0001_initial.sql");
 const LOCAL_LIBRARY_MIGRATION_SQL: &str = include_str!("../../migrations/0002_local_library.sql");
+const SOURCE_FUSION_MIGRATION_SQL: &str = include_str!("../../migrations/0003_source_fusion.sql");
 
-pub const LATEST_SCHEMA_VERSION: u32 = 2;
+pub const LATEST_SCHEMA_VERSION: u32 = 3;
 pub const DATABASE_FILE_NAME: &str = "spotdiy.sqlite3";
 pub const APPLICATION_DATA_DIRECTORY: &str = "SpotDIY";
 
@@ -41,6 +42,12 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         name: "0002_local_library",
         sql: LOCAL_LIBRARY_MIGRATION_SQL,
+        destructive: false,
+    },
+    Migration {
+        version: 3,
+        name: "0003_source_fusion",
+        sql: SOURCE_FUSION_MIGRATION_SQL,
         destructive: false,
     },
 ];
@@ -460,6 +467,7 @@ mod tests {
             "local_files",
             "settings_metadata",
             "schema_metadata",
+            "user_track_overrides",
         ] {
             let exists: i64 = database
                 .with_connection(|connection| {
@@ -549,7 +557,150 @@ mod tests {
         let schema_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema_version, 2);
+        assert_eq!(schema_version, 3);
+    }
+
+    #[test]
+    fn schema_two_fixture_upgrades_to_three_without_losing_tracks_sources_or_settings() {
+        let path = TempDatabasePath::new("migration-three-fixture");
+        let mut connection = Connection::open(path.path()).unwrap();
+        configure_connection(&connection).unwrap();
+        run_migrations(&mut connection, None, &MIGRATIONS[..2]).unwrap();
+
+        let track_id = uuid::Uuid::new_v4().to_string();
+        let source_id = uuid::Uuid::new_v4().to_string();
+        connection
+            .execute(
+                "INSERT INTO tracks (
+                    id, title, normalized_title, duration_ms, version_qualifiers_json,
+                    created_at, updated_at
+                 ) VALUES (?1, 'Existing Track', 'existing track', 180000, '[\"standard\"]', ?2, ?2)",
+                params![track_id, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO track_sources (
+                    id, track_id, provider_kind, provider_item_id, duration_ms,
+                    version_qualifiers_json, created_at, updated_at
+                 ) VALUES (?1, ?2, 'soundcloud', 'existing-source', 180000,
+                           '[\"standard\"]', ?3, ?3)",
+                params![source_id, track_id, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO settings_metadata (
+                    setting_key, value_json, value_type, schema_version, updated_at
+                 ) VALUES ('theme', '\"light\"', 'theme', 1, '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO settings_metadata (
+                    setting_key, value_json, value_type, schema_version, updated_at
+                 ) VALUES (
+                    'source_preference_order',
+                    '[\"soundcloud\",\"youtube\",\"local\",\"spotify\"]',
+                    'source_preference_order', 1, '2026-01-01T00:00:00Z'
+                 )",
+                [],
+            )
+            .unwrap();
+
+        run_migrations(&mut connection, None, MIGRATIONS).unwrap();
+
+        let schema_version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(schema_version, 3);
+        let track_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM tracks WHERE id = ?1",
+                params![track_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let source_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM track_sources WHERE id = ?1 AND provider_item_id = 'existing-source'",
+                params![source_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(track_count, 1);
+        assert_eq!(source_count, 1);
+        let theme: String = connection
+            .query_row(
+                "SELECT value_json FROM settings_metadata WHERE setting_key = 'theme'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let preference_order: String = connection
+            .query_row(
+                "SELECT value_json FROM settings_metadata WHERE setting_key = 'source_preference_order'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(theme, "\"light\"");
+        assert_eq!(
+            preference_order,
+            "[\"soundcloud\",\"youtube\",\"local\",\"spotify\"]"
+        );
+        let foreign_key_rows: i64 = connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_rows, 0);
+    }
+
+    #[test]
+    fn schema_three_override_constraints_reject_spotify_and_duplicate_forced_merge() {
+        let path = TempDatabasePath::new("migration-three-constraints");
+        let database = Database::open(path.path()).unwrap();
+        let first_track = uuid::Uuid::new_v4().to_string();
+        let second_track = uuid::Uuid::new_v4().to_string();
+        database
+            .with_connection(|connection| {
+                for track_id in [&first_track, &second_track] {
+                    connection.execute(
+                        "INSERT INTO tracks (
+                            id, title, normalized_title, version_qualifiers_json,
+                            created_at, updated_at
+                         ) VALUES (?1, ?2, ?2, '[\"standard\"]', ?3, ?3)",
+                        params![track_id, track_id, "2026-01-01T00:00:00Z"],
+                    )?;
+                }
+                connection.execute(
+                    "INSERT INTO user_track_overrides (
+                        provider_kind, provider_item_id, target_track_id, decision,
+                        created_at, updated_at
+                     ) VALUES ('youtube', 'duplicate-id', ?1, 'merge', ?2, ?2)",
+                    params![first_track, "2026-01-01T00:00:00Z"],
+                )?;
+                let duplicate = connection.execute(
+                    "INSERT INTO user_track_overrides (
+                        provider_kind, provider_item_id, target_track_id, decision,
+                        created_at, updated_at
+                     ) VALUES ('youtube', 'duplicate-id', ?1, 'merge', ?2, ?2)",
+                    params![second_track, "2026-01-01T00:00:00Z"],
+                );
+                assert!(duplicate.is_err());
+                let spotify = connection.execute(
+                    "INSERT INTO user_track_overrides (
+                        provider_kind, provider_item_id, target_track_id, decision,
+                        created_at, updated_at
+                     ) VALUES ('spotify', 'spotify-id', ?1, 'merge', ?2, ?2)",
+                    params![first_track, "2026-01-01T00:00:00Z"],
+                );
+                assert!(spotify.is_err());
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]

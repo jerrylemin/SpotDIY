@@ -166,6 +166,7 @@ pub enum VersionQualifier {
     Karaoke,
     SpedUp,
     Slowed,
+    Nightcore,
     Unknown,
 }
 

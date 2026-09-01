@@ -1,6 +1,7 @@
 pub mod credentials;
 pub mod db;
 pub mod domain;
+pub mod fusion;
 pub mod ipc;
 pub mod library;
 pub mod media_tools;
