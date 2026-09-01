@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ProviderBadge } from "../common/ProviderBadge";
 import { SpotIcon } from "../icons/SpotIcon";
 import { isTauriRuntime } from "../../services/ipc";
-import type { LibraryTrack, SourceId } from "../../types/domain";
+import type { LibraryTrack, Playlist, SourceId, Tag, TrackCollectionState } from "../../types/domain";
 
 interface LibraryTrackRowProps {
   track: LibraryTrack;
@@ -16,6 +16,15 @@ interface LibraryTrackRowProps {
   playbackPending: boolean;
   playbackEnabled: boolean;
   current: boolean;
+  collectionState?: TrackCollectionState;
+  collectionPlaylists: Playlist[];
+  collectionTags: Tag[];
+  collectionPending: boolean;
+  onLike: (track: LibraryTrack) => void;
+  onRating: (track: LibraryTrack, rating: number | null) => void;
+  onInbox: (track: LibraryTrack) => void;
+  onPlaylist: (track: LibraryTrack, playlistId: Playlist["id"]) => void;
+  onTag: (track: LibraryTrack, tag: Tag | null, requestedName?: string) => void;
 }
 
 function formatDuration(durationMs: number | null): string | null {
@@ -70,6 +79,15 @@ export function LibraryTrackRow({
   playbackPending,
   playbackEnabled,
   current,
+  collectionState,
+  collectionPlaylists,
+  collectionTags,
+  collectionPending,
+  onLike,
+  onRating,
+  onInbox,
+  onPlaylist,
+  onTag,
 }: LibraryTrackRowProps) {
   const artworkSource = isTauriRuntime() && track.artworkPath
     ? convertFileSrc(track.artworkPath, "asset")
@@ -152,6 +170,48 @@ export function LibraryTrackRow({
           <SpotIcon name="arrow" size={14} />
           Open location
         </button>
+        <div className="library-collection-actions" aria-label={`Collection actions for ${track.title}`}>
+          <button
+            aria-pressed={collectionState?.liked ?? false}
+            className={`button button-quiet button-small${collectionState?.liked ? " library-collection-active" : ""}`}
+            disabled={!isTauriRuntime() || collectionPending}
+            onClick={() => onLike(track)}
+            type="button"
+          >
+            {collectionState?.liked ? "Liked" : "Like"}
+          </button>
+          <select
+            aria-label={`Rate ${track.title}`}
+            className="library-rating-select"
+            disabled={!isTauriRuntime() || collectionPending}
+            onChange={(event) => onRating(track, event.target.value ? Number(event.target.value) : null)}
+            value={collectionState?.rating ?? ""}
+          >
+            <option value="">Rate</option>
+            {[1, 2, 3, 4, 5].map((rating) => <option key={rating} value={rating}>{rating}/5</option>)}
+          </select>
+          <button
+            className={`button button-quiet button-small${collectionState?.inInbox ? " library-collection-active" : ""}`}
+            disabled={!isTauriRuntime() || collectionPending || collectionState?.inInbox === true}
+            onClick={() => onInbox(track)}
+            title={collectionState?.inInbox ? "Already in Inbox" : "Add this track to Inbox"}
+            type="button"
+          >
+            {collectionState?.inInbox ? "In Inbox" : "Add Inbox"}
+          </button>
+          <select
+            aria-label={`Add ${track.title} to playlist`}
+            className="library-playlist-select"
+            disabled={!isTauriRuntime() || collectionPending || collectionPlaylists.length === 0}
+            onChange={(event) => { if (event.target.value) onPlaylist(track, event.target.value as Playlist["id"]); event.currentTarget.value = ""; }}
+            value=""
+          >
+            <option value="">Add playlist</option>
+            {collectionPlaylists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
+          </select>
+          <button className="button button-quiet button-small" disabled={!isTauriRuntime() || collectionPending} onClick={() => { const name = window.prompt("Tag this track:", collectionTags[0]?.name ?? "favorite"); if (name) { const existing = collectionTags.find((tag) => tag.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase()); onTag(track, existing ?? null, existing ? undefined : name); } }} type="button">Tag</button>
+          {collectionState?.tags.length ? <span className="library-tag-list">{collectionState.tags.map((tag) => <span key={tag.id}>{tag.name}</span>)}</span> : null}
+        </div>
       </div>
     </article>
   );

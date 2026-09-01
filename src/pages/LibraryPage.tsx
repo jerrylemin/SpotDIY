@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import * as ipc from "../services/ipc";
 
 import { EmptyState } from "../components/common/EmptyState";
 import { LibraryFolderRow } from "../components/library/LibraryFolderRow";
@@ -24,6 +25,10 @@ import type {
   LibraryFolder,
   LibraryFolderId,
   LibrarySort,
+  LibraryTrack,
+  Playlist,
+  Tag,
+  TrackCollectionState,
 } from "../types/domain";
 
 const PAGE_SIZE = 50;
@@ -44,6 +49,10 @@ function actionError(...errors: unknown[]): string | null {
   return error ? errorMessage(error, "The library action could not be completed.") : null;
 }
 
+function hasIpcExport(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(ipc, name);
+}
+
 export function LibraryPage() {
   const nativeRuntime = isTauriRuntime();
   const e2ePlaybackPreview = !nativeRuntime && import.meta.env.DEV && import.meta.env.VITE_SPOTDIY_E2E === "1";
@@ -55,6 +64,10 @@ export function LibraryPage() {
   const [descending, setDescending] = useState(false);
   const [pageNumber, setPageNumber] = useState(0);
   const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
+  const [collectionStates, setCollectionStates] = useState<Record<string, TrackCollectionState>>({});
+  const [collectionPlaylists, setCollectionPlaylists] = useState<Playlist[]>([]);
+  const [collectionTags, setCollectionTags] = useState<Tag[]>([]);
+  const [collectionPendingTrackId, setCollectionPendingTrackId] = useState<string | null>(null);
 
   const folders = status.data?.folders ?? EMPTY_FOLDERS;
   const request = {
@@ -100,6 +113,40 @@ export function LibraryPage() {
   const playbackEnabled = nativeRuntime || e2ePlaybackPreview;
   const playbackErrorMessage = playback.bridgeError ?? playback.snapshot.error?.summary ?? null;
 
+  useEffect(() => {
+    const items = pageData?.items ?? [];
+    if (!nativeRuntime || items.length === 0) {
+      setCollectionStates({});
+      setCollectionPlaylists([]);
+      setCollectionTags([]);
+      return;
+    }
+    let active = true;
+    const trackIds = items.map((track) => track.trackId);
+    const stateRequest = hasIpcExport("getTrackCollectionStates")
+      ? ipc.getTrackCollectionStates(trackIds)
+      : Promise.resolve([] as TrackCollectionState[]);
+    const playlistRequest = hasIpcExport("listPlaylists") ? ipc.listPlaylists() : Promise.resolve([] as Playlist[]);
+    const tagRequest = hasIpcExport("listTags") ? ipc.listTags() : Promise.resolve([] as Tag[]);
+    void Promise.all([stateRequest, playlistRequest, tagRequest])
+      .then(([states, playlists, tags]) => {
+        if (!active) {
+          return;
+        }
+        setCollectionStates(Object.fromEntries(states.map((state) => [state.trackId, state])));
+        setCollectionPlaylists(playlists.filter((playlist) => playlist.kind !== "inbox" && playlist.branchStatus !== "merged"));
+        setCollectionTags(tags);
+      })
+      .catch((collectionError) => {
+        if (active) {
+          setActionErrorMessage(errorMessage(collectionError, "SpotDIY could not read collection state."));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [nativeRuntime, pageData]);
+
   const addFolder = async () => {
     if (!nativeRuntime || busy) {
       return;
@@ -139,6 +186,75 @@ export function LibraryPage() {
   const reveal = (sourceId: Parameters<typeof revealFile.mutate>[0]) => {
     setActionErrorMessage(null);
     revealFile.mutate(sourceId);
+  };
+
+  const refreshCollectionState = async (track: LibraryTrack) => {
+    if (!hasIpcExport("getTrackCollectionStates")) {
+      return;
+    }
+    const states = await ipc.getTrackCollectionStates([track.trackId]);
+    const next = states[0];
+    if (next) {
+      setCollectionStates((current) => ({ ...current, [track.trackId]: next }));
+    }
+  };
+
+  const runCollectionAction = async (track: LibraryTrack, action: () => Promise<unknown>, fallback: string) => {
+    setActionErrorMessage(null);
+    setCollectionPendingTrackId(track.trackId);
+    try {
+      await action();
+      await refreshCollectionState(track);
+    } catch (collectionError) {
+      setActionErrorMessage(errorMessage(collectionError, fallback));
+    } finally {
+      setCollectionPendingTrackId(null);
+    }
+  };
+
+  const toggleLike = (track: LibraryTrack) => {
+    const liked = collectionStates[track.trackId]?.liked ?? false;
+    if (!hasIpcExport("setTrackLiked")) {
+      return;
+    }
+    void runCollectionAction(track, () => ipc.setTrackLiked(track.trackId, !liked), "SpotDIY could not update that like.");
+  };
+
+  const updateRating = (track: LibraryTrack, rating: number | null) => {
+    if (!hasIpcExport("setTrackRating")) {
+      return;
+    }
+    void runCollectionAction(track, () => ipc.setTrackRating(track.trackId, rating), "SpotDIY could not update that rating.");
+  };
+
+  const addToInbox = (track: LibraryTrack) => {
+    if (!hasIpcExport("addTrackToInbox")) {
+      return;
+    }
+    void runCollectionAction(track, () => ipc.addTrackToInbox(track.trackId), "SpotDIY could not add that track to the Inbox.");
+  };
+
+  const addToPlaylist = (track: LibraryTrack, playlistId: Playlist["id"]) => {
+    if (!hasIpcExport("addPlaylistItem")) {
+      return;
+    }
+    void runCollectionAction(track, () => ipc.addPlaylistItem(playlistId, track.trackId, track.sourceId), "SpotDIY could not add that track to the playlist.");
+  };
+
+  const tagTrack = (track: LibraryTrack, tag: Tag | null, requestedName?: string) => {
+    if (!hasIpcExport("addTrackTag")) {
+      return;
+    }
+    void runCollectionAction(track, async () => {
+      let selectedTag = tag;
+      if (!selectedTag && requestedName && hasIpcExport("createTag")) {
+        selectedTag = await ipc.createTag(requestedName);
+        setCollectionTags((current) => [...current, selectedTag!]);
+      }
+      if (selectedTag) {
+        await ipc.addTrackTag(track.trackId, selectedTag.id);
+      }
+    }, "SpotDIY could not apply that tag.");
   };
 
   const addFolderButton = (label: string) => (
@@ -323,6 +439,15 @@ export function LibraryPage() {
                       playbackPending={playback.pending}
                       revealPending={revealFile.isPending}
                       track={track}
+                      collectionPending={collectionPendingTrackId === track.trackId}
+                      collectionPlaylists={collectionPlaylists}
+                      collectionState={collectionStates[track.trackId]}
+                      collectionTags={collectionTags}
+                      onInbox={addToInbox}
+                      onLike={toggleLike}
+                      onPlaylist={addToPlaylist}
+                      onRating={updateRating}
+                      onTag={tagTrack}
                     />
                   ))}
                 </div>
