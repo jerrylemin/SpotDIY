@@ -231,3 +231,44 @@ below.
   binary, downloaded media, runtime database, cache temp, credential, token,
   or generated test artifact is part of the repository changes.
 - Repository-local `src-tauri\target` remains absent after all checks.
+
+## 2026-09-01 - Plan 08 playlists, collections, and persistent queue
+
+- Baseline before Plan 08 was clean at `d3bd21e7bf0b4ce937cf9cd1e58d6655ccfd6a46`; Cargo output remained external at `C:\CargoTarget\SpotDIY` and `Test-Path .\src-tauri\target` was `False`.
+- Focused native coverage passed: schema v4-to-v5 migration preservation,
+  playlist CRUD/duplicate/remove/reorder, Inbox idempotence, branch diff and
+  one-shot selected merge/discard, collection normalization/validation, queue
+  sections, movement, pin/clear, shuffle policy, snapshot round trip, and
+  restart position restore.
+- `pnpm typecheck` - passed. `pnpm lint` - passed. `pnpm test` - passed:
+  51 tests across 14 files.
+- `pnpm exec playwright test` - passed: 48 runs across the 1280, 1920, and
+  2560 viewport projects, including the queue drawer sections and truthful
+  Autoplay empty state.
+- `pnpm build` - passed. Existing Browserslist stale-data, Tailwind content,
+  and large-chunk notices remain non-fatal.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` - passed.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+  --all-features -- -D warnings` - passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` - passed:
+  318 Rust unit tests, one synthetic mpv integration test, and zero failures.
+- `pnpm tauri build` - passed; the release executable and NSIS bundle were
+  generated under external `C:\CargoTarget\SpotDIY`.
+- Explicit real mpv smoke with `SPOTDIY_REAL_MPV_SMOKE=1` - passed: one
+  synthetic-WAV integration test with owned-process cleanup.
+- Packaged playback smoke with `SPOTDIY_PACKAGED_SMOKE=1` - passed: playback,
+  persistent restart boundary, graceful close, and owned-mpv cleanup.
+- Packaged Plan 08 persistence smoke with `-Plan08Persistence` - passed:
+  durable playlist/items, Inbox, like/rating/tag collection, queue sections,
+  repeat/shuffle, named snapshot, no-autoplay restart, and saved-position
+  resume. No SpotDIY-owned mpv process remained.
+- Named migration smoke `schema_four_fixture_upgrades_to_five_preserving_plan_seven_data` - passed.
+- `git diff --check` - passed before documentation edits. The optional
+  missing-yt-dlp packaged provider-search race was intentionally not triggered;
+  live provider/download smoke was not run.
+- CodeGraph refresh via `codegraph sync .` and status - passed once after
+  implementation: 112 files, 4,000 nodes, 14,771 edges, index up to date.
+- Graphify refresh via `graphify update .` - passed once after implementation:
+  3,596 nodes, 7,012 edges, and 233 communities.
+- Repository-local `src-tauri\target` remains absent; no media, credentials,
+  tokens, runtime database, cache temp, or generated test artifact is staged.

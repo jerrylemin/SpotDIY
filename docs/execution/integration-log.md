@@ -121,3 +121,22 @@
 - No Plan 08 work, Spotify/Local download path, online playback, automatic
   library mutation, source fusion, raw provider payload, credential, token,
   media artifact, or repository-local Cargo target was integrated.
+
+## 2026-09-01 - Plan 08 playlists, collections, and persistent queue
+
+- Integrated migration 5 with durable playlists/items, protected seeded Inbox,
+  one-shot branch base snapshots, likes, ratings, tags, track tags, queue state,
+  queue entries, and immutable queue snapshots. Foreign keys, dense positions,
+  source/track ownership checks, and Plan 07 data preservation remain enforced.
+- Integrated `PlaylistService` for playlist CRUD, duplicate/remove/reorder,
+  branch diff/selected merge/discard with revision conflicts, Inbox idempotence,
+  1..5 ratings, normalized tags, and bounded batch collection reads.
+- Integrated `PlaybackService`-owned persistent queue sections, pin/remove/move/
+  clear operations, Later-only shuffle, throttled position checkpoints,
+  restart restore without autoplay, first-Play position resume, and fresh-ID
+  snapshot restore. No separate `QueueService` was introduced.
+- Integrated typed Rust/Zod playlist, collection, playlist playback, queue, and
+  snapshot IPC; the presentation-only queue drawer uses `queue://state` and
+  dnd-kit handles while browser preview remains native-free.
+- The implementation boundary is committed as `525da8c`, `e5f7161`, `1f31d6a`,
+  and `0a62cad`; documentation closure follows the final verification gates.

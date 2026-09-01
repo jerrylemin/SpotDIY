@@ -13,7 +13,7 @@ Tauri commands / IPC DTOs
         v
 Rust services -- SQLite WAL / local filesystem / managed tools / providers
         |
-        +-- PlaybackService (serialized controller / transient queue)
+        +-- PlaybackService (serialized controller / persistent queue + snapshots)
                 |
                 +-- PlaybackBackend -> MpvBackend -> Windows named pipe -> one mpv.exe
         +-- DownloadService (persistent task scheduler / owned children)
@@ -200,3 +200,33 @@ copies through a destination-side temporary file, renames without overwrite,
 persists the trusted path, and cleans the owned temp root. Plan 07 does not
 create library tracks, move library media, fuse sources, or provide online
 playback; Spotify and Local download requests are rejected.
+
+## Plan 08 durable collections and queue boundary
+
+```text
+React playlists/library/queue surfaces
+              |
+              v
+typed playlist + collection + queue IPC / queue://state
+              |
+              +--> PlaylistService -> playlists, Inbox, branches, likes, ratings, tags
+              `--> PlaybackService -> queue sections, checkpoints, snapshots -> SQLite schema 5
+                                      |
+                                      `--> SourceResolver -> LibraryService path -> mpv
+```
+
+`PlaylistService` owns durable normal playlists, deterministic system Inbox,
+playlist items, and one-level lightweight branches. A branch stores its parent
+revision and base item snapshot; diff, selected merge, and discard are one-shot
+operations with explicit revision/conflict errors. Likes, 1..5 ratings, tags,
+and batch collection reads remain bounded and track-identity based.
+
+`PlaybackService` remains the sole owner of queue state; there is no separate
+`QueueService`. Queue entries contain only opaque IDs and optional requested
+source IDs. Up Next precedes Later, Autoplay is structurally empty, shuffle
+reorders Later without replaying current/history, and current/consumed entries
+are protected. Queue changes and approximately one-second position checkpoints
+persist through the typed repository. Startup restores queue state without
+autoplay; the first Play resumes the saved current item and position. Queue
+snapshots are immutable records whose restore creates fresh live queue IDs and
+does not autoplay.

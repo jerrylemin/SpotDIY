@@ -124,7 +124,21 @@ Build output remains at `C:\CargoTarget\SpotDIY`; owned task temp is under
 `%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>` and the repository
 `src-tauri\target` path remains absent.
 
+## Plan 08 completion
+
+Plan 08 is complete through implementation commits `525da8c`, `e5f7161`,
+`1f31d6a`, and `0a62cad`. It delivers schema-5 durable playlists and
+collections, seeded Inbox, one-shot branch diff/selected merge/discard,
+likes/ratings/tags, typed playlist/collection IPC, PlaybackService-owned
+persistent queue sections, throttled checkpoints, immutable snapshots, restart
+restore, and the queue drawer.
+
+Final evidence records 318 Rust unit tests plus synthetic and real mpv smoke, 51
+Vitest tests, 48 Playwright runs, strict quality gates, Tauri packaging,
+packaged playback/restart/cleanup, explicit Plan 08 persistence/resume, and
+v4-to-v5 migration coverage. Build output remains at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` remains absent.
+
 ## Next atomic task
 
-STOPPED AFTER PLAN 07. Do not start Plan 08 until external ChatGPT GitHub
-review is complete.
+STOPPED AFTER PLAN 08. Awaiting external ChatGPT GitHub review before Plan 09.

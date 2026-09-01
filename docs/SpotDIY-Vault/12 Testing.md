@@ -89,3 +89,21 @@ provider/download work is opt-in and was not run. The optional packaged search
 branch has a known immediate `start_search`/`cancel_search` race when the
 profile intentionally has no yt-dlp; it is recorded as a harness limitation,
 not treated as a successful download or search result.
+
+## Plan 08 verification
+
+Plan 08 passes 318 Rust unit tests plus the synthetic and explicit real-mpv
+smokes, 51 Vitest tests, 48 Playwright runs across the three viewport projects,
+frontend typecheck/lint/build, Rust fmt, all-features Clippy with warnings
+denied, and the external-target Tauri release build. Focused coverage includes
+schema v4-to-v5 preservation, playlist ordering and duplicates, Inbox
+idempotence, one-shot branch diff/merge/discard and conflicts, collection
+normalization, queue section policy, movement/pinning/clear, shuffle, snapshots,
+restart restore, and saved-position resume.
+
+The regular packaged playback/restart/cleanup smoke and the explicit Plan 08
+playlist/collection/queue/snapshot/restart smoke pass. The optional
+missing-yt-dlp packaged provider-search race was intentionally not triggered;
+live provider/download smoke remains opt-in. CodeGraph and Graphify were each
+refreshed once after implementation, and repository-local `src-tauri\target`
+remains absent.

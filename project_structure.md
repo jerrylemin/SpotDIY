@@ -4,7 +4,8 @@
 src/                         React/TanStack frontend
   app/                       App shell and cross-cutting composition
   components/                Shared shell, icons, empty states, badges
-    library/                 Folder rows, track rows, quality/provenance states
+    library/                 Folder rows, track rows, quality/provenance and collection states
+    queue/                   Persistent queue drawer, sections, snapshots, and drag handles
     player/                  Playback controls, progress, volume, audio device menu
     search/                  Search controls, provider sections, result cards
     downloads/               Persistent task rows, progress, provenance, and actions
@@ -13,13 +14,14 @@ src/                         React/TanStack frontend
     usePlayback.ts           Playback snapshot and transport mutations
     useSearch.ts             Debounced provider search lifecycle and stale-ID handling
     useDownloads.ts          Persistent download snapshots, events, and task mutations
+    useQueue.ts              Queue workspace/event bridge and native queue mutations
   pages/                     Route-level screens
   services/                  Typed native IPC boundary
   stores/                    Zustand interaction state
   styles/                    SpotDIY visual system
   types/                     Shared frontend domain vocabulary
 src-tauri/                   Tauri 2 Rust application
-  migrations/                Ordered SQLite schema migrations (through 0004)
+  migrations/                Ordered SQLite schema migrations (through 0005)
   src/domain/                Typed unified music domain model
   src/db/                    SQLite initialization and focused repositories
   src/fusion/                Deterministic normalization, matching, and overrides
@@ -27,6 +29,8 @@ src-tauri/                   Tauri 2 Rust application
   src/library/               Folder ownership, scanner, metadata, fingerprints, artwork, watcher
   src/media_tools/           mpv, yt-dlp, and FFmpeg discovery, validation, version, and health
   src/downloads/              Persistent tasks, scheduler, bounded runner lifecycle, and finalization
+  src/playlists/              Durable playlists, Inbox, branches, likes, ratings, tags, and collection state
+  src/queue/                  Typed persistent queue model, repository, sections, and snapshots
   src/playback/              Typed playback contracts, JSON IPC, mpv backend, queue, and controller
   src/search/                Concurrent provider search, cache, cancellation, and timeouts
   src/sources/               Local, YouTube, SoundCloud, Spotify adapters, and SourceResolver
@@ -44,9 +48,10 @@ public/                      Brand source assets
 ```
 
 The implemented Rust service boundaries are `LibraryService`,
-`PlaybackService`, `DownloadService`, and `MediaToolManager`, plus the existing
+`PlaylistService`, `PlaybackService`, `DownloadService`, and `MediaToolManager`, plus the existing
 domain, database, IPC, and settings modules. `PlaybackService` owns the
-serialized playback controller and transient queue; `DownloadService` owns
+serialized playback controller and persistent queue; `PlaylistService` owns
+durable playlist and collection records; `DownloadService` owns
 persistent task lifecycle, bounded yt-dlp children, progress, cancellation,
 retry, recovery, and destination-side finalization. `MpvBackend` owns the
 external playback process and JSON IPC; `LibraryService` remains the only
@@ -57,8 +62,8 @@ adds `SearchService`, the provider adapter boundary, and the credentials seam.
 Plan 06 adds `SourceFusionService` and `SourceResolver`: search results remain
 ephemeral until explicit YouTube/SoundCloud acceptance, local playback remains
 owned by `LibraryService`, and provider capability truth remains backend-owned.
-`LyricsService`, `PlaylistService`, `QueueService`, `BackupService`, and
-`AnalyticsService` remain later-plan boundaries and have no empty facade
-modules. Persistent playback queue state remains Plan 08 work; Plan 07
-downloads do not create library tracks, move media, or inject paths into
-playback.
+`LyricsService`, `QueueService`, `BackupService`, and `AnalyticsService` remain
+later-plan boundaries and have no empty facade modules. Plan 08 deliberately
+keeps queue ownership inside `PlaybackService` instead of adding a separate
+`QueueService`; Plan 07 downloads do not create library tracks, move media, or
+inject paths into playback.

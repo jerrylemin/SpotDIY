@@ -9,16 +9,18 @@ State date: 2026-09-01
 - Plan 04 feature commit: `536617d` (`feat: add mpv playback service and queue transport`)
 - Plan 04 review-fix commit: `af66127` (`fix: harden mpv playback lifecycle and event ordering`)
 - Plan 07 implementation commits: `0dbb628`, `22438a0`, and `6012921`.
-- Delivery status: Plan 07 implementation and final verification are complete; documentation closure and remote SHA verification are the remaining delivery records.
+- Plan 08 implementation commits: `525da8c`, `e5f7161`, `1f31d6a`, and `0a62cad`.
+- Delivery status: Plan 08 implementation and final verification are complete; this document is part of the documentation closure boundary.
 
 ## Runtime
 
 - Frontend: React 19, TypeScript 6 strict, Vite 8, TanStack Router/Query, Zustand, Zod.
 - Native: Tauri 2, Rust stable MSVC, SQLite WAL, typed serialized DTOs, and runtime frontend parsing.
 - Library: `LibraryService` owns persistent folder roots, recursive local indexing, metadata/artwork/fingerprint evidence, watcher reconciliation, and managed-source path validation.
-- Playback: `PlaybackService` is the sole serialized controller. It owns the transient ID-only queue, snapshot revisions, transport, repeat/shuffle/previous/EOF policy, source switching, recovery, and shutdown.
+- Playback: `PlaybackService` is the sole serialized controller. It owns the persistent ID-only queue, checkpointed position, immutable snapshots, transport, repeat/shuffle/previous/EOF policy, source switching, recovery, and shutdown.
+- Playlists: `PlaylistService` owns durable playlists, seeded Inbox, playlist items, one-shot branches, likes, ratings, tags, and bounded collection reads.
 - Backend: `MpvBackend` starts one external `mpv.exe` child over one fresh Windows named pipe and keeps JSON protocol/process details behind the backend boundary. Discovery is `SPOTDIY_MPV_PATH`, then PATH.
-- Tauri playback surface: `get_playback_snapshot`, `play_track`, `enqueue_track`, `play_track_next`, `toggle_play_pause`, `seek_playback`, `next_track`, `previous_track`, `set_playback_volume`, `set_playback_muted`, `set_repeat_mode`, `set_shuffle_enabled`, `get_audio_devices`, `set_audio_device`, `switch_playback_source`, `retry_playback_backend`, and `clear_playback_queue`; state events use `playback://state`.
+- Tauri playback surface: `get_playback_snapshot`, `play_track`, `enqueue_track`, `play_track_next`, `toggle_play_pause`, `seek_playback`, `next_track`, `previous_track`, `set_playback_volume`, `set_playback_muted`, `set_repeat_mode`, `set_shuffle_enabled`, `get_audio_devices`, `set_audio_device`, `switch_playback_source`, `retry_playback_backend`, `clear_playback_queue`, playlist playback/queue commands, queue workspace mutations, and queue snapshot commands; state events use `playback://state` and `queue://state`.
 - Downloads: `DownloadService` owns schema-v4 task persistence, yt-dlp/FFmpeg execution, bounded progress, scheduling, cancellation, retry, restart recovery, destination-side finalization, and `downloads://state` snapshots. Tasks support YouTube and SoundCloud only; Spotify and Local are rejected.
 - Tauri download surface: `get_download_snapshot`, `queue_search_result_download`, `queue_source_download`, `cancel_download`, `retry_download`, `set_download_concurrency`, and `open_download_location`.
 - Build cache: Rust/Tauri output is external at `C:\CargoTarget\SpotDIY`; `src-tauri\target` is absent and the path is not committed.
@@ -28,12 +30,12 @@ State date: 2026-09-01
 - Keep one Tauri application and keep provider-specific logic behind later adapter boundaries.
 - Use explicit Rust DTOs plus strict Zod parsing at the IPC boundary; frontend commands carry typed IDs and values, never local paths, pipe names, request IDs, URLs, or raw mpv JSON.
 - Permit playback only for managed, indexed, enabled, available local sources resolved by Rust through `LibraryService`.
-- Keep the Plan 04 queue transient and non-persistent; persistent queue and queue snapshots belong to Plan 08.
+- Keep `PlaybackService` as the sole queue owner; durable queue state and snapshots use typed IDs and never expose paths, URLs, or raw queue JSON through IPC.
 - Use the exact mpv startup arguments in the Plan 04 specification, positive request IDs, bounded 1 MiB frames, six property observations, generation-scoped events, and bounded quit/kill/reap.
 - Keep standard data under `%LOCALAPPDATA%\SpotDIY`; `SPOTDIY_PACKAGED_DATA_ROOT` is a smoke-only isolation seam because Windows known-folder resolution does not follow a child `LOCALAPPDATA` override.
 - Keep download task temp files under `%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>`, create final names inside the user-selected `downloads_directory`, and never expose arbitrary paths through IPC.
 - Preserve provider-encoded provenance for YouTube/SoundCloud downloads; no lossy-to-FLAC claim, raw provider payload, credential, token, or automatic library mutation is allowed.
-- Keep provider playback/search, Source Fusion, downloads, lyrics, playlists, overlays, media keys/SMTC, portable mode, analytics, EQ, normalization, crossfade, ReplayGain, and unrelated refactors out of Plan 04.
+- Keep provider playback/search, lyrics, overlays, media keys/SMTC, portable mode, analytics, EQ, normalization, crossfade, ReplayGain, and unrelated refactors outside the Plan 08 boundary.
 
 ## Plan 04 verification snapshot
 
@@ -111,6 +113,36 @@ Plan 06 was the predecessor boundary; its external review gate was completed bef
 - Final evidence: 308 Rust unit tests plus the synthetic mpv integration test, 47 Vitest tests, 45 Playwright runs, typecheck/lint/build, fmt/clippy, Tauri release packaging, explicit real-mpv smoke, packaged playback/restart/cleanup smoke, and five native provider-search smoke checks pass. Optional live provider/download smoke was not run; the existing optional packaged-search harness still has an immediate start/cancel race when yt-dlp is intentionally missing.
 - Storage remains external at `C:\CargoTarget\SpotDIY` for build output and `%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>` for owned task temp files. No media, credentials, tokens, or raw provider payloads are committed.
 
-## Next slice after Plan 07
+## Historical next slice after Plan 07
 
-STOPPED AFTER PLAN 07. Do not start Plan 08 until external GitHub review is complete.
+Plan 08 is the completed follow-on delivery recorded below.
+
+## Plan 08 delivery snapshot (2026-09-01)
+
+- Schema version 5 adds durable `playlists`, `playlist_items`, branch-base
+  snapshots, `likes`, `ratings`, `tags`, `track_tags`, `queue_entries`,
+  `queue_state`, `queue_snapshots`, and immutable `queue_snapshot_entries`.
+  Existing Plan 07 tracks, sources, overrides, downloads, and settings survive
+  the v4-to-v5 migration.
+- `PlaylistService` provides normal playlist CRUD, duplicate/remove/reorder,
+  deterministic seeded Inbox, one-level one-shot branches with base snapshots,
+  selected merge/discard and revision conflicts, likes, ratings 1..5, normalized
+  tags, and bounded batch collection state.
+- `PlaybackService` remains the sole queue owner. Up Next and Later are ordered
+  sections, Autoplay is structurally empty, shuffle affects Later only, position
+  checkpoints are throttled, startup restores state without autoplay, first Play
+  resumes the saved current item/position, and snapshots restore fresh live IDs.
+- Typed Rust/Zod IPC and `queue://state` bridge the native owner to the
+  presentation-only queue drawer. Playlists and library rows expose the scoped
+  collection actions; browser preview remains deterministic and native-free.
+- Final evidence: 318 Rust unit tests plus synthetic and explicit real-mpv
+  integration smoke, 51 Vitest tests, 48 Playwright runs, typecheck/lint/build,
+  fmt/clippy, Tauri release packaging, packaged playback/restart smoke, explicit
+  Plan 08 playlist/collection/queue/snapshot/restart smoke, and the v4-to-v5
+  migration smoke all pass.
+- CodeGraph and Graphify were refreshed once after implementation. Their final
+  counts are recorded in `docs/execution/verification-log.md`.
+
+## Next slice after Plan 08
+
+STOPPED AFTER PLAN 08. Awaiting external ChatGPT GitHub review before Plan 09.

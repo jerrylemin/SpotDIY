@@ -53,8 +53,9 @@ restarts the first entry.
 
 Canonical queue order and active play order are separate. Shuffle uses
 Fisher-Yates, preserves the current item and consumed history, and restores
-canonical ordering when disabled. The queue is transient and non-persistent;
-persistent queue state and queue snapshots belong to Plan 08.
+canonical ordering when disabled. Plan 08 persists the queue state and
+checkpointed position through `PlaybackService`; queue snapshots are immutable
+named records restored with fresh live entry IDs.
 
 Source switching preserves queue context, timestamp, pause state, volume,
 mute, repeat, shuffle, and selected device where valid. If the replacement
@@ -82,3 +83,21 @@ returns `MetadataOnly`. No online URL is sent to mpv and yt-dlp is not invoked
 for playback. `PlaybackSourceOption` carries `availabilityDetail` so the
 existing source selector/player surface can explain unavailable sources
 without a UI redesign.
+
+## Plan 08 persistent queue delivery
+
+`PlaybackService` remains the sole queue owner; there is no separate
+`QueueService`. Queue entries are typed IDs with optional requested source IDs.
+The durable workspace exposes `CURRENT`, `UP NEXT`, `LATER`, and structurally
+empty `AUTOPLAY` sections. Up Next has priority, Play Next inserts there,
+enqueue appends to Later, shuffle affects Later only, and current/consumed
+entries remain protected. Clear removes only unpinned upcoming entries while
+the existing full-clear transport semantics remain available.
+
+Queue mutations and approximately one-second position checkpoints persist in
+schema 5. Startup restores the current entry, order, repeat/shuffle, and
+position without autoplay; the first Play resumes the saved current item. Named
+snapshots are bounded and immutable except for deletion; restoring one stops
+the current transport, creates fresh live queue IDs, and never autoplays.
+Playlist playback and queueing accept playlist item IDs and resolve their
+requested source through the existing `SourceResolver` boundary.

@@ -71,9 +71,24 @@ remained.
 Storage remains external at `C:\CargoTarget\SpotDIY` for build output and
 `%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>` for owned task temp.
 Spotify and Local downloads, online playback, automatic fusion/library
-mutation, persistent playback queue, and Plan 08 remain out of scope.
+mutation, and later plans remain out of scope. Plan 08 completion is recorded
+below.
+
+## Plan 08 handoff
+
+Plan 08 is complete through implementation commits `525da8c`, `e5f7161`,
+`1f31d6a`, and `0a62cad`. Schema 5 persists playlists/items, seeded Inbox,
+one-shot branch base snapshots, likes, ratings, tags, queue entries/state, and
+immutable queue snapshots while preserving Plan 07 data. `PlaylistService`
+owns collections and branch operations; `PlaybackService` remains the sole
+queue owner and restores queue state/position without autoplay.
+
+The final log records 318 Rust unit tests plus synthetic and real mpv smoke, 51
+Vitest tests, 48 Playwright runs, strict quality gates, Tauri packaging,
+packaged restart/cleanup, explicit Plan 08 persistence/resume, and v4-to-v5
+migration coverage. Cargo output remains external at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
 
 ## Next atomic task
 
-STOPPED AFTER PLAN 07. Do not start Plan 08 until external ChatGPT GitHub
-review is complete.
+STOPPED AFTER PLAN 08. Awaiting external ChatGPT GitHub review before Plan 09.

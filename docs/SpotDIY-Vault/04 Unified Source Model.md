@@ -30,3 +30,12 @@ Merge and Split overrides are stored in migration-3 `user_track_overrides`.
 Only an explicit accepted YouTube or SoundCloud candidate creates a remote
 `TrackSource`; evaluation and best-match selection do not write SQLite. Local
 identity and Spotify remain excluded from destructive or automatic fusion.
+
+## Plan 08 collection identity boundary
+
+Playlists, Inbox, likes, ratings, tags, and queue entries reference the existing
+opaque `TrackId` and may retain an optional requested `SourceId`. They do not
+create alternate track identities, persist transient provider search results, or
+carry filesystem paths and online URLs through the frontend IPC boundary. Queue
+and playlist playback still resolve through `SourceResolver` and the managed
+local-library path checks; provider playback remains outside this plan.

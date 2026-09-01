@@ -85,3 +85,29 @@
   build output remains at `C:\CargoTarget\SpotDIY`, task temp roots are
   owned under `%LOCALAPPDATA%\SpotDIY\cache\downloads`, and the repository
   `src-tauri\target` path remains absent.
+
+## Plan 08 verification
+
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass;
+  Vitest reports 51 tests across 14 files, including strict playlist/collection
+  and queue DTOs, stale queue-event handling, and browser-preview isolation.
+- Browser: `pnpm exec playwright test` passes 48 runs across the 1280, 1920,
+  and 2560 viewport projects, including the queue drawer's four sections,
+  truthful Autoplay empty state, and accessible drag handles.
+- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`,
+  all-features Clippy with warnings denied, and `cargo test --all-targets`
+  pass. The final suite reports 318 unit tests plus one synthetic `mpv_smoke`
+  integration test; explicit real mpv smoke also passes.
+- Focused Plan 08 coverage includes schema v4-to-v5 preservation, playlist
+  duplicates/order and Inbox idempotence, branch base/revision/one-shot merge
+  behavior, collection normalization and batch bounds, queue section policy,
+  movement/pinning/clear, Later-only shuffle, snapshot immutability, restart
+  restore, and saved-position resume.
+- Runtime: `pnpm tauri build`, the regular packaged playback/restart/cleanup
+  smoke, and the explicit packaged Plan 08 playlist/collection/queue/snapshot/
+  restart smoke pass. The optional missing-yt-dlp provider-search race and live
+  provider/download smoke were intentionally not run.
+- Storage: schema version 5 adds durable playlist/collection/queue/snapshot
+  tables with foreign-key and ownership checks. Build output remains at
+  `C:\CargoTarget\SpotDIY`; no repository-local `src-tauri\target`, media,
+  credentials, tokens, or raw provider payloads are retained.
