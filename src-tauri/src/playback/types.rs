@@ -112,6 +112,7 @@ pub struct PlaybackSourceOption {
     pub provider: ProviderKind,
     pub label: String,
     pub available: bool,
+    pub availability_detail: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

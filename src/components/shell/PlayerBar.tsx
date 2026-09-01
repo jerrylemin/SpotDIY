@@ -129,7 +129,7 @@ export function PlayerBar() {
       </div>
 
       <div className="player-right">
-        <span className="player-source-label">SOURCE <strong>{sourceLabel}</strong></span>
+        <span className="player-source-label" title={currentSource?.availabilityDetail ?? undefined}>SOURCE <strong>{sourceLabel}</strong></span>
         <AudioDeviceMenu
           devices={playback.audioDevices}
           disabled={playback.snapshot.phase === "failed" || playback.snapshot.phase === "recovering"}

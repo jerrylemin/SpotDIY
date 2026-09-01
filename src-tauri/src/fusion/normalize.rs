@@ -229,6 +229,7 @@ fn add_text_qualifiers(value: &str, output: &mut Vec<VersionQualifier>) {
     if normalized == "live"
         || normalized.starts_with("live session")
         || normalized.starts_with("live version")
+        || normalized.starts_with("live at")
         || normalized.contains(" live at ")
         || normalized.ends_with(" live session")
     {

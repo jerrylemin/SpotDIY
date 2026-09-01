@@ -18,6 +18,7 @@ pub mod search {
 pub mod sources;
 
 use db::{standard_database_path, Database};
+use fusion::{FusionEvaluation, FusionOverride, FusionOverrideDecision, SourceFusionService};
 use ipc::{app_status_with_runtime, source_capabilities, AppStatus, ProviderCapabilities};
 use library::{LibraryService, ProgressSink, LIBRARY_PROGRESS_EVENT};
 use media_tools::MediaToolManager;
@@ -31,10 +32,12 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::search::{SearchEvent, SearchEventSink, SearchRequest, SearchStarted};
+use crate::db::repository::TrackRepository;
+use crate::domain::{ProviderKind, TrackId};
+use crate::search::{SearchEvent, SearchEventSink, SearchRequest, SearchResult, SearchStarted};
 use crate::sources::{
-    LocalSourceAdapter, SoundcloudSourceAdapter, SourceAdapter, SpotifySourceAdapter,
-    YoutubeSourceAdapter,
+    LocalSourceAdapter, SoundcloudSourceAdapter, SourceAdapter, SourceResolution, SourceResolver,
+    SpotifySourceAdapter, YoutubeSourceAdapter,
 };
 
 pub const SEARCH_PROVIDER_UPDATE_EVENT: &str = "search://provider-update";
@@ -48,6 +51,8 @@ struct AppState {
     playback: PlaybackService,
     search: search::SearchService,
     spotify_auth: sources::spotify::SpotifyAuthService,
+    fusion: SourceFusionService,
+    source_resolver: SourceResolver,
 }
 
 #[tauri::command]
@@ -135,6 +140,72 @@ fn open_provider_result(
     let safe = sources::validate_provider_url(provider, &url).map_err(|error| error.to_string())?;
     app.opener()
         .open_url(safe.as_url().as_str().to_owned(), None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn evaluate_fusion_candidate(
+    candidate: SearchResult,
+    target_track_id: TrackId,
+    state: State<'_, AppState>,
+) -> Result<FusionEvaluation, String> {
+    state
+        .fusion
+        .evaluate_candidate(&candidate, target_track_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn accept_fusion_candidate(
+    candidate: SearchResult,
+    target_track_id: TrackId,
+    state: State<'_, AppState>,
+) -> Result<FusionEvaluation, String> {
+    state
+        .fusion
+        .accept_match(&candidate, target_track_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_fusion_override(
+    provider_kind: ProviderKind,
+    provider_item_id: String,
+    target_track_id: TrackId,
+    decision: FusionOverrideDecision,
+    state: State<'_, AppState>,
+) -> Result<FusionOverride, String> {
+    state
+        .fusion
+        .set_override(provider_kind, provider_item_id, target_track_id, decision)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_fusion_override(
+    provider_kind: ProviderKind,
+    provider_item_id: String,
+    target_track_id: TrackId,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .fusion
+        .clear_override(provider_kind, &provider_item_id, target_track_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_source_resolution(
+    track_id: TrackId,
+    state: State<'_, AppState>,
+) -> Result<SourceResolution, String> {
+    let track = TrackRepository::new(&state.database)
+        .get(track_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("track {track_id} was not found"))?;
+    state
+        .source_resolver
+        .resolve(&track)
         .map_err(|error| error.to_string())
 }
 
@@ -465,6 +536,8 @@ pub fn run() {
                 Arc::new(SpotifySourceAdapter::new(spotify_auth.clone())),
             ];
             let search = search::SearchService::new(adapters);
+            let fusion = SourceFusionService::new(database.clone());
+            let source_resolver = SourceResolver::new(library.clone());
             let playback_sink = {
                 let app_handle = app.handle().clone();
                 Arc::new(move |snapshot: PlaybackSnapshot| {
@@ -481,6 +554,8 @@ pub fn run() {
                 playback,
                 search,
                 spotify_auth,
+                fusion,
+                source_resolver,
             });
             library.start_all_scans(sink)?;
             Ok(())
@@ -496,6 +571,11 @@ pub fn run() {
             begin_spotify_authorization,
             disconnect_spotify,
             open_provider_result,
+            evaluate_fusion_candidate,
+            accept_fusion_candidate,
+            set_fusion_override,
+            clear_fusion_override,
+            get_source_resolution,
             get_settings_snapshot,
             set_setting,
             get_library_folders,
@@ -522,7 +602,7 @@ pub fn run() {
             set_audio_device,
             switch_playback_source,
             retry_playback_backend,
-            clear_playback_queue
+            clear_playback_queue,
         ])
         .build(tauri::generate_context!())
         .expect("error while building SpotDIY")

@@ -1,10 +1,15 @@
 pub mod local;
+pub mod resolver;
 pub mod soundcloud;
 pub mod spotify;
 pub mod traits;
 pub mod youtube;
 pub use crate::media_tools::yt_dlp;
 pub use local::LocalSourceAdapter;
+pub use resolver::{
+    SourceReadiness, SourceReadinessProbe, SourceResolution, SourceResolutionCandidate,
+    SourceResolutionReason, SourceResolver, SourceResolverError,
+};
 pub use soundcloud::SoundcloudSourceAdapter;
 pub use spotify::SpotifySourceAdapter;
 pub use traits::SourceAdapter;

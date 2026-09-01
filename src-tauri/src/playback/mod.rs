@@ -4,7 +4,6 @@ pub mod protocol;
 pub mod queue;
 pub mod types;
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -19,6 +18,10 @@ use crate::db::repository::TrackRepository;
 use crate::domain::{ProviderKind, SourceId, TrackId, TrackSource, UnifiedTrack};
 use crate::library::{LibraryError, LibraryService};
 use crate::media_tools::MediaToolManager;
+use crate::sources::{
+    SourceResolution, SourceResolutionCandidate, SourceResolutionReason, SourceResolver,
+    SourceResolverError,
+};
 
 pub use self::backend::{
     BackendCommand, BackendEvent, EndFileReason, GenerationStampedBackendEvent, PlaybackBackend,
@@ -90,6 +93,7 @@ impl PlaybackService {
     where
         F: Fn(u64) -> PlaybackBackendSession + Send + Sync + 'static,
     {
+        let resolver = SourceResolver::new(library.clone());
         let (command_tx, command_rx) = tokio_mpsc::channel(COMMAND_CAPACITY);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let (done_tx, done_rx) = mpsc::sync_channel(1);
@@ -98,7 +102,7 @@ impl PlaybackService {
         let controller_thread = thread::Builder::new()
             .name("spotdiy-playback-controller".to_owned())
             .spawn(move || {
-                let mut controller = Controller::new(library, factory, sink, snapshot_tx);
+                let mut controller = Controller::new(library, resolver, factory, sink, snapshot_tx);
                 controller.initialize();
                 let _ = ready_tx.send(());
                 controller.run(command_rx);
@@ -513,6 +517,7 @@ struct RecoveryPlan {
 
 struct Controller {
     library: LibraryService,
+    resolver: SourceResolver,
     backend_factory: BackendFactory,
     backend: Arc<dyn PlaybackBackend>,
     backend_events: tokio_mpsc::Receiver<GenerationStampedBackendEvent>,
@@ -535,6 +540,7 @@ struct Controller {
 impl Controller {
     fn new(
         library: LibraryService,
+        resolver: SourceResolver,
         backend_factory: BackendFactory,
         sink: SnapshotSink,
         snapshot_tx: watch::Sender<PlaybackSnapshot>,
@@ -543,6 +549,7 @@ impl Controller {
         let PlaybackBackendSession { backend, events } = backend_factory(backend_generation);
         Self {
             library,
+            resolver,
             backend_factory,
             backend,
             backend_events: events,
@@ -1573,6 +1580,13 @@ impl Controller {
     ) -> Result<ResolvedPlayback, PlaybackError> {
         let track = self.track(request.track_id)?;
         if let Some(source_id) = request.source_id {
+            let exact = self
+                .resolver
+                .resolve_exact_source(&track, source_id)
+                .map_err(playback_error_from_resolver)?;
+            if !exact.playable {
+                return Err(playback_error_from_resolution_candidate(&exact));
+            }
             let source = track
                 .sources
                 .iter()
@@ -1588,45 +1602,46 @@ impl Controller {
                 .library
                 .resolve_playback_path(track.id, source_id)
                 .map_err(playback_error_from_library)?;
-            return Ok(self.resolved_playback(&track, source, path));
+            let resolution = self
+                .resolver
+                .resolve(&track)
+                .map_err(playback_error_from_resolver)?;
+            return Ok(self.resolved_playback(&track, source, path, &resolution));
         }
 
-        let mut candidates = Vec::new();
-        let mut seen = HashSet::new();
-        if let Some(source_id) = track.preferred_source_id {
-            if seen.insert(source_id) {
-                candidates.push(source_id);
-            }
-        }
-        for source in &track.sources {
-            if seen.insert(source.id) {
-                candidates.push(source.id);
-            }
-        }
-
-        let mut last_error = None;
-        for source_id in candidates {
-            let Some(source) = track.sources.iter().find(|source| source.id == source_id) else {
-                last_error = Some(playback_error_from_library(
-                    self.library
-                        .resolve_playback_path(track.id, source_id)
-                        .expect_err("a source absent from the track cannot resolve"),
-                ));
-                continue;
-            };
-            match self.library.resolve_playback_path(track.id, source_id) {
-                Ok(path) => return Ok(self.resolved_playback(&track, source, path)),
-                Err(error) => last_error = Some(playback_error_from_library(error)),
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| {
-            PlaybackError::new(
-                PlaybackErrorCode::SourceNotFound,
-                format!("track {} has no playback source", track.id),
-                false,
-            )
-        }))
+        let resolution = self
+            .resolver
+            .resolve(&track)
+            .map_err(playback_error_from_resolver)?;
+        let source_id = resolution.selected_source_id.ok_or_else(|| {
+            resolution
+                .candidates
+                .last()
+                .map(playback_error_from_resolution_candidate)
+                .unwrap_or_else(|| {
+                    PlaybackError::new(
+                        PlaybackErrorCode::SourceNotFound,
+                        format!("track {} has no playback source", track.id),
+                        false,
+                    )
+                })
+        })?;
+        let source = track
+            .sources
+            .iter()
+            .find(|source| source.id == source_id)
+            .ok_or_else(|| {
+                PlaybackError::new(
+                    PlaybackErrorCode::SourceNotFound,
+                    format!("playback source {source_id} was not found"),
+                    false,
+                )
+            })?;
+        let path = self
+            .library
+            .resolve_playback_path(track.id, source_id)
+            .map_err(playback_error_from_library)?;
+        Ok(self.resolved_playback(&track, source, path, &resolution))
     }
 
     fn resolve_exact_source(
@@ -1635,22 +1650,33 @@ impl Controller {
         source_id: SourceId,
     ) -> Result<ResolvedPlayback, PlaybackError> {
         let track = self.track(track_id)?;
+        let exact = self
+            .resolver
+            .resolve_exact_source(&track, source_id)
+            .map_err(playback_error_from_resolver)?;
+        if !exact.playable {
+            return Err(playback_error_from_resolution_candidate(&exact));
+        }
         let source = track
             .sources
             .iter()
             .find(|source| source.id == source_id)
             .ok_or_else(|| {
-                playback_error_from_library(
-                    self.library
-                        .resolve_playback_path(track_id, source_id)
-                        .expect_err("a source absent from the track cannot resolve"),
+                PlaybackError::new(
+                    PlaybackErrorCode::SourceNotFound,
+                    format!("playback source {source_id} was not found"),
+                    false,
                 )
             })?;
         let path = self
             .library
             .resolve_playback_path(track_id, source_id)
             .map_err(playback_error_from_library)?;
-        Ok(self.resolved_playback(&track, source, path))
+        let resolution = self
+            .resolver
+            .resolve(&track)
+            .map_err(playback_error_from_resolver)?;
+        Ok(self.resolved_playback(&track, source, path, &resolution))
     }
 
     fn track(&self, track_id: TrackId) -> Result<UnifiedTrack, PlaybackError> {
@@ -1677,18 +1703,24 @@ impl Controller {
         track: &UnifiedTrack,
         source: &TrackSource,
         path: PathBuf,
+        resolution: &SourceResolution,
     ) -> ResolvedPlayback {
-        let sources = track
-            .sources
+        let sources = resolution
+            .candidates
             .iter()
             .map(|candidate| PlaybackSourceOption {
-                source_id: candidate.id,
-                provider: candidate.provider_kind,
-                label: source_label(candidate.provider_kind),
-                available: self
-                    .library
-                    .resolve_playback_path(track.id, candidate.id)
-                    .is_ok(),
+                source_id: candidate.source_id,
+                provider: candidate.provider,
+                label: source_label(candidate.provider),
+                available: candidate.playable,
+                availability_detail: if candidate.playable {
+                    None
+                } else {
+                    candidate
+                        .detail
+                        .clone()
+                        .or_else(|| candidate.reason.default_detail().map(str::to_owned))
+                },
             })
             .collect();
         let artwork_path = source
@@ -1840,6 +1872,53 @@ fn playback_error_from_library(error: LibraryError) -> PlaybackError {
             true,
         ),
     }
+}
+
+fn playback_error_from_resolver(error: SourceResolverError) -> PlaybackError {
+    match error {
+        SourceResolverError::SourceNotFound {
+            track_id,
+            source_id,
+        } => PlaybackError::new(
+            PlaybackErrorCode::SourceNotFound,
+            format!("playback source {source_id} was not found for track {track_id}"),
+            false,
+        ),
+        SourceResolverError::Library(error) => playback_error_from_library(error),
+        SourceResolverError::Settings(error) => PlaybackError::new(
+            PlaybackErrorCode::SourceUnavailable,
+            format!("could not read source preference settings: {error}"),
+            true,
+        ),
+    }
+}
+
+fn playback_error_from_resolution_candidate(
+    candidate: &SourceResolutionCandidate,
+) -> PlaybackError {
+    let code = match candidate.reason {
+        SourceResolutionReason::LocalFileMissing => PlaybackErrorCode::LocalFileMissing,
+        SourceResolutionReason::SourceDoesNotSupportPlayback
+        | SourceResolutionReason::ProviderPlaybackNotImplemented
+        | SourceResolutionReason::MetadataOnly => PlaybackErrorCode::SourceNotPlayable,
+        SourceResolutionReason::Unavailable => PlaybackErrorCode::SourceUnavailable,
+        SourceResolutionReason::PreferredSource | SourceResolutionReason::Playable => {
+            PlaybackErrorCode::SourceUnavailable
+        }
+    };
+    let detail = candidate
+        .detail
+        .clone()
+        .or_else(|| candidate.reason.default_detail().map(str::to_owned))
+        .unwrap_or_else(|| "source is not currently playable".to_owned());
+    PlaybackError::new(
+        code,
+        format!(
+            "playback source {} is unavailable: {detail}",
+            candidate.source_id
+        ),
+        true,
+    )
 }
 
 fn playback_error_from_backend(error: BackendError) -> PlaybackError {

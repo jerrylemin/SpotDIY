@@ -28,7 +28,7 @@ const snapshot: PlaybackSnapshot = {
   artists: ["Luna Max"],
   album: "Afterglow",
   artworkPath: null,
-  sources: [{ sourceId: "source-1" as PlaybackSnapshot["currentSourceId"] & string, provider: "local", label: "LOCAL", available: true }],
+  sources: [{ sourceId: "source-1" as PlaybackSnapshot["currentSourceId"] & string, provider: "local", label: "LOCAL", available: true, availabilityDetail: null }],
   positionMs: 1_250,
   durationMs: 185_000,
   volumePercent: 72,

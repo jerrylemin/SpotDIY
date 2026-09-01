@@ -39,6 +39,7 @@ export type VersionQualifier =
   | "karaoke"
   | "spedUp"
   | "slowed"
+  | "nightcore"
   | "unknown";
 
 export interface VersionInfo {
@@ -190,6 +191,61 @@ export interface SearchResult {
   localTrackId: TrackId | null;
   localSourceId: SourceId | null;
   originalRank: number;
+}
+
+export type FusionOverrideDecision = "merge" | "split";
+export type FusionDecision = "already_unified" | "forced_merge" | "auto_merge" | "forced_split" | "rejected" | "excluded";
+export type FusionReason =
+  | "matched"
+  | "provider_excluded"
+  | "entity_unsupported"
+  | "already_unified"
+  | "forced_merge"
+  | "forced_split"
+  | "same_provider_requires_manual_merge"
+  | "title_below_minimum"
+  | "artist_below_minimum"
+  | "duration_mismatch"
+  | "version_mismatch"
+  | "below_threshold"
+  | "identity_conflict"
+  | "ambiguous"
+  | "invalid_candidate";
+
+export interface FusionEvaluation {
+  targetTrackId: TrackId;
+  decision: FusionDecision;
+  scoreBps: number;
+  thresholdBps: number;
+  titleScoreBps: number;
+  artistScoreBps: number;
+  durationScoreBps: number;
+  durationDeltaMs: number | null;
+  candidateQualifiers: VersionQualifier[];
+  targetQualifiers: VersionQualifier[];
+  reason: FusionReason;
+}
+
+export interface FusionOverride {
+  providerKind: ProviderKind;
+  providerItemId: string;
+  targetTrackId: TrackId;
+  decision: FusionOverrideDecision;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FusionOverrideRequest {
+  providerKind: ProviderKind;
+  providerItemId: string;
+  targetTrackId: TrackId;
+  decision: FusionOverrideDecision;
+}
+
+export interface ClearFusionOverrideRequest {
+  providerKind: ProviderKind;
+  providerItemId: string;
+  targetTrackId: TrackId;
 }
 
 export type ProviderSearchState = "idle" | "loading" | "ready" | "failed" | "cancelled";
@@ -398,6 +454,30 @@ export interface PlaybackSourceOption {
   provider: ProviderKind;
   label: string;
   available: boolean;
+  availabilityDetail: string | null;
+}
+
+export type SourceResolutionReason =
+  | "preferred_source"
+  | "playable"
+  | "unavailable"
+  | "local_file_missing"
+  | "source_does_not_support_playback"
+  | "provider_playback_not_implemented"
+  | "metadata_only";
+
+export interface SourceResolutionCandidate {
+  sourceId: SourceId;
+  provider: ProviderKind;
+  playable: boolean;
+  reason: SourceResolutionReason;
+  preferenceRank: number;
+  detail: string | null;
+}
+
+export interface SourceResolution {
+  selectedSourceId: SourceId | null;
+  candidates: SourceResolutionCandidate[];
 }
 
 export interface TrackPlaybackRequest {

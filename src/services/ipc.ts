@@ -34,6 +34,11 @@ import type {
   SettingsSnapshot,
   SpotifyAuthorizationRequest,
   SpotifySetupStatus,
+  ClearFusionOverrideRequest,
+  FusionEvaluation,
+  FusionOverride,
+  FusionOverrideRequest,
+  SourceResolution,
   TrackPlaybackRequest,
   TrackId,
   SourceId,
@@ -248,6 +253,93 @@ const libraryPageSchema = z.object({
 const queueEntryIdSchema = z.string().transform((value) => value as QueueEntryId);
 const trackIdSchema = z.string().transform((value) => value as TrackId);
 const sourceIdSchema = z.string().transform((value) => value as SourceId);
+const versionQualifierSchema = z.enum([
+  "standard",
+  "studio",
+  "live",
+  "acoustic",
+  "remix",
+  "remaster",
+  "cover",
+  "instrumental",
+  "karaoke",
+  "spedUp",
+  "slowed",
+  "nightcore",
+  "unknown",
+]);
+const fusionDecisionSchema = z.enum(["already_unified", "forced_merge", "auto_merge", "forced_split", "rejected", "excluded"]);
+const fusionReasonSchema = z.enum([
+  "matched",
+  "provider_excluded",
+  "entity_unsupported",
+  "already_unified",
+  "forced_merge",
+  "forced_split",
+  "same_provider_requires_manual_merge",
+  "title_below_minimum",
+  "artist_below_minimum",
+  "duration_mismatch",
+  "version_mismatch",
+  "below_threshold",
+  "identity_conflict",
+  "ambiguous",
+  "invalid_candidate",
+]);
+const fusionOverrideDecisionSchema = z.enum(["merge", "split"]);
+const fusionEvaluationSchema = z.object({
+  targetTrackId: trackIdSchema,
+  decision: fusionDecisionSchema,
+  scoreBps: z.number().int().min(0).max(10_000),
+  thresholdBps: z.number().int().min(0).max(10_000),
+  titleScoreBps: z.number().int().min(0).max(10_000),
+  artistScoreBps: z.number().int().min(0).max(10_000),
+  durationScoreBps: z.number().int().min(0).max(10_000),
+  durationDeltaMs: z.number().int().nonnegative().nullable(),
+  candidateQualifiers: z.array(versionQualifierSchema),
+  targetQualifiers: z.array(versionQualifierSchema),
+  reason: fusionReasonSchema,
+}).strict();
+const fusionOverrideSchema = z.object({
+  providerKind: providerKindSchema,
+  providerItemId: z.string().min(1),
+  targetTrackId: trackIdSchema,
+  decision: fusionOverrideDecisionSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}).strict();
+const fusionOverrideRequestSchema = z.object({
+  providerKind: providerKindSchema,
+  providerItemId: z.string().trim().min(1),
+  targetTrackId: trackIdSchema,
+  decision: fusionOverrideDecisionSchema,
+}).strict();
+const clearFusionOverrideRequestSchema = z.object({
+  providerKind: providerKindSchema,
+  providerItemId: z.string().trim().min(1),
+  targetTrackId: trackIdSchema,
+}).strict();
+const sourceResolutionReasonSchema = z.enum([
+  "preferred_source",
+  "playable",
+  "unavailable",
+  "local_file_missing",
+  "source_does_not_support_playback",
+  "provider_playback_not_implemented",
+  "metadata_only",
+]);
+const sourceResolutionCandidateSchema = z.object({
+  sourceId: sourceIdSchema,
+  provider: providerKindSchema,
+  playable: z.boolean(),
+  reason: sourceResolutionReasonSchema,
+  preferenceRank: z.number().int().nonnegative(),
+  detail: z.string().nullable(),
+}).strict();
+const sourceResolutionSchema = z.object({
+  selectedSourceId: sourceIdSchema.nullable(),
+  candidates: z.array(sourceResolutionCandidateSchema),
+}).strict();
 const playbackPhaseSchema = z.enum([
   "idle",
   "loading",
@@ -298,6 +390,7 @@ const playbackSourceOptionSchema = z.object({
   provider: providerKindSchema,
   label: z.string(),
   available: z.boolean(),
+  availabilityDetail: z.string().nullable(),
 }).strict();
 const playbackErrorSchema = z.object({
   code: playbackErrorCodeSchema,
@@ -590,12 +683,14 @@ function trackToPlaybackSources(track: LibraryTrack): PlaybackSourceOption[] {
       provider: "local",
       label: "LOCAL",
       available: track.available,
+      availabilityDetail: track.availabilityDetail,
     },
     {
       sourceId: e2eAlternateSourceId(track),
       provider: "youtube",
       label: "YT",
       available: true,
+      availabilityDetail: null,
     },
   ];
 }
@@ -1582,6 +1677,97 @@ export async function openProviderResult(provider: ProviderKind, url: string): P
     await invoke("open_provider_result", { provider, url });
   } catch (error) {
     throw new IpcError("SpotDIY could not open that provider result.", error);
+  }
+}
+
+export async function evaluateFusionCandidate(
+  candidate: SearchResult,
+  targetTrackId: TrackId,
+): Promise<FusionEvaluation> {
+  try {
+    const parsedCandidate = searchResultSchema.parse(candidate) as SearchResult;
+    const parsedTargetTrackId = trackIdSchema.parse(targetTrackId);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Source fusion requires the native SpotDIY runtime.");
+    }
+    return fusionEvaluationSchema.parse(await invoke<unknown>("evaluate_fusion_candidate", {
+      candidate: parsedCandidate,
+      targetTrackId: parsedTargetTrackId,
+    })) as FusionEvaluation;
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not evaluate that source fusion candidate.", error);
+  }
+}
+
+export async function acceptFusionCandidate(
+  candidate: SearchResult,
+  targetTrackId: TrackId,
+): Promise<FusionEvaluation> {
+  try {
+    const parsedCandidate = searchResultSchema.parse(candidate) as SearchResult;
+    const parsedTargetTrackId = trackIdSchema.parse(targetTrackId);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Source fusion requires the native SpotDIY runtime.");
+    }
+    return fusionEvaluationSchema.parse(await invoke<unknown>("accept_fusion_candidate", {
+      candidate: parsedCandidate,
+      targetTrackId: parsedTargetTrackId,
+    })) as FusionEvaluation;
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not accept that source fusion candidate.", error);
+  }
+}
+
+export async function setFusionOverride(request: FusionOverrideRequest): Promise<FusionOverride> {
+  try {
+    const parsedRequest = fusionOverrideRequestSchema.parse(request);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Source fusion overrides require the native SpotDIY runtime.");
+    }
+    return fusionOverrideSchema.parse(await invoke<unknown>("set_fusion_override", parsedRequest)) as FusionOverride;
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not persist that source fusion override.", error);
+  }
+}
+
+export async function clearFusionOverride(request: ClearFusionOverrideRequest): Promise<void> {
+  try {
+    const parsedRequest = clearFusionOverrideRequestSchema.parse(request);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Source fusion overrides require the native SpotDIY runtime.");
+    }
+    await invoke("clear_fusion_override", parsedRequest);
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not clear that source fusion override.", error);
+  }
+}
+
+export async function getSourceResolution(trackId: TrackId): Promise<SourceResolution> {
+  try {
+    const parsedTrackId = trackIdSchema.parse(trackId);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Source resolution requires the native SpotDIY runtime.");
+    }
+    return sourceResolutionSchema.parse(await invoke<unknown>("get_source_resolution", {
+      trackId: parsedTrackId,
+    })) as SourceResolution;
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not resolve a playback source.", error);
   }
 }
 

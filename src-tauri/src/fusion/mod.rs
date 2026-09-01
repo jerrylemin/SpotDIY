@@ -99,6 +99,17 @@ impl SourceFusionService {
         Self { database }
     }
 
+    pub fn evaluate_candidate(
+        &self,
+        candidate: &SearchResult,
+        target_track_id: TrackId,
+    ) -> Result<FusionEvaluation, FusionServiceError> {
+        let target = TrackRepository::new(&self.database)
+            .get(target_track_id)?
+            .ok_or(RepositoryError::TrackNotFound(target_track_id))?;
+        self.evaluate(candidate, &target)
+    }
+
     pub fn evaluate(
         &self,
         candidate: &SearchResult,
@@ -260,7 +271,7 @@ impl SourceFusionService {
             .collect::<Result<Vec<_>, _>>()?;
         if let Some(evaluation) = evaluations
             .iter()
-            .find(|evaluation| evaluation.decision == FusionDecision::AlreadyUnified)
+            .find(|evaluation| evaluation.decision == FusionDecision::ForcedMerge)
         {
             return Ok(FusionSelection {
                 target_track_id: Some(evaluation.target_track_id),
@@ -271,7 +282,7 @@ impl SourceFusionService {
         }
         if let Some(evaluation) = evaluations
             .iter()
-            .find(|evaluation| evaluation.decision == FusionDecision::ForcedMerge)
+            .find(|evaluation| evaluation.decision == FusionDecision::AlreadyUnified)
         {
             return Ok(FusionSelection {
                 target_track_id: Some(evaluation.target_track_id),

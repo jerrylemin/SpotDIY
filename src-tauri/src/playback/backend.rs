@@ -113,6 +113,7 @@ mod tests {
             provider: crate::domain::ProviderKind::Local,
             label: "LOCAL".to_owned(),
             available: true,
+            availability_detail: None,
         };
         let event = BackendEvent::AudioDevices(vec![device]);
         let json = serde_json::to_value((&event, &source)).unwrap();
