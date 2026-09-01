@@ -2,6 +2,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 
 import { ProviderBadge } from "../common/ProviderBadge";
+import { ContextActionMenu } from "../common/ContextActionMenu";
 import { SpotIcon } from "../icons/SpotIcon";
 import { isTauriRuntime } from "../../services/ipc";
 import type { LibraryTrack, Playlist, SourceId, Tag, TrackCollectionState } from "../../types/domain";
@@ -128,6 +129,18 @@ export function LibraryTrackRow({
       <div className="library-track-quality" aria-label="Measured file quality">
         {facts.length > 0 ? facts.map((fact) => <span key={fact}>{fact}</span>) : <span>Quality unavailable</span>}
       </div>
+      <ContextActionMenu
+        actions={[
+          { id: "play", label: "Play now", onSelect: () => onPlayNow(track), disabled: !canPlay || playbackPending, disabledReason: "Track unavailable" },
+          { id: "play-next", label: "Play next", onSelect: () => onPlayNext(track), disabled: !canPlay || playbackPending, disabledReason: "Track unavailable" },
+          { id: "queue", label: "Add to queue", onSelect: () => onAddToQueue(track), disabled: !canPlay || playbackPending, disabledReason: "Track unavailable" },
+          { id: "reveal", label: "Open location", onSelect: () => onReveal(track.sourceId), disabled: !canReveal || revealPending, disabledReason: "File unavailable" },
+          { id: "like", label: collectionState?.liked ? "Unlike" : "Like", onSelect: () => onLike(track), disabled: !isTauriRuntime() || collectionPending, disabledReason: "Native app only" },
+        ]}
+        className="library-track-context-menu"
+        label={`Actions for ${track.title}`}
+        showMoreButton={false}
+      >
       <div className="library-track-actions">
         <button
           aria-label={`Play now ${track.title}`}
@@ -213,6 +226,7 @@ export function LibraryTrackRow({
           {collectionState?.tags.length ? <span className="library-tag-list">{collectionState.tags.map((tag) => <span key={tag.id}>{tag.name}</span>)}</span> : null}
         </div>
       </div>
+      </ContextActionMenu>
     </article>
   );
 }
