@@ -747,7 +747,7 @@ mod tests {
             snapshot.downloads_directory,
             Some(PathBuf::from(r"C:\Downloads"))
         );
-        assert_eq!(snapshot.first_run, false);
+        assert!(!snapshot.first_run);
         assert_eq!(
             snapshot.storage_mode,
             crate::settings::StorageMode::Standard
