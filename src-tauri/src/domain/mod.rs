@@ -42,7 +42,7 @@ macro_rules! typed_id {
                 Self(Uuid::new_v4())
             }
 
-            pub fn from_uuid(value: Uuid) -> Self {
+            pub const fn from_uuid(value: Uuid) -> Self {
                 Self(value)
             }
 
@@ -89,6 +89,11 @@ typed_id!(AlbumId);
 typed_id!(SourceId);
 typed_id!(LibraryFolderId);
 typed_id!(ArtworkId);
+typed_id!(PlaylistId);
+typed_id!(PlaylistItemId);
+typed_id!(TagId);
+typed_id!(QueueSnapshotId);
+typed_id!(QueueSnapshotEntryId);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]

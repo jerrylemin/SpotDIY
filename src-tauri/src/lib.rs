@@ -7,6 +7,7 @@ pub mod ipc;
 pub mod library;
 pub mod media_tools;
 pub mod playback;
+pub mod playlists;
 pub mod queue;
 pub mod settings;
 pub mod search {
@@ -25,9 +26,10 @@ use ipc::{app_status_with_runtime, source_capabilities, AppStatus, ProviderCapab
 use library::{LibraryService, ProgressSink, LIBRARY_PROGRESS_EVENT};
 use media_tools::MediaToolManager;
 use playback::{
-    AudioDevice, PlaybackErrorDto, PlaybackService, PlaybackSnapshot, RepeatMode,
-    TrackPlaybackRequest, PLAYBACK_STATE_EVENT,
+    AudioDevice, PlaybackErrorDto, PlaybackService, PlaybackSnapshot, QueueSection, RepeatMode,
+    TrackPlaybackRequest, PLAYBACK_STATE_EVENT, QUEUE_STATE_EVENT,
 };
+use playlists::{PlaylistErrorDto, PlaylistService};
 use settings::{SettingValue, SettingsRepository, SettingsSnapshot};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -52,6 +54,7 @@ struct AppState {
     media_tools: MediaToolManager,
     downloads: DownloadService,
     playback: PlaybackService,
+    playlists: PlaylistService,
     search: search::SearchService,
     spotify_auth: sources::spotify::SpotifyAuthService,
     fusion: SourceFusionService,
@@ -383,6 +386,290 @@ fn get_library_page(
 }
 
 #[tauri::command]
+fn list_playlists(
+    state: State<'_, AppState>,
+) -> Result<Vec<playlists::Playlist>, PlaylistErrorDto> {
+    state
+        .playlists
+        .list_playlists()
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn get_playlist(
+    playlist_id: crate::domain::PlaylistId,
+    state: State<'_, AppState>,
+) -> Result<Option<playlists::Playlist>, PlaylistErrorDto> {
+    state
+        .playlists
+        .get_playlist(playlist_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn create_playlist(
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<playlists::Playlist, PlaylistErrorDto> {
+    state
+        .playlists
+        .create_playlist(name)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn rename_playlist(
+    playlist_id: crate::domain::PlaylistId,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<playlists::Playlist, PlaylistErrorDto> {
+    state
+        .playlists
+        .rename_playlist(playlist_id, name)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn delete_playlist(
+    playlist_id: crate::domain::PlaylistId,
+    state: State<'_, AppState>,
+) -> Result<(), PlaylistErrorDto> {
+    state
+        .playlists
+        .delete_playlist(playlist_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn duplicate_playlist(
+    playlist_id: crate::domain::PlaylistId,
+    requested_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<playlists::Playlist, PlaylistErrorDto> {
+    state
+        .playlists
+        .duplicate_playlist(playlist_id, requested_name)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn add_playlist_item(
+    playlist_id: crate::domain::PlaylistId,
+    track_id: crate::domain::TrackId,
+    requested_source_id: Option<crate::domain::SourceId>,
+    state: State<'_, AppState>,
+) -> Result<playlists::PlaylistItem, PlaylistErrorDto> {
+    state
+        .playlists
+        .add_playlist_item(playlist_id, track_id, requested_source_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn remove_playlist_item(
+    playlist_id: crate::domain::PlaylistId,
+    item_id: crate::domain::PlaylistItemId,
+    state: State<'_, AppState>,
+) -> Result<(), PlaylistErrorDto> {
+    state
+        .playlists
+        .remove_playlist_item(playlist_id, item_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn reorder_playlist_item(
+    playlist_id: crate::domain::PlaylistId,
+    item_id: crate::domain::PlaylistItemId,
+    target_position: u32,
+    state: State<'_, AppState>,
+) -> Result<playlists::Playlist, PlaylistErrorDto> {
+    state
+        .playlists
+        .reorder_playlist_item(playlist_id, item_id, target_position)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn create_playlist_branch(
+    parent_playlist_id: crate::domain::PlaylistId,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<playlists::Playlist, PlaylistErrorDto> {
+    state
+        .playlists
+        .create_playlist_branch(parent_playlist_id, name)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn get_branch_changes(
+    branch_playlist_id: crate::domain::PlaylistId,
+    state: State<'_, AppState>,
+) -> Result<Vec<playlists::BranchChange>, PlaylistErrorDto> {
+    state
+        .playlists
+        .get_branch_changes(branch_playlist_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn merge_branch_changes(
+    branch_playlist_id: crate::domain::PlaylistId,
+    selected_changes: Vec<playlists::BranchChange>,
+    state: State<'_, AppState>,
+) -> Result<playlists::BranchMergeResult, PlaylistErrorDto> {
+    state
+        .playlists
+        .merge_branch_changes(branch_playlist_id, selected_changes)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn discard_playlist_branch(
+    branch_playlist_id: crate::domain::PlaylistId,
+    state: State<'_, AppState>,
+) -> Result<(), PlaylistErrorDto> {
+    state
+        .playlists
+        .discard_branch(branch_playlist_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn play_playlist(
+    playlist_id: crate::domain::PlaylistId,
+    item_ids: Vec<crate::domain::PlaylistItemId>,
+    state: State<'_, AppState>,
+) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state
+        .playback
+        .play_playlist(playlist_id, item_ids)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn queue_playlist(
+    playlist_id: crate::domain::PlaylistId,
+    item_ids: Vec<crate::domain::PlaylistItemId>,
+    state: State<'_, AppState>,
+) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state
+        .playback
+        .queue_playlist(playlist_id, item_ids)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn get_track_collection_states(
+    track_ids: Vec<crate::domain::TrackId>,
+    state: State<'_, AppState>,
+) -> Result<Vec<playlists::TrackCollectionState>, PlaylistErrorDto> {
+    state
+        .playlists
+        .get_track_collection_states(&track_ids)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn set_track_liked(
+    track_id: crate::domain::TrackId,
+    liked: bool,
+    state: State<'_, AppState>,
+) -> Result<bool, PlaylistErrorDto> {
+    state
+        .playlists
+        .set_track_liked(track_id, liked)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn set_track_rating(
+    track_id: crate::domain::TrackId,
+    rating: Option<u8>,
+    state: State<'_, AppState>,
+) -> Result<Option<u8>, PlaylistErrorDto> {
+    state
+        .playlists
+        .set_track_rating(track_id, rating)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn list_tags(state: State<'_, AppState>) -> Result<Vec<playlists::Tag>, PlaylistErrorDto> {
+    state.playlists.list_tags().map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn create_tag(
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<playlists::Tag, PlaylistErrorDto> {
+    state
+        .playlists
+        .create_tag(name)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn rename_tag(
+    tag_id: crate::domain::TagId,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<playlists::Tag, PlaylistErrorDto> {
+    state
+        .playlists
+        .rename_tag(tag_id, name)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn delete_tag(
+    tag_id: crate::domain::TagId,
+    state: State<'_, AppState>,
+) -> Result<(), PlaylistErrorDto> {
+    state
+        .playlists
+        .delete_tag(tag_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn add_track_tag(
+    track_id: crate::domain::TrackId,
+    tag_id: crate::domain::TagId,
+    state: State<'_, AppState>,
+) -> Result<(), PlaylistErrorDto> {
+    state
+        .playlists
+        .add_track_tag(track_id, tag_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn remove_track_tag(
+    track_id: crate::domain::TrackId,
+    tag_id: crate::domain::TagId,
+    state: State<'_, AppState>,
+) -> Result<(), PlaylistErrorDto> {
+    state
+        .playlists
+        .remove_track_tag(track_id, tag_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn add_track_to_inbox(
+    track_id: crate::domain::TrackId,
+    state: State<'_, AppState>,
+) -> Result<playlists::PlaylistItem, PlaylistErrorDto> {
+    state
+        .playlists
+        .add_track_to_inbox(track_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
 fn reveal_local_file(
     source_id: crate::domain::SourceId,
     app: AppHandle,
@@ -573,6 +860,106 @@ fn clear_playback_queue(state: State<'_, AppState>) -> Result<PlaybackSnapshot, 
         .map_err(|error| error.dto())
 }
 
+#[tauri::command]
+fn get_queue_workspace(
+    state: State<'_, AppState>,
+) -> Result<playback::QueueWorkspace, PlaybackErrorDto> {
+    state
+        .playback
+        .get_queue_workspace()
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn move_queue_entry(
+    entry_id: crate::queue::QueueEntryId,
+    section: QueueSection,
+    target_index: usize,
+    state: State<'_, AppState>,
+) -> Result<playback::QueueWorkspace, PlaybackErrorDto> {
+    state
+        .playback
+        .move_queue_entry(entry_id, section, target_index)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn remove_queue_entry(
+    entry_id: crate::queue::QueueEntryId,
+    state: State<'_, AppState>,
+) -> Result<playback::QueueWorkspace, PlaybackErrorDto> {
+    state
+        .playback
+        .remove_queue_entry(entry_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn set_queue_entry_pinned(
+    entry_id: crate::queue::QueueEntryId,
+    pinned: bool,
+    state: State<'_, AppState>,
+) -> Result<playback::QueueWorkspace, PlaybackErrorDto> {
+    state
+        .playback
+        .set_queue_entry_pinned(entry_id, pinned)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn clear_queue_section(
+    section: QueueSection,
+    state: State<'_, AppState>,
+) -> Result<playback::QueueWorkspace, PlaybackErrorDto> {
+    state
+        .playback
+        .clear_queue_section(section)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn save_queue_snapshot(
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<playback::QueueSnapshot, PlaybackErrorDto> {
+    state
+        .playback
+        .save_queue_snapshot(name)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn list_queue_snapshots(
+    state: State<'_, AppState>,
+) -> Result<Vec<playback::QueueSnapshotSummary>, PlaybackErrorDto> {
+    state
+        .playback
+        .list_queue_snapshots()
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn restore_queue_snapshot(
+    snapshot_id: crate::domain::QueueSnapshotId,
+    state: State<'_, AppState>,
+) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state
+        .playback
+        .restore_queue_snapshot(snapshot_id)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn delete_queue_snapshot(
+    snapshot_id: crate::domain::QueueSnapshotId,
+    state: State<'_, AppState>,
+) -> Result<Vec<playback::QueueSnapshotSummary>, PlaybackErrorDto> {
+    state
+        .playback
+        .delete_queue_snapshot(snapshot_id)
+        .map_err(|error| error.dto())
+}
+
 fn progress_sink(app: &AppHandle) -> ProgressSink {
     let app = app.clone();
     Arc::new(move |progress| {
@@ -646,8 +1033,18 @@ pub fn run() {
                     let _ = app_handle.emit(PLAYBACK_STATE_EVENT, snapshot);
                 })
             };
-            let playback =
-                PlaybackService::new(library.clone(), media_tools.clone(), playback_sink);
+            let queue_sink = {
+                let app_handle = app.handle().clone();
+                Arc::new(move |workspace: playback::QueueWorkspace| {
+                    let _ = app_handle.emit(QUEUE_STATE_EVENT, workspace);
+                })
+            };
+            let playback = PlaybackService::new_with_queue_sink(
+                library.clone(),
+                media_tools.clone(),
+                playback_sink,
+                queue_sink,
+            );
             library.register_watchers(sink.clone())?;
             app.manage(AppState {
                 database,
@@ -655,6 +1052,7 @@ pub fn run() {
                 media_tools,
                 downloads,
                 playback,
+                playlists: PlaylistService::new(library.database().clone()),
                 search,
                 spotify_auth,
                 fusion,
@@ -696,6 +1094,31 @@ pub fn run() {
             rescan_all_library_folders,
             get_library_page,
             reveal_local_file,
+            list_playlists,
+            get_playlist,
+            create_playlist,
+            rename_playlist,
+            delete_playlist,
+            duplicate_playlist,
+            add_playlist_item,
+            remove_playlist_item,
+            reorder_playlist_item,
+            create_playlist_branch,
+            get_branch_changes,
+            merge_branch_changes,
+            discard_playlist_branch,
+            play_playlist,
+            queue_playlist,
+            get_track_collection_states,
+            set_track_liked,
+            set_track_rating,
+            list_tags,
+            create_tag,
+            rename_tag,
+            delete_tag,
+            add_track_tag,
+            remove_track_tag,
+            add_track_to_inbox,
             get_playback_snapshot,
             play_track,
             enqueue_track,
@@ -713,6 +1136,15 @@ pub fn run() {
             switch_playback_source,
             retry_playback_backend,
             clear_playback_queue,
+            get_queue_workspace,
+            move_queue_entry,
+            remove_queue_entry,
+            set_queue_entry_pinned,
+            clear_queue_section,
+            save_queue_snapshot,
+            list_queue_snapshots,
+            restore_queue_snapshot,
+            delete_queue_snapshot,
         ])
         .build(tauri::generate_context!())
         .expect("error while building SpotDIY")

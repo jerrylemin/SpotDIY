@@ -47,6 +47,21 @@ import type {
   TrackPlaybackRequest,
   TrackId,
   SourceId,
+  Playlist,
+  PlaylistId,
+  PlaylistItem,
+  PlaylistItemId,
+  BranchChange,
+  BranchMergeResult,
+  Tag,
+  TagId,
+  TrackCollectionState,
+  QueueSection,
+  QueueSnapshot,
+  QueueSnapshotEntryId,
+  QueueSnapshotId,
+  QueueSnapshotSummary,
+  QueueWorkspace,
 } from "../types/domain";
 
 const providerKindSchema = z.enum(["local", "youtube", "soundcloud", "spotify"]);
@@ -338,9 +353,98 @@ const libraryPageSchema = z.object({
   sort: z.enum(["title", "artist", "dateAdded", "dateModified"]),
   descending: z.boolean(),
 });
-const queueEntryIdSchema = z.string().transform((value) => value as QueueEntryId);
 const trackIdSchema = z.string().transform((value) => value as TrackId);
 const sourceIdSchema = z.string().transform((value) => value as SourceId);
+const playlistIdSchema = z.string().min(1).transform((value) => value as PlaylistId);
+const playlistItemIdSchema = z.string().min(1).transform((value) => value as PlaylistItemId);
+const tagIdSchema = z.string().min(1).transform((value) => value as TagId);
+const playlistKindSchema = z.enum(["normal", "inbox", "branch"]);
+const branchStatusSchema = z.enum(["open", "merged"]);
+const playlistItemSchema = z.object({
+  id: playlistItemIdSchema,
+  playlistId: playlistIdSchema,
+  trackId: trackIdSchema,
+  requestedSourceId: sourceIdSchema.nullable(),
+  position: z.number().int().nonnegative(),
+  originBaseItemId: playlistItemIdSchema.nullable(),
+  addedAt: z.string(),
+  updatedAt: z.string(),
+}).strict();
+const playlistSchema = z.object({
+  id: playlistIdSchema,
+  name: z.string().min(1).max(120),
+  kind: playlistKindSchema,
+  parentPlaylistId: playlistIdSchema.nullable(),
+  baseParentRevision: z.number().int().nonnegative().nullable(),
+  branchStatus: branchStatusSchema.nullable(),
+  revision: z.number().int().nonnegative(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  items: z.array(playlistItemSchema),
+}).strict();
+const branchChangeSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("add"), branchItemId: playlistItemIdSchema }).strict(),
+  z.object({ type: z.literal("remove"), baseItemId: playlistItemIdSchema }).strict(),
+  z.object({
+    type: z.literal("move"),
+    baseItemId: playlistItemIdSchema,
+    targetPosition: z.number().int().nonnegative(),
+  }).strict(),
+]);
+const branchMergeResultSchema = z.object({
+  parent: playlistSchema,
+  branch: playlistSchema,
+}).strict();
+const playlistMembershipSchema = z.object({
+  playlistId: playlistIdSchema,
+  name: z.string(),
+  kind: playlistKindSchema,
+}).strict();
+const tagSchema = z.object({
+  id: tagIdSchema,
+  name: z.string().min(1).max(64),
+  normalizedName: z.string().min(1).max(64),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}).strict();
+const trackCollectionStateSchema = z.object({
+  trackId: trackIdSchema,
+  liked: z.boolean(),
+  rating: z.number().int().min(1).max(5).nullable(),
+  tags: z.array(tagSchema),
+  playlistMemberships: z.array(playlistMembershipSchema),
+  inInbox: z.boolean(),
+}).strict();
+const playlistErrorCodeSchema = z.enum([
+  "invalidName",
+  "invalidTagName",
+  "playlistNotFound",
+  "playlistItemNotFound",
+  "trackNotFound",
+  "sourceNotFound",
+  "sourceMismatch",
+  "systemPlaylist",
+  "branchExists",
+  "cannotBranch",
+  "branchNotFound",
+  "branchNotOpen",
+  "branchAlreadyMerged",
+  "branchConflict",
+  "invalidBranchChange",
+  "emptySelection",
+  "invalidPosition",
+  "tagNotFound",
+  "tagExists",
+  "invalidRating",
+  "collectionRequestTooLarge",
+  "snapshotNotFound",
+  "database",
+]);
+const playlistErrorSchema = z.object({
+  code: playlistErrorCodeSchema,
+  detail: z.string().min(1),
+}).strict();
+const queueEntryIdSchema = z.string().transform((value) => value as QueueEntryId);
 const versionQualifierSchema = z.enum([
   "standard",
   "studio",
@@ -440,6 +544,57 @@ const playbackPhaseSchema = z.enum([
   "shuttingDown",
 ]);
 const repeatModeSchema = z.enum(["off", "one", "all"]);
+const queueSectionSchema = z.enum(["up_next", "later", "autoplay"]);
+const queueSnapshotIdSchema = z.string().min(1).transform((value) => value as QueueSnapshotId);
+const queueSnapshotEntryIdSchema = z.string().min(1).transform((value) => value as QueueSnapshotEntryId);
+const queueWorkspaceEntrySchema = z.object({
+  id: queueEntryIdSchema,
+  trackId: trackIdSchema,
+  requestedSourceId: sourceIdSchema.nullable(),
+  section: queueSectionSchema,
+  position: z.number().int().nonnegative(),
+  pinned: z.boolean(),
+  title: z.string().nullable(),
+  artists: z.array(z.string()),
+  album: z.string().nullable(),
+}).strict();
+const queueWorkspaceSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  current: queueWorkspaceEntrySchema.nullable(),
+  upNext: z.array(queueWorkspaceEntrySchema),
+  later: z.array(queueWorkspaceEntrySchema),
+  autoplay: z.array(queueWorkspaceEntrySchema),
+  currentPositionMs: z.number().int().nonnegative(),
+  repeatMode: repeatModeSchema,
+  shuffleEnabled: z.boolean(),
+}).strict();
+const queueSnapshotEntrySchema = z.object({
+  id: queueSnapshotEntryIdSchema,
+  snapshotId: queueSnapshotIdSchema,
+  trackId: trackIdSchema,
+  requestedSourceId: sourceIdSchema.nullable(),
+  section: queueSectionSchema,
+  position: z.number().int().nonnegative(),
+  pinned: z.boolean(),
+  traversalPosition: z.number().int().nonnegative(),
+}).strict();
+const queueSnapshotSummarySchema = z.object({
+  id: queueSnapshotIdSchema,
+  name: z.string().min(1).max(80),
+  currentTrackId: trackIdSchema.nullable(),
+  currentSourceId: sourceIdSchema.nullable(),
+  currentPositionMs: z.number().int().nonnegative(),
+  repeatMode: repeatModeSchema,
+  shuffleEnabled: z.boolean(),
+  entryCount: z.number().int().nonnegative(),
+  createdAt: z.string(),
+}).strict();
+const queueSnapshotSchema = queueSnapshotSummarySchema.extend({
+  currentSnapshotEntryId: queueSnapshotEntryIdSchema.nullable(),
+  historyOrder: z.array(queueSnapshotEntryIdSchema),
+  traversalOrder: z.array(queueSnapshotEntryIdSchema),
+  entries: z.array(queueSnapshotEntrySchema),
+}).strict();
 const playbackErrorCodeSchema = z.enum([
   "toolMissing",
   "toolBroken",
@@ -460,6 +615,11 @@ const playbackErrorCodeSchema = z.enum([
   "queueEmpty",
   "recoveryRetrying",
   "recoveryExhausted",
+  "persistenceFailed",
+  "queueEntryNotFound",
+  "queueEntryImmutable",
+  "invalidQueuePosition",
+  "snapshotNotFound",
   "shuttingDown",
 ]);
 const playbackBackendHealthSchema = z.object({
@@ -557,10 +717,13 @@ export class IpcError extends Error {
 
 export const LIBRARY_PROGRESS_EVENT = "library://scan-progress";
 export const PLAYBACK_STATE_EVENT = "playback://state";
+export const QUEUE_STATE_EVENT = "queue://state";
 export const DOWNLOAD_STATE_EVENT = "downloads://state";
 
 type PlaybackSnapshotListener = (snapshot: PlaybackSnapshot) => void;
 type PlaybackSnapshotErrorListener = (error: IpcError) => void;
+export type QueueWorkspaceListener = (workspace: QueueWorkspace) => void;
+export type QueueWorkspaceErrorListener = (error: IpcError) => void;
 export type DownloadSnapshotListener = (snapshot: DownloadSnapshot) => void;
 export type DownloadSnapshotErrorListener = (error: IpcError) => void;
 
@@ -584,6 +747,11 @@ const playbackErrorSummary: Record<PlaybackErrorCode, string> = {
   queueEmpty: "The playback queue is empty.",
   recoveryRetrying: "SpotDIY is retrying the playback backend.",
   recoveryExhausted: "Playback recovery is exhausted.",
+  persistenceFailed: "SpotDIY could not save the playback queue.",
+  queueEntryNotFound: "That queue entry is no longer available.",
+  queueEntryImmutable: "The current or consumed queue entry cannot be changed.",
+  invalidQueuePosition: "That queue position is invalid.",
+  snapshotNotFound: "That queue snapshot could not be found.",
   shuttingDown: "SpotDIY is shutting down playback.",
 };
 
@@ -2229,6 +2397,234 @@ export async function getLibraryPage(request: LibraryPageRequest): Promise<Libra
   }
 }
 
+async function invokePlaylist<T>(
+  command: string,
+  args: Record<string, unknown> | undefined,
+  parse: (value: unknown) => T,
+  message: string,
+): Promise<T> {
+  try {
+    const response = args ? await invoke<unknown>(command, args) : await invoke<unknown>(command);
+    return parse(response);
+  } catch (error) {
+    const typedError = playlistErrorSchema.safeParse(error);
+    if (typedError.success) {
+      throw new IpcError(typedError.data.detail, typedError.data);
+    }
+    throw new IpcError(message, error);
+  }
+}
+
+function nativePlaylistRequired(message: string): never {
+  throw new IpcError(message);
+}
+
+export async function listPlaylists(): Promise<Playlist[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokePlaylist("list_playlists", undefined, (value) => z.array(playlistSchema).parse(value) as Playlist[], "SpotDIY could not read playlists.");
+}
+
+export async function getPlaylist(playlistId: PlaylistId): Promise<Playlist | null> {
+  const parsedId = playlistIdSchema.parse(playlistId);
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  return invokePlaylist(
+    "get_playlist",
+    { playlistId: parsedId },
+    (value) => z.union([playlistSchema, z.null()]).parse(value) as Playlist | null,
+    "SpotDIY could not read that playlist.",
+  );
+}
+
+export async function createPlaylist(name: string): Promise<Playlist> {
+  const parsedName = z.string().trim().min(1).max(120).parse(name);
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Creating playlists requires the native SpotDIY runtime.");
+  }
+  return invokePlaylist("create_playlist", { name: parsedName }, (value) => playlistSchema.parse(value) as Playlist, "SpotDIY could not create that playlist.");
+}
+
+export async function renamePlaylist(playlistId: PlaylistId, name: string): Promise<Playlist> {
+  const parsedId = playlistIdSchema.parse(playlistId);
+  const parsedName = z.string().trim().min(1).max(120).parse(name);
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Renaming playlists requires the native SpotDIY runtime.");
+  }
+  return invokePlaylist("rename_playlist", { playlistId: parsedId, name: parsedName }, (value) => playlistSchema.parse(value) as Playlist, "SpotDIY could not rename that playlist.");
+}
+
+export async function deletePlaylist(playlistId: PlaylistId): Promise<void> {
+  const parsedId = playlistIdSchema.parse(playlistId);
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Deleting playlists requires the native SpotDIY runtime.");
+  }
+  await invokePlaylist("delete_playlist", { playlistId: parsedId }, () => undefined, "SpotDIY could not delete that playlist.");
+}
+
+export async function duplicatePlaylist(playlistId: PlaylistId, requestedName?: string): Promise<Playlist> {
+  const parsedId = playlistIdSchema.parse(playlistId);
+  const parsedName = requestedName === undefined ? undefined : z.string().trim().min(1).max(120).parse(requestedName);
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Duplicating playlists requires the native SpotDIY runtime.");
+  }
+  return invokePlaylist("duplicate_playlist", { playlistId: parsedId, requestedName: parsedName ?? null }, (value) => playlistSchema.parse(value) as Playlist, "SpotDIY could not duplicate that playlist.");
+}
+
+export async function addPlaylistItem(playlistId: PlaylistId, trackId: TrackId, requestedSourceId: SourceId | null): Promise<PlaylistItem> {
+  const parsed = {
+    playlistId: playlistIdSchema.parse(playlistId),
+    trackId: trackIdSchema.parse(trackId),
+    requestedSourceId: requestedSourceId === null ? null : sourceIdSchema.parse(requestedSourceId),
+  };
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Adding playlist items requires the native SpotDIY runtime.");
+  }
+  return invokePlaylist("add_playlist_item", parsed, (value) => playlistItemSchema.parse(value) as PlaylistItem, "SpotDIY could not add that playlist item.");
+}
+
+export async function removePlaylistItem(playlistId: PlaylistId, itemId: PlaylistItemId): Promise<void> {
+  const args = { playlistId: playlistIdSchema.parse(playlistId), itemId: playlistItemIdSchema.parse(itemId) };
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Removing playlist items requires the native SpotDIY runtime.");
+  }
+  await invokePlaylist("remove_playlist_item", args, () => undefined, "SpotDIY could not remove that playlist item.");
+}
+
+export async function reorderPlaylistItem(playlistId: PlaylistId, itemId: PlaylistItemId, targetPosition: number): Promise<Playlist> {
+  const args = {
+    playlistId: playlistIdSchema.parse(playlistId),
+    itemId: playlistItemIdSchema.parse(itemId),
+    targetPosition: z.number().int().nonnegative().parse(targetPosition),
+  };
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Reordering playlists requires the native SpotDIY runtime.");
+  }
+  return invokePlaylist("reorder_playlist_item", args, (value) => playlistSchema.parse(value) as Playlist, "SpotDIY could not reorder that playlist.");
+}
+
+export async function createPlaylistBranch(parentPlaylistId: PlaylistId, name: string): Promise<Playlist> {
+  const args = { parentPlaylistId: playlistIdSchema.parse(parentPlaylistId), name: z.string().trim().min(1).max(120).parse(name) };
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Creating playlist branches requires the native SpotDIY runtime.");
+  }
+  return invokePlaylist("create_playlist_branch", args, (value) => playlistSchema.parse(value) as Playlist, "SpotDIY could not create that playlist branch.");
+}
+
+export async function getBranchChanges(branchPlaylistId: PlaylistId): Promise<BranchChange[]> {
+  const args = { branchPlaylistId: playlistIdSchema.parse(branchPlaylistId) };
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokePlaylist("get_branch_changes", args, (value) => z.array(branchChangeSchema).parse(value) as BranchChange[], "SpotDIY could not read branch changes.");
+}
+
+export async function mergeBranchChanges(branchPlaylistId: PlaylistId, selectedChanges: BranchChange[]): Promise<BranchMergeResult> {
+  const args = { branchPlaylistId: playlistIdSchema.parse(branchPlaylistId), selectedChanges: z.array(branchChangeSchema).min(1).parse(selectedChanges) };
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Merging playlist branches requires the native SpotDIY runtime.");
+  }
+  return invokePlaylist("merge_branch_changes", args, (value) => branchMergeResultSchema.parse(value) as BranchMergeResult, "SpotDIY could not merge the selected branch changes.");
+}
+
+export async function discardPlaylistBranch(branchPlaylistId: PlaylistId): Promise<void> {
+  const args = { branchPlaylistId: playlistIdSchema.parse(branchPlaylistId) };
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Discarding playlist branches requires the native SpotDIY runtime.");
+  }
+  await invokePlaylist("discard_playlist_branch", args, () => undefined, "SpotDIY could not discard that playlist branch.");
+}
+
+export async function playPlaylist(playlistId: PlaylistId, itemIds: PlaylistItemId[]): Promise<PlaybackSnapshot> {
+  const args = { playlistId: playlistIdSchema.parse(playlistId), itemIds: z.array(playlistItemIdSchema).min(1).parse(itemIds) };
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Playing playlists requires the native SpotDIY runtime.");
+  }
+  return invokePlayback("play_playlist", args, parsePlaybackSnapshot, "SpotDIY could not start that playlist.");
+}
+
+export async function queuePlaylist(playlistId: PlaylistId, itemIds: PlaylistItemId[]): Promise<PlaybackSnapshot> {
+  const args = { playlistId: playlistIdSchema.parse(playlistId), itemIds: z.array(playlistItemIdSchema).min(1).parse(itemIds) };
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Queuing playlists requires the native SpotDIY runtime.");
+  }
+  return invokePlayback("queue_playlist", args, parsePlaybackSnapshot, "SpotDIY could not add that playlist to the queue.");
+}
+
+export async function getTrackCollectionStates(trackIds: TrackId[]): Promise<TrackCollectionState[]> {
+  const parsedIds = z.array(trackIdSchema).max(100).parse(trackIds);
+  if (!isTauriRuntime()) {
+    return parsedIds.map((trackId) => ({ trackId, liked: false, rating: null, tags: [], playlistMemberships: [], inInbox: false }));
+  }
+  return invokePlaylist("get_track_collection_states", { trackIds: parsedIds }, (value) => z.array(trackCollectionStateSchema).parse(value) as TrackCollectionState[], "SpotDIY could not read track collection state.");
+}
+
+export async function setTrackLiked(trackId: TrackId, liked: boolean): Promise<boolean> {
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Likes require the native SpotDIY runtime.");
+  }
+  return invokePlaylist("set_track_liked", { trackId: trackIdSchema.parse(trackId), liked: z.boolean().parse(liked) }, (value) => z.boolean().parse(value), "SpotDIY could not update that like.");
+}
+
+export async function setTrackRating(trackId: TrackId, rating: number | null): Promise<number | null> {
+  const parsedRating = rating === null ? null : z.number().int().min(1).max(5).parse(rating);
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Ratings require the native SpotDIY runtime.");
+  }
+  return invokePlaylist("set_track_rating", { trackId: trackIdSchema.parse(trackId), rating: parsedRating }, (value) => z.number().int().min(1).max(5).nullable().parse(value), "SpotDIY could not update that rating.");
+}
+
+export async function listTags(): Promise<Tag[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokePlaylist("list_tags", undefined, (value) => z.array(tagSchema).parse(value) as Tag[], "SpotDIY could not read tags.");
+}
+
+export async function createTag(name: string): Promise<Tag> {
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Tags require the native SpotDIY runtime.");
+  }
+  return invokePlaylist("create_tag", { name: z.string().trim().min(1).max(64).parse(name) }, (value) => tagSchema.parse(value) as Tag, "SpotDIY could not create that tag.");
+}
+
+export async function renameTag(tagId: TagId, name: string): Promise<Tag> {
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Tags require the native SpotDIY runtime.");
+  }
+  return invokePlaylist("rename_tag", { tagId: tagIdSchema.parse(tagId), name: z.string().trim().min(1).max(64).parse(name) }, (value) => tagSchema.parse(value) as Tag, "SpotDIY could not rename that tag.");
+}
+
+export async function deleteTag(tagId: TagId): Promise<void> {
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Tags require the native SpotDIY runtime.");
+  }
+  await invokePlaylist("delete_tag", { tagId: tagIdSchema.parse(tagId) }, () => undefined, "SpotDIY could not delete that tag.");
+}
+
+export async function addTrackTag(trackId: TrackId, tagId: TagId): Promise<void> {
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Track tags require the native SpotDIY runtime.");
+  }
+  await invokePlaylist("add_track_tag", { trackId: trackIdSchema.parse(trackId), tagId: tagIdSchema.parse(tagId) }, () => undefined, "SpotDIY could not apply that tag.");
+}
+
+export async function removeTrackTag(trackId: TrackId, tagId: TagId): Promise<void> {
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("Track tags require the native SpotDIY runtime.");
+  }
+  await invokePlaylist("remove_track_tag", { trackId: trackIdSchema.parse(trackId), tagId: tagIdSchema.parse(tagId) }, () => undefined, "SpotDIY could not remove that tag.");
+}
+
+export async function addTrackToInbox(trackId: TrackId): Promise<PlaylistItem> {
+  if (!isTauriRuntime()) {
+    return nativePlaylistRequired("The Inbox requires the native SpotDIY runtime.");
+  }
+  return invokePlaylist("add_track_to_inbox", { trackId: trackIdSchema.parse(trackId) }, (value) => playlistItemSchema.parse(value) as PlaylistItem, "SpotDIY could not add that track to the Inbox.");
+}
+
 export async function revealLocalFile(sourceId: SourceId): Promise<void> {
   if (!isTauriRuntime()) {
     throw new IpcError("File locations require the native SpotDIY runtime.");
@@ -2683,6 +3079,153 @@ export async function clearPlaybackQueue(): Promise<PlaybackSnapshot> {
     throw new IpcError("Clearing the queue requires the native SpotDIY runtime.");
   }
   return invokePlayback("clear_playback_queue", undefined, parsePlaybackSnapshot, "SpotDIY could not clear the playback queue.");
+}
+
+function browserPreviewQueueWorkspace(): QueueWorkspace {
+  ensureE2EPlaybackState();
+  const currentIndex = e2eAdapterState.currentIndex;
+  const current = currentIndex === null ? null : e2eAdapterState.activeQueue[currentIndex] ?? null;
+  const makeEntry = (request: TrackPlaybackRequest, id: QueueEntryId, position: number): QueueWorkspace["later"][number] => {
+    const track = e2eTrackMap.get(request.trackId);
+    return {
+      id,
+      trackId: request.trackId,
+      requestedSourceId: request.sourceId,
+      section: "later",
+      position,
+      pinned: false,
+      title: track?.title ?? null,
+      artists: track?.artists ?? [],
+      album: track?.album ?? null,
+    };
+  };
+  const later = e2eAdapterState.activeQueue
+    .map((request, index) => ({ request, id: e2eAdapterState.activeQueueIds[index], index }))
+    .filter(({ index }) => index !== currentIndex)
+    .map(({ request, id }, position) => makeEntry(request, id, position));
+  const currentEntry = current && currentIndex !== null
+    ? makeEntry(current, e2eAdapterState.activeQueueIds[currentIndex], 0)
+    : null;
+  return {
+    revision: e2eAdapterState.snapshot.revision,
+    current: currentEntry,
+    upNext: [],
+    later,
+    autoplay: [],
+    currentPositionMs: e2eAdapterState.snapshot.positionMs,
+    repeatMode: e2eAdapterState.snapshot.repeatMode,
+    shuffleEnabled: e2eAdapterState.snapshot.shuffleEnabled,
+  };
+}
+
+export function parseQueueWorkspace(value: unknown): QueueWorkspace {
+  return queueWorkspaceSchema.parse(value) as QueueWorkspace;
+}
+
+export async function getQueueWorkspace(): Promise<QueueWorkspace> {
+  if (isPlaybackE2EAdapterEnabled()) {
+    return browserPreviewQueueWorkspace();
+  }
+  if (!isTauriRuntime()) {
+    return {
+      revision: 0,
+      current: null,
+      upNext: [],
+      later: [],
+      autoplay: [],
+      currentPositionMs: 0,
+      repeatMode: "off",
+      shuffleEnabled: false,
+    };
+  }
+  return invokePlayback("get_queue_workspace", undefined, parseQueueWorkspace, "SpotDIY could not read the queue workspace.");
+}
+
+export async function moveQueueEntry(entryId: QueueEntryId, section: QueueSection, targetIndex: number): Promise<QueueWorkspace> {
+  const args = {
+    entryId: queueEntryIdSchema.parse(entryId),
+    section: queueSectionSchema.parse(section),
+    targetIndex: z.number().int().nonnegative().parse(targetIndex),
+  };
+  if (!isTauriRuntime()) {
+    throw new IpcError("Queue editing requires the native SpotDIY runtime.");
+  }
+  return invokePlayback("move_queue_entry", args, parseQueueWorkspace, "SpotDIY could not move that queue entry.");
+}
+
+export async function removeQueueEntry(entryId: QueueEntryId): Promise<QueueWorkspace> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Queue editing requires the native SpotDIY runtime.");
+  }
+  return invokePlayback("remove_queue_entry", { entryId: queueEntryIdSchema.parse(entryId) }, parseQueueWorkspace, "SpotDIY could not remove that queue entry.");
+}
+
+export async function setQueueEntryPinned(entryId: QueueEntryId, pinned: boolean): Promise<QueueWorkspace> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Queue editing requires the native SpotDIY runtime.");
+  }
+  return invokePlayback("set_queue_entry_pinned", {
+    entryId: queueEntryIdSchema.parse(entryId),
+    pinned: z.boolean().parse(pinned),
+  }, parseQueueWorkspace, "SpotDIY could not update that queue pin.");
+}
+
+export async function clearQueueSection(section: QueueSection): Promise<QueueWorkspace> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Queue editing requires the native SpotDIY runtime.");
+  }
+  return invokePlayback("clear_queue_section", { section: queueSectionSchema.parse(section) }, parseQueueWorkspace, "SpotDIY could not clear that queue section.");
+}
+
+export async function saveQueueSnapshot(name: string): Promise<QueueSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Queue snapshots require the native SpotDIY runtime.");
+  }
+  return invokePlayback("save_queue_snapshot", { name: z.string().trim().min(1).max(80).parse(name) }, (value) => queueSnapshotSchema.parse(value) as QueueSnapshot, "SpotDIY could not save the queue snapshot.");
+}
+
+export async function listQueueSnapshots(): Promise<QueueSnapshotSummary[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokePlayback("list_queue_snapshots", undefined, (value) => z.array(queueSnapshotSummarySchema).parse(value) as QueueSnapshotSummary[], "SpotDIY could not read queue snapshots.");
+}
+
+export async function restoreQueueSnapshot(snapshotId: QueueSnapshotId): Promise<PlaybackSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Queue snapshots require the native SpotDIY runtime.");
+  }
+  return invokePlayback("restore_queue_snapshot", { snapshotId: queueSnapshotIdSchema.parse(snapshotId) }, parsePlaybackSnapshot, "SpotDIY could not restore the queue snapshot.");
+}
+
+export async function deleteQueueSnapshot(snapshotId: QueueSnapshotId): Promise<QueueSnapshotSummary[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokePlayback("delete_queue_snapshot", { snapshotId: queueSnapshotIdSchema.parse(snapshotId) }, (value) => z.array(queueSnapshotSummarySchema).parse(value) as QueueSnapshotSummary[], "SpotDIY could not delete the queue snapshot.");
+}
+
+export async function subscribeToQueueState(
+  listener: QueueWorkspaceListener,
+  onError?: QueueWorkspaceErrorListener,
+): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    if (isPlaybackE2EAdapterEnabled()) {
+      listener(browserPreviewQueueWorkspace());
+    }
+    return () => undefined;
+  }
+  try {
+    return await listen<unknown>(QUEUE_STATE_EVENT, (event) => {
+      try {
+        listener(parseQueueWorkspace(event.payload));
+      } catch (error) {
+        onError?.(new IpcError("SpotDIY received an invalid queue state event.", error));
+      }
+    });
+  } catch (error) {
+    throw new IpcError("SpotDIY could not subscribe to queue updates.", error);
+  }
 }
 
 export async function subscribeToPlaybackState(

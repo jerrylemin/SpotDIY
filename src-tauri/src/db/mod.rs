@@ -12,8 +12,10 @@ const INITIAL_MIGRATION_SQL: &str = include_str!("../../migrations/0001_initial.
 const LOCAL_LIBRARY_MIGRATION_SQL: &str = include_str!("../../migrations/0002_local_library.sql");
 const SOURCE_FUSION_MIGRATION_SQL: &str = include_str!("../../migrations/0003_source_fusion.sql");
 const DOWNLOADS_MIGRATION_SQL: &str = include_str!("../../migrations/0004_downloads.sql");
+const COLLECTIONS_AND_QUEUE_MIGRATION_SQL: &str =
+    include_str!("../../migrations/0005_collections_and_queue.sql");
 
-pub const LATEST_SCHEMA_VERSION: u32 = 4;
+pub const LATEST_SCHEMA_VERSION: u32 = 5;
 pub const DATABASE_FILE_NAME: &str = "spotdiy.sqlite3";
 pub const APPLICATION_DATA_DIRECTORY: &str = "SpotDIY";
 
@@ -55,6 +57,12 @@ const MIGRATIONS: &[Migration] = &[
         version: 4,
         name: "0004_downloads",
         sql: DOWNLOADS_MIGRATION_SQL,
+        destructive: false,
+    },
+    Migration {
+        version: 5,
+        name: "0005_collections_and_queue",
+        sql: COLLECTIONS_AND_QUEUE_MIGRATION_SQL,
         destructive: false,
     },
 ];
@@ -477,6 +485,17 @@ mod tests {
             "user_track_overrides",
             "downloads",
             "download_settings",
+            "playlists",
+            "playlist_items",
+            "playlist_branch_base_items",
+            "likes",
+            "ratings",
+            "tags",
+            "track_tags",
+            "queue_state",
+            "queue_entries",
+            "queue_snapshots",
+            "queue_snapshot_entries",
         ] {
             let exists: i64 = database
                 .with_connection(|connection| {
@@ -566,12 +585,12 @@ mod tests {
         let schema_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema_version, 4);
+        assert_eq!(schema_version, LATEST_SCHEMA_VERSION as i64);
     }
 
     #[test]
-    fn schema_two_fixture_upgrades_to_four_without_losing_tracks_sources_or_settings() {
-        let path = TempDatabasePath::new("migration-four-fixture");
+    fn schema_two_fixture_upgrades_to_five_without_losing_tracks_sources_or_settings() {
+        let path = TempDatabasePath::new("migration-five-fixture");
         let mut connection = Connection::open(path.path()).unwrap();
         configure_connection(&connection).unwrap();
         run_migrations(&mut connection, None, &MIGRATIONS[..2]).unwrap();
@@ -623,7 +642,7 @@ mod tests {
         let schema_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema_version, 4);
+        assert_eq!(schema_version, LATEST_SCHEMA_VERSION as i64);
         let track_count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM tracks WHERE id = ?1",
@@ -673,6 +692,158 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
+        assert_eq!(foreign_key_rows, 0);
+    }
+
+    #[test]
+    fn schema_four_fixture_upgrades_to_five_preserving_plan_seven_data() {
+        let path = TempDatabasePath::new("migration-four-to-five");
+        let mut connection = Connection::open(path.path()).unwrap();
+        configure_connection(&connection).unwrap();
+        run_migrations(&mut connection, None, &MIGRATIONS[..4]).unwrap();
+
+        let track_id = uuid::Uuid::new_v4().to_string();
+        let source_id = uuid::Uuid::new_v4().to_string();
+        let folder_id = uuid::Uuid::new_v4().to_string();
+        connection
+            .execute(
+                "INSERT INTO tracks (
+                    id, title, normalized_title, version_qualifiers_json,
+                    created_at, updated_at
+                 ) VALUES (?1, 'Migration Track', 'migration track', '[\"standard\"]', ?2, ?2)",
+                params![track_id, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO track_sources (
+                    id, track_id, provider_kind, provider_item_id, can_downloads,
+                    created_at, updated_at
+                 ) VALUES (?1, ?2, 'youtube', 'migration-source', 1, ?3, ?3)",
+                params![source_id, track_id, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO user_track_overrides (
+                    provider_kind, provider_item_id, target_track_id, decision,
+                    created_at, updated_at
+                 ) VALUES ('youtube', 'migration-source', ?1, 'merge', ?2, ?2)",
+                params![track_id, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO downloads (
+                    id, provider_kind, provider_item_id, canonical_url,
+                    target_track_id, target_source_id, title, artists_json, mode,
+                    state, destination_directory, source_quality_provenance,
+                    created_at, updated_at
+                 ) VALUES ('migration-completed', 'youtube', 'migration-source',
+                           'https://youtube.com/watch?v=migration', ?1, ?2,
+                           'Migration Track', '[]', 'audio', 'completed',
+                           'C:\\Downloads', 'provider_encoded', ?3, ?3)",
+                params![track_id, source_id, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO downloads (
+                    id, provider_kind, provider_item_id, canonical_url,
+                    title, artists_json, mode, state, destination_directory,
+                    source_quality_provenance, created_at, updated_at
+                 ) VALUES ('migration-failed', 'soundcloud', 'failed-source',
+                           'https://soundcloud.com/migration/failed',
+                           'Failed Track', '[]', 'audio', 'failed',
+                           'C:\\Downloads', 'unknown', ?1, ?1)",
+                params!["2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO library_folders (
+                    id, path, normalized_path_key, created_at, updated_at
+                 ) VALUES (?1, 'C:\\Music', 'c:\\music', ?2, ?2)",
+                params![folder_id, "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO settings_metadata (
+                    setting_key, value_json, value_type, schema_version, updated_at
+                 ) VALUES ('theme', '\"light\"', 'theme', 1, '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE download_settings SET max_concurrent = 3 WHERE id = 1",
+                [],
+            )
+            .unwrap();
+
+        run_migrations(&mut connection, None, MIGRATIONS).unwrap();
+
+        let schema_version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(schema_version, 5);
+        let track_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM tracks WHERE id = ?1",
+                params![track_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let override_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM user_track_overrides WHERE target_track_id = ?1",
+                params![track_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (completed_count, failed_count): (i64, i64) = connection
+            .query_row(
+                "SELECT
+                    SUM(state = 'completed'), SUM(state = 'failed')
+                 FROM downloads",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let (max_concurrent, theme): (i64, String) = connection
+            .query_row(
+                "SELECT
+                    (SELECT max_concurrent FROM download_settings WHERE id = 1),
+                    (SELECT value_json FROM settings_metadata WHERE setting_key = 'theme')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let (inbox_count, queue_state_count, folder_count): (i64, i64, i64) = connection
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM playlists WHERE kind = 'inbox'),
+                    (SELECT COUNT(*) FROM queue_state WHERE id = 1),
+                    (SELECT COUNT(*) FROM library_folders WHERE id = ?1)",
+                params![folder_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let foreign_key_rows: i64 = connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(track_count, 1);
+        assert_eq!(override_count, 1);
+        assert_eq!(completed_count, 1);
+        assert_eq!(failed_count, 1);
+        assert_eq!(max_concurrent, 3);
+        assert_eq!(theme, "\"light\"");
+        assert_eq!(inbox_count, 1);
+        assert_eq!(queue_state_count, 1);
+        assert_eq!(folder_count, 1);
         assert_eq!(foreign_key_rows, 0);
     }
 

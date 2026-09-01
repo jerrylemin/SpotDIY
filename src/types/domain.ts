@@ -6,6 +6,11 @@ export type SourceId = string & { readonly __brand: "SourceId" };
 export type LibraryFolderId = string & { readonly __brand: "LibraryFolderId" };
 export type ArtworkId = string & { readonly __brand: "ArtworkId" };
 export type QueueEntryId = string & { readonly __brand: "QueueEntryId" };
+export type PlaylistId = string & { readonly __brand: "PlaylistId" };
+export type PlaylistItemId = string & { readonly __brand: "PlaylistItemId" };
+export type TagId = string & { readonly __brand: "TagId" };
+export type QueueSnapshotId = string & { readonly __brand: "QueueSnapshotId" };
+export type QueueSnapshotEntryId = string & { readonly __brand: "QueueSnapshotEntryId" };
 
 export type RouteId =
   | "home"
@@ -468,6 +473,151 @@ export interface LibraryPage {
   descending: boolean;
 }
 
+export type PlaylistKind = "normal" | "inbox" | "branch";
+export type BranchStatus = "open" | "merged";
+
+export interface PlaylistItem {
+  id: PlaylistItemId;
+  playlistId: PlaylistId;
+  trackId: TrackId;
+  requestedSourceId: SourceId | null;
+  position: number;
+  originBaseItemId: PlaylistItemId | null;
+  addedAt: string;
+  updatedAt: string;
+}
+
+export interface Playlist {
+  id: PlaylistId;
+  name: string;
+  kind: PlaylistKind;
+  parentPlaylistId: PlaylistId | null;
+  baseParentRevision: number | null;
+  branchStatus: BranchStatus | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  items: PlaylistItem[];
+}
+
+export type BranchChange =
+  | { type: "add"; branchItemId: PlaylistItemId }
+  | { type: "remove"; baseItemId: PlaylistItemId }
+  | { type: "move"; baseItemId: PlaylistItemId; targetPosition: number };
+
+export interface BranchMergeResult {
+  parent: Playlist;
+  branch: Playlist;
+}
+
+export interface PlaylistMembership {
+  playlistId: PlaylistId;
+  name: string;
+  kind: PlaylistKind;
+}
+
+export interface Tag {
+  id: TagId;
+  name: string;
+  normalizedName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TrackCollectionState {
+  trackId: TrackId;
+  liked: boolean;
+  rating: number | null;
+  tags: Tag[];
+  playlistMemberships: PlaylistMembership[];
+  inInbox: boolean;
+}
+
+export type PlaylistErrorCode =
+  | "invalidName"
+  | "invalidTagName"
+  | "playlistNotFound"
+  | "playlistItemNotFound"
+  | "trackNotFound"
+  | "sourceNotFound"
+  | "sourceMismatch"
+  | "systemPlaylist"
+  | "branchExists"
+  | "cannotBranch"
+  | "branchNotFound"
+  | "branchNotOpen"
+  | "branchAlreadyMerged"
+  | "branchConflict"
+  | "invalidBranchChange"
+  | "emptySelection"
+  | "invalidPosition"
+  | "tagNotFound"
+  | "tagExists"
+  | "invalidRating"
+  | "collectionRequestTooLarge"
+  | "snapshotNotFound"
+  | "database";
+
+export interface PlaylistErrorDto {
+  code: PlaylistErrorCode;
+  detail: string;
+}
+
+export type QueueSection = "up_next" | "later" | "autoplay";
+
+export interface QueueWorkspaceEntry {
+  id: QueueEntryId;
+  trackId: TrackId;
+  requestedSourceId: SourceId | null;
+  section: QueueSection;
+  position: number;
+  pinned: boolean;
+  title: string | null;
+  artists: string[];
+  album: string | null;
+}
+
+export interface QueueWorkspace {
+  revision: number;
+  current: QueueWorkspaceEntry | null;
+  upNext: QueueWorkspaceEntry[];
+  later: QueueWorkspaceEntry[];
+  autoplay: QueueWorkspaceEntry[];
+  currentPositionMs: number;
+  repeatMode: RepeatMode;
+  shuffleEnabled: boolean;
+}
+
+export interface QueueSnapshotEntry {
+  id: QueueSnapshotEntryId;
+  snapshotId: QueueSnapshotId;
+  trackId: TrackId;
+  requestedSourceId: SourceId | null;
+  section: QueueSection;
+  position: number;
+  pinned: boolean;
+  traversalPosition: number;
+}
+
+export interface QueueSnapshotSummary {
+  id: QueueSnapshotId;
+  name: string;
+  currentTrackId: TrackId | null;
+  currentSourceId: SourceId | null;
+  currentPositionMs: number;
+  repeatMode: RepeatMode;
+  shuffleEnabled: boolean;
+  entryCount: number;
+  createdAt: string;
+}
+
+export interface QueueSnapshot extends QueueSnapshotSummary {
+  currentSnapshotEntryId: QueueSnapshotEntryId | null;
+  historyOrder: QueueSnapshotEntryId[];
+  traversalOrder: QueueSnapshotEntryId[];
+  entries: QueueSnapshotEntry[];
+}
+
 export type PlaybackPhase =
   | "idle"
   | "loading"
@@ -501,6 +651,11 @@ export type PlaybackErrorCode =
   | "queueEmpty"
   | "recoveryRetrying"
   | "recoveryExhausted"
+  | "persistenceFailed"
+  | "queueEntryNotFound"
+  | "queueEntryImmutable"
+  | "invalidQueuePosition"
+  | "snapshotNotFound"
   | "shuttingDown";
 
 export interface PlaybackErrorDto {
