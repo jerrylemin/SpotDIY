@@ -1,3 +1,5 @@
+import type { SpotThemeDefinition } from "../features/theme/theme-schema";
+
 export type ProviderKind = "local" | "youtube" | "soundcloud" | "spotify";
 export type TrackId = string & { readonly __brand: "TrackId" };
 export type ArtistId = string & { readonly __brand: "ArtistId" };
@@ -179,11 +181,14 @@ export interface AbLoopPreset {
   updatedAt: string;
 }
 
-export type Theme = "dark" | "light" | "system";
+export type Theme = "dark" | "light" | "system" | "custom";
+export type LayoutProfile = "comfortable" | "compact" | "dense";
 export type StorageMode = "standard" | "portable";
 
 export interface SettingsSnapshot {
   theme: Theme;
+  layoutProfile: LayoutProfile;
+  customTheme: SpotThemeDefinition | null;
   downloadsDirectory: string | null;
   sourcePreferenceOrder: ProviderKind[];
   firstRun: boolean;
@@ -192,6 +197,8 @@ export interface SettingsSnapshot {
 
 export type SettingValue =
   | { key: "theme"; value: Theme }
+  | { key: "layoutProfile"; value: LayoutProfile }
+  | { key: "customTheme"; value: SpotThemeDefinition | null }
   | { key: "downloadsDirectory"; value: string | null }
   | { key: "sourcePreferenceOrder"; value: ProviderKind[] };
 

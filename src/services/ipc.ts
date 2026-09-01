@@ -73,6 +73,7 @@ import type {
   QueueSnapshotSummary,
   QueueWorkspace,
 } from "../types/domain";
+import { spotThemeDefinitionSchema } from "../features/theme/theme-schema";
 
 const providerKindSchema = z.enum(["local", "youtube", "soundcloud", "spotify"]);
 const sourceCapabilitiesSchema = z.object({
@@ -185,13 +186,16 @@ const spotifyAuthorizationRequestSchema = z.object({
   redirectUri: z.string().url(),
 }).strict();
 
-const themeSchema = z.enum(["dark", "light", "system"]);
+const themeSchema = z.enum(["dark", "light", "system", "custom"]);
+const layoutProfileSchema = z.enum(["comfortable", "compact", "dense"]);
 const sourcePreferenceOrderSchema = z
   .array(providerKindSchema)
   .length(4)
   .refine((value) => new Set(value).size === value.length, "Provider preference order cannot contain duplicates.");
 const settingsSnapshotSchema = z.object({
   theme: themeSchema,
+  layoutProfile: layoutProfileSchema,
+  customTheme: spotThemeDefinitionSchema.nullable(),
   downloadsDirectory: z.string().nullable(),
   sourcePreferenceOrder: sourcePreferenceOrderSchema,
   firstRun: z.boolean(),
@@ -199,6 +203,8 @@ const settingsSnapshotSchema = z.object({
 });
 const settingValueSchema = z.discriminatedUnion("key", [
   z.object({ key: z.literal("theme"), value: themeSchema }),
+  z.object({ key: z.literal("layoutProfile"), value: layoutProfileSchema }),
+  z.object({ key: z.literal("customTheme"), value: spotThemeDefinitionSchema.nullable() }),
   z.object({ key: z.literal("downloadsDirectory"), value: z.string().nullable() }),
   z.object({ key: z.literal("sourcePreferenceOrder"), value: sourcePreferenceOrderSchema }),
 ]);
@@ -1619,15 +1625,49 @@ function browserPreviewStatus(): AppStatus {
   };
 }
 
+let browserPreviewSettingsState: SettingsSnapshot = {
+  theme: "dark",
+  layoutProfile: "comfortable",
+  customTheme: null,
+  downloadsDirectory: null,
+  sourcePreferenceOrder: ["local", "soundcloud", "youtube", "spotify"],
+  firstRun: true,
+  storageMode: "standard",
+};
+
 function browserPreviewSettings(): SettingsSnapshot {
   return {
-    theme: "dark",
-    downloadsDirectory: null,
-    sourcePreferenceOrder: ["local", "soundcloud", "youtube", "spotify"],
-    firstRun: true,
-    storageMode: "standard",
+    ...browserPreviewSettingsState,
+    sourcePreferenceOrder: [...browserPreviewSettingsState.sourcePreferenceOrder],
+    customTheme: browserPreviewSettingsState.customTheme
+      ? {
+        ...browserPreviewSettingsState.customTheme,
+        tokens: { ...browserPreviewSettingsState.customTheme.tokens },
+      }
+      : null,
   };
 }
+
+function setBrowserPreviewSetting(setting: SettingValue): SettingsSnapshot {
+  const parsedSetting = settingValueSchema.parse(setting) as SettingValue;
+  if (parsedSetting.key === "theme" && parsedSetting.value === "custom" && browserPreviewSettingsState.customTheme === null) {
+    throw new IpcError("A valid custom theme must be imported before it can be selected.");
+  }
+  if (parsedSetting.key === "customTheme" && parsedSetting.value === null && browserPreviewSettingsState.theme === "custom") {
+    throw new IpcError("Reset the active custom theme by selecting Dark first.");
+  }
+
+  browserPreviewSettingsState = {
+    ...browserPreviewSettingsState,
+    ...(parsedSetting.key === "theme" ? { theme: parsedSetting.value } : {}),
+    ...(parsedSetting.key === "layoutProfile" ? { layoutProfile: parsedSetting.value } : {}),
+    ...(parsedSetting.key === "customTheme" ? { customTheme: parsedSetting.value } : {}),
+    ...(parsedSetting.key === "downloadsDirectory" ? { downloadsDirectory: parsedSetting.value } : {}),
+    ...(parsedSetting.key === "sourcePreferenceOrder" ? { sourcePreferenceOrder: [...parsedSetting.value] } : {}),
+  };
+  return browserPreviewSettings();
+}
+
 
 function browserPreviewLibraryStatus(): LibraryStatus {
   if (isPlaybackE2EAdapterEnabled()) {
@@ -2239,7 +2279,7 @@ export async function setSetting(setting: SettingValue): Promise<SettingsSnapsho
   try {
     const parsedSetting = settingValueSchema.parse(setting);
     if (!isTauriRuntime()) {
-      throw new IpcError("Local settings require the native SpotDIY runtime.");
+      return setBrowserPreviewSetting(parsedSetting as SettingValue);
     }
 
     const response = await invoke<unknown>("set_setting", { setting: parsedSetting });

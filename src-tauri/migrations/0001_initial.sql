@@ -122,11 +122,11 @@ CREATE TABLE local_files (
 
 CREATE TABLE settings_metadata (
     setting_key TEXT PRIMARY KEY CHECK (
-        setting_key IN ('theme', 'downloads_directory', 'source_preference_order', 'first_run', 'storage_mode')
+        setting_key IN ('theme', 'downloads_directory', 'source_preference_order', 'first_run', 'storage_mode', 'layout_profile', 'custom_theme')
     ),
     value_json TEXT NOT NULL CHECK (json_valid(value_json)),
     value_type TEXT NOT NULL CHECK (
-        value_type IN ('theme', 'downloads_directory', 'source_preference_order', 'boolean', 'storage_mode')
+        value_type IN ('theme', 'downloads_directory', 'source_preference_order', 'boolean', 'storage_mode', 'layout_profile', 'custom_theme')
     ),
     schema_version INTEGER NOT NULL CHECK (schema_version > 0),
     updated_at TEXT NOT NULL

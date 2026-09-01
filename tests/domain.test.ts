@@ -25,6 +25,8 @@ describe("settings IPC contract", () => {
   it("provides typed browser-preview defaults", async () => {
     await expect(getSettingsSnapshot()).resolves.toEqual({
       theme: "dark",
+      layoutProfile: "comfortable",
+      customTheme: null,
       downloadsDirectory: null,
       sourcePreferenceOrder: ["local", "soundcloud", "youtube", "spotify"],
       firstRun: true,
@@ -32,8 +34,12 @@ describe("settings IPC contract", () => {
     });
   });
 
-  it("rejects settings writes outside the native runtime", async () => {
-    await expect(setSetting({ key: "theme", value: "light" })).rejects.toBeInstanceOf(IpcError);
+  it("keeps appearance writes inside the browser-preview settings adapter", async () => {
+    await expect(setSetting({ key: "layoutProfile", value: "dense" })).resolves.toMatchObject({
+      theme: "dark",
+      layoutProfile: "dense",
+    });
+    await expect(setSetting({ key: "theme", value: "light" })).resolves.toMatchObject({ theme: "light" });
   });
 
   it("wraps malformed native status responses", async () => {
