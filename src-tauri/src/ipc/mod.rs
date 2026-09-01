@@ -69,7 +69,7 @@ const VIDEO_CAPABILITIES: SourceCapabilities = SourceCapabilities {
     metadata: true,
     artwork: true,
     lyrics: false,
-    downloads: false,
+    downloads: true,
     popularity: true,
     release_date: false,
     lyrics_metadata: false,

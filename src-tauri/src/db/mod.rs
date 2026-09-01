@@ -11,8 +11,9 @@ use thiserror::Error;
 const INITIAL_MIGRATION_SQL: &str = include_str!("../../migrations/0001_initial.sql");
 const LOCAL_LIBRARY_MIGRATION_SQL: &str = include_str!("../../migrations/0002_local_library.sql");
 const SOURCE_FUSION_MIGRATION_SQL: &str = include_str!("../../migrations/0003_source_fusion.sql");
+const DOWNLOADS_MIGRATION_SQL: &str = include_str!("../../migrations/0004_downloads.sql");
 
-pub const LATEST_SCHEMA_VERSION: u32 = 3;
+pub const LATEST_SCHEMA_VERSION: u32 = 4;
 pub const DATABASE_FILE_NAME: &str = "spotdiy.sqlite3";
 pub const APPLICATION_DATA_DIRECTORY: &str = "SpotDIY";
 
@@ -48,6 +49,12 @@ const MIGRATIONS: &[Migration] = &[
         version: 3,
         name: "0003_source_fusion",
         sql: SOURCE_FUSION_MIGRATION_SQL,
+        destructive: false,
+    },
+    Migration {
+        version: 4,
+        name: "0004_downloads",
+        sql: DOWNLOADS_MIGRATION_SQL,
         destructive: false,
     },
 ];
@@ -468,6 +475,8 @@ mod tests {
             "settings_metadata",
             "schema_metadata",
             "user_track_overrides",
+            "downloads",
+            "download_settings",
         ] {
             let exists: i64 = database
                 .with_connection(|connection| {
@@ -557,12 +566,12 @@ mod tests {
         let schema_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema_version, 3);
+        assert_eq!(schema_version, 4);
     }
 
     #[test]
-    fn schema_two_fixture_upgrades_to_three_without_losing_tracks_sources_or_settings() {
-        let path = TempDatabasePath::new("migration-three-fixture");
+    fn schema_two_fixture_upgrades_to_four_without_losing_tracks_sources_or_settings() {
+        let path = TempDatabasePath::new("migration-four-fixture");
         let mut connection = Connection::open(path.path()).unwrap();
         configure_connection(&connection).unwrap();
         run_migrations(&mut connection, None, &MIGRATIONS[..2]).unwrap();
@@ -614,7 +623,7 @@ mod tests {
         let schema_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema_version, 3);
+        assert_eq!(schema_version, 4);
         let track_count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM tracks WHERE id = ?1",
@@ -650,6 +659,15 @@ mod tests {
             preference_order,
             "[\"soundcloud\",\"youtube\",\"local\",\"spotify\"]"
         );
+        let (can_downloads, can_playback): (i64, i64) = connection
+            .query_row(
+                "SELECT can_downloads, can_playback FROM track_sources WHERE id = ?1",
+                params![source_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(can_downloads, 1);
+        assert_eq!(can_playback, 0);
         let foreign_key_rows: i64 = connection
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
                 row.get(0)

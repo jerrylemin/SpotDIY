@@ -20,6 +20,8 @@ logs/
 cache/
 downloads/
 Data/
+!src-tauri/src/downloads/
+!src-tauri/src/downloads/*.rs
 
 # Tooling indexes and local reports
 .codegraph/
