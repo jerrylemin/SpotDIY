@@ -45,7 +45,7 @@ function SetupHome({ indexedTracks, providers }: { indexedTracks: number; provid
         </div>
       </section>
       <SourceStatus providers={providers} />
-      <EmptyState icon="library" eyebrow="LOCAL LIBRARY" title="Nothing indexed yet" description="Choose a folder to turn your files into a searchable, source-aware library." />
+      {indexedTracks === 0 ? <EmptyState icon="library" eyebrow="LOCAL LIBRARY" title="Nothing indexed yet" description="Choose a folder to turn your files into a searchable, source-aware library." /> : null}
     </>
   );
 }

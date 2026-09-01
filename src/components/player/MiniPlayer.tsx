@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { isTauriRuntime } from "../../services/ipc";
 import { usePlayback } from "../../hooks/usePlayback";
 import { useUiStore } from "../../stores/ui-store";
-import { SourceSwitcher } from "./SourceSwitcher";
 import { ProgressControl } from "./ProgressControl";
 import { VolumeControl } from "./VolumeControl";
 import { SpotIcon } from "../icons/SpotIcon";
@@ -19,8 +18,6 @@ function phaseLabel(phase: ReturnType<typeof usePlayback>["snapshot"]["phase"]):
 
 export function MiniPlayer() {
   const playback = usePlayback();
-  const queueDrawerOpen = useUiStore((state) => state.queueDrawerOpen);
-  const setQueueDrawerOpen = useUiStore((state) => state.setQueueDrawerOpen);
   const setPlayerMode = useUiStore((state) => state.setPlayerMode);
   const openTrackInspector = useUiStore((state) => state.openTrackInspector);
   const [artworkFailed, setArtworkFailed] = useState(false);
@@ -57,17 +54,9 @@ export function MiniPlayer() {
         <button aria-label={snapshot.phase === "playing" ? "Pause" : "Play"} className="player-play-button" disabled={!queueReady || playback.pending} onClick={() => { void playback.togglePlayPause(); }} type="button"><SpotIcon name={snapshot.phase === "playing" ? "pause" : "play"} size={15} /></button>
         <button aria-label="Next track" className="player-icon-button" disabled={!queueReady || playback.pending} onClick={() => { void playback.nextTrack(); }} type="button"><SpotIcon name="next" size={17} /></button>
       </div>
-      <SourceSwitcher
-        currentSourceId={snapshot.currentSourceId}
-        disabled={!hasTrack || playback.pending}
-        onSwitch={(sourceId) => { if (snapshot.currentTrackId) void playback.switchSource(snapshot.currentTrackId, sourceId); }}
-        sources={snapshot.sources}
-      />
       <VolumeControl disabled={snapshot.phase === "failed" || snapshot.phase === "recovering"} muted={snapshot.muted} onSetVolume={(volumePercent) => { void playback.setVolume(volumePercent); }} onToggleMuted={() => { void playback.toggleMuted(); }} pending={playback.pending} volumePercent={snapshot.volumePercent} />
       <div className="mini-player-actions">
-        <button aria-expanded={queueDrawerOpen} aria-label="Open queue" className="button button-quiet button-small" onClick={() => setQueueDrawerOpen(!queueDrawerOpen)} type="button"><SpotIcon name="queue" size={14} /> Queue</button>
         <button aria-label="Open expanded now playing" className="icon-button" onClick={() => setPlayerMode("expanded")} title="Open expanded now playing" type="button"><SpotIcon name="expand" size={17} /></button>
-        <button aria-label="Use standard player" className="icon-button" onClick={() => setPlayerMode("standard")} title="Use standard player" type="button"><SpotIcon name="collapse" size={17} /></button>
       </div>
     </footer>
   );

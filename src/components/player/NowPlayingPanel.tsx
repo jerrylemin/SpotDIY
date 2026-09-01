@@ -1,4 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { usePlayback } from "../../hooks/usePlayback";
@@ -108,7 +109,10 @@ export function NowPlayingPanel() {
             <span className="eyebrow">QUALITY / PROVENANCE</span>
             {inspector.isLoading ? <span className="inspector-muted">Reading current source details…</span> : inspectorSource ? <><div><span>Provider</span><strong>{inspectorSource.provider}</strong></div><div><span>Availability</span><strong>{inspectorSource.available ? "Available" : inspectorSource.availabilityDetail ?? "Unavailable"}</strong></div><div><span>Version</span><strong>{inspectorSource.versionQualifiers.join(" · ") || "Unspecified"}</strong></div><div className="now-playing-quality-facts">{qualityFacts(inspectorSource).map((fact) => <span key={fact}>{fact}</span>)}</div></> : <span className="inspector-muted">Quality is unavailable for this source.</span>}
           </div>
-          {hasTrack ? <button className="button button-quiet button-small" onClick={() => openTrackInspector(snapshot.currentTrackId!)} type="button"><SpotIcon name="info" size={14} /> Inspect track</button> : null}
+          <div className="now-playing-fact-actions">
+            <Link className="button button-quiet button-small" to="/lyrics"><SpotIcon name="lyrics" size={14} /> Lyrics</Link>
+            {hasTrack ? <button className="button button-quiet button-small" onClick={() => openTrackInspector(snapshot.currentTrackId!)} type="button"><SpotIcon name="info" size={14} /> Inspect track</button> : null}
+          </div>
         </div>
         <div className="now-playing-queue-preview">
           <div className="now-playing-subheading"><span className="eyebrow">UP NEXT</span><span>{queue.workspace.upNext.length} queued</span></div>

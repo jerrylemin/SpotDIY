@@ -3,6 +3,13 @@ import { expect, test } from "@playwright/test";
 const longTitle = "Night Drive - Neon Over Water (Extended Live Session)";
 
 test.describe("Plan 11 shell surfaces", () => {
+  test("renders the populated home dashboard from live preview data", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByText("YOUR MUSIC, YOUR MACHINE", { exact: true })).toBeVisible();
+    await expect(page.locator(".home-dashboard-grid").getByText("LIBRARY", { exact: true })).toBeVisible();
+    await expect(page.getByText("START HERE", { exact: true })).toBeHidden();
+  });
+
   test("opens a persisted track inspector without exposing local paths", async ({ page }) => {
     await page.goto("/library");
     await expect(page.getByText(longTitle, { exact: true }).first()).toBeVisible();
@@ -36,6 +43,9 @@ test.describe("Plan 11 shell surfaces", () => {
 
   test("switches standard, mini, and expanded player modes from the shell", async ({ page }) => {
     await page.goto("/library");
+    await page.getByRole("button", { name: /Play now Night Drive/ }).click();
+    await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Playback source" }).first()).toBeEnabled();
     await expect(page.getByRole("button", { name: "Open mini player" })).toBeVisible();
     await page.getByRole("button", { name: "Open mini player" }).click();
     await expect(page.getByRole("contentinfo", { name: "Mini now playing" })).toBeVisible();
