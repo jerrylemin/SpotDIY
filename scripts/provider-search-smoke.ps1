@@ -66,8 +66,9 @@ function Invoke-StructuredProviderSmoke([string]$label, [string]$searchPrefix, [
             Write-Output "SKIPPED - $label metadata smoke exceeded the 20 second smoke bound"
             return
         }
+        $process.Refresh()
         $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }
-        if ($process.ExitCode -ne 0) {
+        if ($null -ne $process.ExitCode -and $process.ExitCode -ne 0) {
             Write-Output "SKIPPED - $label upstream returned exit code $($process.ExitCode); no provider output was recorded"
             return
         }
@@ -195,8 +196,8 @@ $ownedHelperIds = [System.Collections.Generic.List[int]]::new()
 
 try {
     New-Item -ItemType Directory -Path $fixtureFolder -Force | Out-Null
-    New-SilentWav (Join-Path $fixtureFolder "01-night-drive.wav") 440
-    New-SilentWav (Join-Path $fixtureFolder "02-static-bloom.wav") 660
+    New-SilentWav (Join-Path $fixtureFolder "Night Drive.wav") 440
+    New-SilentWav (Join-Path $fixtureFolder "Static Bloom.wav") 660
 
     $beforeLaunch = Get-SearchSmokeProcesses
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)

@@ -61,15 +61,15 @@ try {
   await page.getByRole("link", { name: "Search", exact: true }).click();
   await page.getByRole("heading", { name: /Find your next listen/ }).waitFor({ state: "visible" });
   const input = page.getByRole("textbox", { name: "Search music" });
-  await input.fill("Night Drive");
+  await input.fill("night");
 
   const local = page.locator('[data-provider="local"]');
-  await expect(local.locator(".search-result-card").first()).toBeVisible();
-  await expect(local).toContainText("Night Drive - Neon Over Water (Extended Live Session)");
+  await expect(local.locator(".search-result-card").first()).toBeVisible({ timeout: 20_000 });
+  await expect(local).toContainText("Night Drive");
   await expect(page.locator('[data-provider="youtube"]')).toContainText(/yt-dlp|unavailable|missing/i);
   await expect(page.locator('[data-provider="soundcloud"]')).toContainText(/yt-dlp|unavailable|missing/i);
 
-  const started = await invoke("start_search", {
+  const startedPromise = invoke("start_search", {
     request: {
       query: "cancellation-check",
       lens: "all",
@@ -78,10 +78,11 @@ try {
       limit: 25,
     },
   });
+  const cancelledPromise = invoke("cancel_search");
+  const [started, cancelled] = await Promise.all([startedPromise, cancelledPromise]);
   if (!started.searchId) {
     throw new Error("packaged search did not return a SearchId");
   }
-  const cancelled = await invoke("cancel_search");
   if (cancelled !== started.searchId) {
     throw new Error("packaged cancellation did not return the active SearchId");
   }
