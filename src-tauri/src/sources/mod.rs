@@ -5,8 +5,10 @@ pub mod traits;
 pub mod youtube;
 pub use crate::media_tools::yt_dlp;
 pub use local::LocalSourceAdapter;
+pub use soundcloud::SoundcloudSourceAdapter;
 pub use spotify::SpotifySourceAdapter;
 pub use traits::SourceAdapter;
+pub use youtube::YoutubeSourceAdapter;
 
 use std::sync::Arc;
 

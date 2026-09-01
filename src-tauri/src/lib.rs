@@ -17,7 +17,7 @@ pub mod search {
 pub mod sources;
 
 use db::{standard_database_path, Database};
-use ipc::{app_status, source_capabilities, AppStatus, ProviderCapabilities};
+use ipc::{app_status_with_runtime, source_capabilities, AppStatus, ProviderCapabilities};
 use library::{LibraryService, ProgressSink, LIBRARY_PROGRESS_EVENT};
 use media_tools::MediaToolManager;
 use playback::{
@@ -28,22 +28,113 @@ use settings::{SettingValue, SettingsRepository, SettingsSnapshot};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use tauri_plugin_opener::OpenerExt;
+
+use crate::search::{SearchEvent, SearchEventSink, SearchRequest, SearchStarted};
+use crate::sources::{
+    LocalSourceAdapter, SoundcloudSourceAdapter, SourceAdapter, SpotifySourceAdapter,
+    YoutubeSourceAdapter,
+};
+
+pub const SEARCH_PROVIDER_UPDATE_EVENT: &str = "search://provider-update";
+pub const SEARCH_COMPLETED_EVENT: &str = "search://complete";
+pub const SPOTIFY_AUTH_STATE_EVENT: &str = "spotify://auth-state";
 
 struct AppState {
     database: Database,
     library: LibraryService,
     media_tools: MediaToolManager,
     playback: PlaybackService,
+    search: search::SearchService,
+    spotify_auth: sources::spotify::SpotifyAuthService,
 }
 
 #[tauri::command]
 fn get_app_status(state: State<'_, AppState>) -> Result<AppStatus, String> {
-    app_status(env!("CARGO_PKG_VERSION"), &state.database).map_err(|error| error.to_string())
+    app_status_with_runtime(
+        env!("CARGO_PKG_VERSION"),
+        &state.database,
+        &state.media_tools,
+        &state.spotify_auth,
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn get_source_capabilities() -> Vec<ProviderCapabilities> {
     source_capabilities()
+}
+
+#[tauri::command]
+fn start_search(
+    request: SearchRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SearchStarted, String> {
+    let sink = search_event_sink(&app);
+    state
+        .search
+        .start_search(request, sink)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn cancel_search(state: State<'_, AppState>) -> Option<crate::search::SearchId> {
+    state.search.cancel_search()
+}
+
+#[tauri::command]
+fn get_spotify_setup_status(state: State<'_, AppState>) -> sources::spotify::SpotifySetupStatus {
+    state.spotify_auth.setup_status()
+}
+
+#[tauri::command]
+async fn begin_spotify_authorization(
+    client_id: String,
+    market: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<sources::spotify::SpotifyAuthorizationRequest, String> {
+    let request = state
+        .spotify_auth
+        .begin_authorization(client_id, &market)
+        .await
+        .map_err(|error| error.to_string())?;
+    app.opener()
+        .open_url(request.authorization_url.clone(), None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let auth = state.spotify_auth.clone();
+    let app_handle = app.clone();
+    tokio::spawn(async move {
+        let status = match auth.complete_authorization().await {
+            Ok(status) => status,
+            Err(_) => auth.setup_status(),
+        };
+        let _ = app_handle.emit(SPOTIFY_AUTH_STATE_EVENT, status);
+    });
+    Ok(request)
+}
+
+#[tauri::command]
+fn disconnect_spotify(
+    state: State<'_, AppState>,
+) -> Result<sources::spotify::SpotifySetupStatus, String> {
+    state
+        .spotify_auth
+        .disconnect()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn open_provider_result(
+    provider: crate::domain::ProviderKind,
+    url: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    let safe = sources::validate_provider_url(provider, &url).map_err(|error| error.to_string())?;
+    app.opener()
+        .open_url(safe.as_url().as_str().to_owned(), None::<&str>)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -333,6 +424,18 @@ fn progress_sink(app: &AppHandle) -> ProgressSink {
     })
 }
 
+fn search_event_sink(app: &AppHandle) -> SearchEventSink {
+    let app = app.clone();
+    Arc::new(move |event| match event {
+        SearchEvent::ProviderSection(event) => {
+            let _ = app.emit(SEARCH_PROVIDER_UPDATE_EVENT, event);
+        }
+        SearchEvent::Completed(event) => {
+            let _ = app.emit(SEARCH_COMPLETED_EVENT, event);
+        }
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -353,6 +456,14 @@ pub fn run() {
             let library = LibraryService::new(database.clone(), artwork_root)?;
             let sink = Some(progress_sink(app.handle()));
             let media_tools = MediaToolManager::new();
+            let spotify_auth = sources::spotify::SpotifyAuthService::production();
+            let adapters: Vec<Arc<dyn SourceAdapter>> = vec![
+                Arc::new(LocalSourceAdapter::new(database.clone())),
+                Arc::new(YoutubeSourceAdapter::new(media_tools.clone())),
+                Arc::new(SoundcloudSourceAdapter::new(media_tools.clone())),
+                Arc::new(SpotifySourceAdapter::new(spotify_auth.clone())),
+            ];
+            let search = search::SearchService::new(adapters);
             let playback_sink = {
                 let app_handle = app.handle().clone();
                 Arc::new(move |snapshot: PlaybackSnapshot| {
@@ -367,6 +478,8 @@ pub fn run() {
                 library: library.clone(),
                 media_tools,
                 playback,
+                search,
+                spotify_auth,
             });
             library.start_all_scans(sink)?;
             Ok(())
@@ -376,6 +489,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_app_status,
             get_source_capabilities,
+            start_search,
+            cancel_search,
+            get_spotify_setup_status,
+            begin_spotify_authorization,
+            disconnect_spotify,
+            open_provider_result,
             get_settings_snapshot,
             set_setting,
             get_library_folders,
@@ -409,6 +528,7 @@ pub fn run() {
         .run(|app_handle, event| {
             if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
                 if let Some(state) = app_handle.try_state::<AppState>() {
+                    let _ = state.search.cancel_search();
                     let _ = state.playback.shutdown();
                 }
             }
