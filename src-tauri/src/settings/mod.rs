@@ -676,7 +676,7 @@ mod tests {
         assert_eq!(snapshot.theme, Theme::Custom);
         assert_eq!(snapshot.custom_theme, Some(theme));
         assert_eq!(snapshot.layout_profile, LayoutProfile::Dense);
-        assert_eq!(database.schema_version().unwrap(), 6);
+        assert_eq!(database.schema_version().unwrap(), 7);
     }
 
     #[test]

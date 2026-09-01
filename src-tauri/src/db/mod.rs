@@ -16,8 +16,10 @@ const COLLECTIONS_AND_QUEUE_MIGRATION_SQL: &str =
     include_str!("../../migrations/0005_collections_and_queue.sql");
 const LYRICS_BOOKMARKS_MIGRATION_SQL: &str =
     include_str!("../../migrations/0006_lyrics_bookmarks.sql");
+const APPEARANCE_SETTINGS_MIGRATION_SQL: &str =
+    include_str!("../../migrations/0007_appearance_settings.sql");
 
-pub const LATEST_SCHEMA_VERSION: u32 = 6;
+pub const LATEST_SCHEMA_VERSION: u32 = 7;
 pub const DATABASE_FILE_NAME: &str = "spotdiy.sqlite3";
 pub const APPLICATION_DATA_DIRECTORY: &str = "SpotDIY";
 
@@ -72,6 +74,12 @@ const MIGRATIONS: &[Migration] = &[
         name: "0006_lyrics_bookmarks",
         sql: LYRICS_BOOKMARKS_MIGRATION_SQL,
         destructive: false,
+    },
+    Migration {
+        version: 7,
+        name: "0007_appearance_settings",
+        sql: APPEARANCE_SETTINGS_MIGRATION_SQL,
+        destructive: true,
     },
 ];
 
@@ -463,7 +471,76 @@ impl Drop for TempDatabasePath {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::{
+        LayoutProfile, SettingValue, SettingsRepository, SpotThemeDefinition, SpotThemeTokens,
+        Theme, ThemeBaseMode,
+    };
     use rusqlite::params;
+
+    const LEGACY_SCHEMA_6_INITIAL_SQL: &str =
+        include_str!("../../migrations/fixtures/legacy_schema6_initial.sql");
+
+    fn open_legacy_schema_six_fixture(label: &str) -> (TempDatabasePath, Connection) {
+        let path = TempDatabasePath::new(label);
+        let mut connection = Connection::open(path.path()).unwrap();
+        configure_connection(&connection).unwrap();
+        connection
+            .execute_batch(LEGACY_SCHEMA_6_INITIAL_SQL)
+            .unwrap();
+        connection.pragma_update(None, "user_version", 1).unwrap();
+        run_migrations(&mut connection, None, &MIGRATIONS[1..6]).unwrap();
+        assert_eq!(current_schema_version(&connection).unwrap(), 6);
+        (path, connection)
+    }
+
+    fn replace_settings_with_plan10_shape(connection: &Connection) {
+        connection
+            .execute_batch(
+                "CREATE TABLE settings_metadata_plan10 (
+                    setting_key TEXT PRIMARY KEY CHECK (
+                        setting_key IN ('theme', 'downloads_directory', 'source_preference_order', 'first_run', 'storage_mode', 'layout_profile', 'custom_theme')
+                    ),
+                    value_json TEXT NOT NULL CHECK (json_valid(value_json)),
+                    value_type TEXT NOT NULL CHECK (
+                        value_type IN ('theme', 'downloads_directory', 'source_preference_order', 'boolean', 'storage_mode', 'layout_profile', 'custom_theme')
+                    ),
+                    schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO settings_metadata_plan10
+                    (setting_key, value_json, value_type, schema_version, updated_at)
+                SELECT setting_key, value_json, value_type, schema_version, updated_at
+                FROM settings_metadata;
+                DROP TABLE settings_metadata;
+                ALTER TABLE settings_metadata_plan10 RENAME TO settings_metadata;",
+            )
+            .unwrap();
+    }
+
+    fn fixture_theme() -> SpotThemeDefinition {
+        SpotThemeDefinition {
+            schema_version: 1,
+            name: "Migration theme".to_owned(),
+            base_mode: ThemeBaseMode::Dark,
+            tokens: SpotThemeTokens {
+                background: "#101113".to_owned(),
+                surface: "#17181D".to_owned(),
+                surface_raised: "#1D1E24".to_owned(),
+                surface_soft: "#22232A".to_owned(),
+                text: "#F3F1EC".to_owned(),
+                text_muted: "#A8A7AE".to_owned(),
+                text_subtle: "#807F87".to_owned(),
+                border: "#2E2F36".to_owned(),
+                border_strong: "#4B4C55".to_owned(),
+                accent: "#D7FF60".to_owned(),
+                accent_contrast: "#151617".to_owned(),
+                success: "#81E2D0".to_owned(),
+                warning: "#FFB570".to_owned(),
+                danger: "#FF806F".to_owned(),
+                info: "#8E7BFF".to_owned(),
+            },
+        }
+    }
 
     #[test]
     fn clean_database_reaches_latest_schema_with_core_tables() {
@@ -545,6 +622,212 @@ mod tests {
     }
 
     #[test]
+    fn legacy_schema_six_old_settings_constraint_migrates_to_seven_without_loss() {
+        let (path, mut connection) = open_legacy_schema_six_fixture("migration-six-old-settings");
+        let now = "2026-01-01T00:00:00Z";
+
+        connection
+            .execute(
+                "UPDATE settings_metadata
+                 SET value_json = CASE setting_key
+                     WHEN 'first_run' THEN 'false'
+                     WHEN 'storage_mode' THEN '\"standard\"'
+                     ELSE value_json
+                 END,
+                 updated_at = ?1",
+                params![now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO settings_metadata
+                    (setting_key, value_json, value_type, schema_version, updated_at)
+                 VALUES ('theme', '\"light\"', 'theme', 1, ?1)
+                 ON CONFLICT(setting_key) DO UPDATE SET
+                    value_json = excluded.value_json,
+                    updated_at = excluded.updated_at",
+                params![now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO settings_metadata
+                    (setting_key, value_json, value_type, schema_version, updated_at)
+                 VALUES ('downloads_directory', '\"C:\\\\Downloads\"', 'downloads_directory', 1, ?1)",
+                params![now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO settings_metadata
+                    (setting_key, value_json, value_type, schema_version, updated_at)
+                 VALUES ('source_preference_order',
+                    '[\"youtube\",\"soundcloud\",\"local\",\"spotify\"]',
+                    'source_preference_order', 1, ?1)",
+                params![now],
+            )
+            .unwrap();
+
+        let rejected = connection.execute(
+            "INSERT INTO settings_metadata
+                (setting_key, value_json, value_type, schema_version, updated_at)
+             VALUES ('layout_profile', '\"dense\"', 'layout_profile', 1, ?1)",
+            params![now],
+        );
+        assert!(
+            rejected.is_err(),
+            "the legacy schema must reject Plan 10 keys"
+        );
+
+        run_migrations(&mut connection, None, MIGRATIONS).unwrap();
+        assert_eq!(current_schema_version(&connection).unwrap(), 7);
+        let old_values: Vec<(String, String, String)> = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT setting_key, value_json, value_type
+                     FROM settings_metadata
+                     WHERE setting_key IN ('theme', 'downloads_directory', 'source_preference_order', 'first_run', 'storage_mode')
+                     ORDER BY setting_key",
+                )
+                .unwrap();
+            statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(old_values.len(), 5);
+        assert_eq!(
+            old_values[0],
+            (
+                "downloads_directory".to_owned(),
+                "\"C:\\\\Downloads\"".to_owned(),
+                "downloads_directory".to_owned()
+            )
+        );
+        assert_eq!(
+            old_values[1],
+            (
+                "first_run".to_owned(),
+                "false".to_owned(),
+                "boolean".to_owned()
+            )
+        );
+        assert_eq!(
+            old_values[2],
+            (
+                "source_preference_order".to_owned(),
+                "[\"youtube\",\"soundcloud\",\"local\",\"spotify\"]".to_owned(),
+                "source_preference_order".to_owned()
+            )
+        );
+        assert_eq!(
+            old_values[3],
+            (
+                "storage_mode".to_owned(),
+                "\"standard\"".to_owned(),
+                "storage_mode".to_owned()
+            )
+        );
+        assert_eq!(
+            old_values[4],
+            (
+                "theme".to_owned(),
+                "\"light\"".to_owned(),
+                "theme".to_owned()
+            )
+        );
+        drop(connection);
+
+        let database = Database::open(path.path()).unwrap();
+        let repository = SettingsRepository::new(&database);
+        let snapshot = repository.get_snapshot().unwrap();
+        assert_eq!(snapshot.theme, Theme::Light);
+        assert_eq!(
+            snapshot.downloads_directory,
+            Some(PathBuf::from(r"C:\Downloads"))
+        );
+        assert_eq!(snapshot.first_run, false);
+        assert_eq!(
+            snapshot.storage_mode,
+            crate::settings::StorageMode::Standard
+        );
+        assert_eq!(snapshot.source_preference_order.len(), 4);
+
+        repository
+            .set_setting(SettingValue::LayoutProfile(LayoutProfile::Dense))
+            .unwrap();
+        repository
+            .set_setting(SettingValue::CustomTheme(Box::new(Some(fixture_theme()))))
+            .unwrap();
+        let active = repository
+            .set_setting(SettingValue::Theme(Theme::Custom))
+            .unwrap();
+        assert_eq!(active.layout_profile, LayoutProfile::Dense);
+        assert_eq!(active.theme, Theme::Custom);
+        assert!(active.custom_theme.is_some());
+        assert_eq!(database.schema_version().unwrap(), 7);
+        let foreign_key_rows: i64 = database
+            .with_connection(|connection| {
+                connection.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get(0)
+                })
+            })
+            .unwrap();
+        assert_eq!(foreign_key_rows, 0);
+    }
+
+    #[test]
+    fn plan10_schema_six_settings_shape_migrates_to_seven_and_preserves_appearance() {
+        let (path, mut connection) =
+            open_legacy_schema_six_fixture("migration-six-plan10-settings");
+        replace_settings_with_plan10_shape(&connection);
+        let theme_json = serde_json::to_string(&fixture_theme()).unwrap();
+        connection
+            .execute(
+                "INSERT INTO settings_metadata
+                    (setting_key, value_json, value_type, schema_version, updated_at)
+                 VALUES ('layout_profile', '\"compact\"', 'layout_profile', 1, '2026-01-01T00:00:00Z'),
+                        ('custom_theme', ?1, 'custom_theme', 1, '2026-01-01T00:00:00Z')",
+                params![theme_json],
+            )
+            .unwrap();
+
+        run_migrations(&mut connection, None, MIGRATIONS).unwrap();
+        assert_eq!(current_schema_version(&connection).unwrap(), 7);
+        let (layout, custom_theme): (String, String) = connection
+            .query_row(
+                "SELECT
+                    (SELECT value_json FROM settings_metadata WHERE setting_key = 'layout_profile'),
+                    (SELECT value_json FROM settings_metadata WHERE setting_key = 'custom_theme')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(layout, "\"compact\"");
+        assert_eq!(custom_theme, theme_json);
+        drop(connection);
+
+        let database = Database::open(path.path()).unwrap();
+        let repository = SettingsRepository::new(&database);
+        let snapshot = repository.get_snapshot().unwrap();
+        assert_eq!(snapshot.layout_profile, LayoutProfile::Compact);
+        assert_eq!(snapshot.custom_theme, Some(fixture_theme()));
+        repository
+            .set_setting(SettingValue::Theme(Theme::Custom))
+            .unwrap();
+        assert_eq!(repository.get_theme().unwrap(), Theme::Custom);
+        let foreign_key_rows: i64 = database
+            .with_connection(|connection| {
+                connection.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get(0)
+                })
+            })
+            .unwrap();
+        assert_eq!(foreign_key_rows, 0);
+    }
+
+    #[test]
     fn migration_two_preserves_plan_two_rows_and_rewrites_path_identity() {
         let path = TempDatabasePath::new("migration-two-legacy");
         let mut connection = Connection::open(path.path()).unwrap();
@@ -600,7 +883,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_two_fixture_upgrades_to_six_without_losing_tracks_sources_or_settings() {
+    fn schema_two_fixture_upgrades_to_seven_without_losing_tracks_sources_or_settings() {
         let path = TempDatabasePath::new("migration-five-fixture");
         let mut connection = Connection::open(path.path()).unwrap();
         configure_connection(&connection).unwrap();
@@ -707,7 +990,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_four_fixture_upgrades_to_six_preserving_plan_seven_data() {
+    fn schema_four_fixture_upgrades_to_seven_preserving_plan_seven_data() {
         let path = TempDatabasePath::new("migration-four-to-five");
         let mut connection = Connection::open(path.path()).unwrap();
         configure_connection(&connection).unwrap();
@@ -798,7 +1081,7 @@ mod tests {
         let schema_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema_version, 6);
+        assert_eq!(schema_version, 7);
         let track_count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM tracks WHERE id = ?1",
@@ -859,7 +1142,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_five_fixture_upgrades_to_six_preserving_plan_eight_collections_and_queue() {
+    fn schema_five_fixture_upgrades_to_seven_preserving_plan_eight_collections_and_queue() {
         let path = TempDatabasePath::new("migration-five-to-six");
         let mut connection = Connection::open(path.path()).unwrap();
         configure_connection(&connection).unwrap();
@@ -994,7 +1277,7 @@ mod tests {
         let schema_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema_version, 6);
+        assert_eq!(schema_version, 7);
         for (table, expected) in [
             ("playlists", 3_i64),
             ("playlist_branch_base_items", 1),

@@ -1,3 +1,6 @@
+-- Test fixture for a database shipped before Plan 10 appearance settings.
+-- Keep this independent from migrations/0001_initial.sql so its old CHECK
+-- constraint remains an explicit compatibility contract.
 CREATE TABLE artists (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL CHECK (length(trim(name)) > 0),
