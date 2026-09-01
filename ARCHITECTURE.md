@@ -95,3 +95,33 @@ the probe child.
 The queue is intentionally transient and ID-only. Canonical ordering remains
 stable when shuffle changes; repeat and EOF traversal are service policies.
 Persistent queue state and queue snapshots belong to Plan 08.
+
+## Plan 05 provider search boundary
+
+```text
+React SearchPage / useSearch
+        |
+        v
+typed SearchRequest + SearchId events
+        |
+        v
+SearchService
+  |-- LocalSourceAdapter -> SQLite library records
+  |-- YoutubeSourceAdapter -> bounded yt-dlp metadata process
+  |-- SoundcloudSourceAdapter -> bounded yt-dlp metadata process
+  `-- SpotifySourceAdapter -> PKCE-authenticated catalog metadata (isolated lens)
+```
+
+`SearchService` owns the provider registry, active SearchId, cancellation,
+per-provider timeouts, partial section events, exact completion, stale-event
+identity, provider-local sorting, and a bounded TTL cache. Unified `ALL`,
+`TRACKS`, `ARTISTS`, and `ALBUMS` requests never include Spotify; `LOCAL`,
+`YOUTUBE`, `SOUNDCLOUD`, and `SPOTIFY` select only their specified providers.
+The frontend buffers events that arrive before the native start response and
+rejects events from stale SearchIds. Search results are transient DTOs; no
+provider payload, raw subprocess output, token, or credential is persisted.
+
+Spotify authorization is loopback-only on `127.0.0.1` with a dynamic port and
+S256 PKCE. Access and refresh tokens stay in the Windows credential seam or
+process memory, and catalog search remains disabled until the explicit
+development/compliance gate is enabled.

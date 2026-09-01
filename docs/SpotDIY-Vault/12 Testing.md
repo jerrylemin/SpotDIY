@@ -36,3 +36,20 @@ release executable, indexes two synthetic tracks, exercises transport and
 restart behavior, verifies library persistence with an empty transient queue,
 and verifies no SpotDIY-owned mpv child remains. Temporary media, profiles,
 and test database rows are cleaned after the run.
+
+## Plan 05 verification
+
+The native suite passes 250 unit tests plus one all-target `mpv_smoke`
+integration test. Frontend typecheck, lint, build, and 38 Vitest tests pass.
+The three-width Playwright matrix runs 45 tests through the development-only
+typed browser adapter and covers independent provider loading, partial results,
+stale SearchIds, lens mappings, sort controls, Spotify disablement, long-title
+overflow, and artwork fallback.
+
+`scripts/provider-search-smoke.ps1` passes five focused native Local/playback
+checks. Its opt-in live branch passes YouTube and SoundCloud metadata-only
+searches with 25 entries each and skips Spotify without developer authorization.
+The isolated packaged search smoke passes Local indexing/result rendering,
+missing-provider failure isolation, concurrent cancellation, Spotify gating,
+and owned-process cleanup. No provider credentials, tokens, raw output, or
+provider payloads are retained by the smoke runs.

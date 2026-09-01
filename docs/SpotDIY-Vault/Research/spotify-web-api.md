@@ -1,5 +1,13 @@
 # Spotify Web API research
 
+> Superseded for Plan 05 (2026-09-01): the older Client Credentials
+> recommendation in this research note is historical and is not the active
+> implementation decision. Plan 05 uses Authorization Code with S256 PKCE,
+> loopback-only callback handling, keyring/memory-only tokens, no client
+> secret, and an explicit development/compliance gate. The historical research
+> below is retained for provenance; do not use its former flow recommendation
+> for the current implementation.
+
 ## Date
 
 2026-08-30

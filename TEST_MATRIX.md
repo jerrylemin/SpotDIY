@@ -13,6 +13,23 @@
 | Real mpv | Windows `mpv_smoke` integration gate | Pass with local `v0.41.0-dev-g41f6a6450`; synthetic WAV transport, device, EOF, shutdown, and process-exit behavior verified. |
 | Packaged lifecycle | `scripts/packaged-playback-smoke.ps1` | Pass with release executable: local indexing, playback transport, graceful close, owned-mpv cleanup, restart persistence, and empty transient queue. |
 | Release | `pnpm tauri build` | Pass. Release executable and NSIS bundle built with external `C:\CargoTarget\SpotDIY`; no repository-local `src-tauri\target`. |
-| Provider contracts | Not started | Plan 05+; no provider playback/search is part of Plan 04. |
+| Provider contracts | Plan 05 native adapter/search tests and metadata smoke | Pass: 250 Rust tests include provider registry, local search, yt-dlp adapters, Spotify PKCE/error mapping, timeouts, cancellation, sorting, and cache bounds; opt-in YouTube/SoundCloud metadata smoke returned 25 entries each. |
 | Persistence boundary | Schema and restart smoke | Pass: Plan 04 adds no migration; library roots persist while the transient playback queue restarts empty. |
 | Visual follow-up | Playwright screenshots | The matrix exercises responsive widths, long titles, missing artwork, and accessible controls; later full visual/design QA remains part of the UI/release plans. |
+
+## Plan 05 verification
+
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass;
+  Vitest reports 38 tests across 9 files.
+- Browser: `pnpm exec playwright test` reports 45 passing runs across the
+  1280, 1920, and 2560 viewport projects, including independent loading,
+  partial results, stale IDs, lens isolation, strict Spotify disablement,
+  long-title overflow, and artwork fallback.
+- Native: all-target Rust tests report 250 unit tests plus one integration
+  `mpv_smoke` test; fmt and all-features clippy with warnings denied pass.
+- Runtime: the provider smoke script passes five focused native checks; its
+  opt-in live branch passes YouTube and SoundCloud metadata-only searches with
+  25 entries each and skips Spotify without developer authorization. The
+  isolated packaged search smoke passes Local indexing/result rendering,
+  provider failure isolation, cancellation, Spotify gating, and helper
+  process cleanup.

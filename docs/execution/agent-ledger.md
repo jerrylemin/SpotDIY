@@ -42,3 +42,14 @@ push `main`.
 |---|---|---|---|---|
 | controller | Lead implementation/integration | Playback contracts, mpv backend, service, Tauri IPC, frontend, browser/native smoke, and delivery | `536617d` feature commit; `af66127` review-fix; documentation closure recorded | COMPLETE |
 | Mendel (`01a05761-c31f-7f51-88d5-52902c7ac673`) | Fresh independent read-only reviewer | Whole Plan 04 feature range plus committed remediation `af66127` | Initial review found two medium findings; remediation recheck found no critical/high/correctness-medium findings and returned `PASS`; one low coverage note remains | COMPLETE |
+
+## Plan 05 agent record
+
+The controller retained ownership of the shared provider/search integration,
+verification, documentation, and authorized Git delivery. The Plan 05 slices
+were integrated into one feature boundary; no separate agent edited or pushed
+the shared branch.
+
+| Agent ID | Role | Scope | Result | Status |
+|---|---|---|---|---|
+| controller | Lead implementation/integration | Provider contracts, Local/YouTube/SoundCloud adapters, Spotify PKCE gate, SearchService, frontend search UI, browser/native/live/packaged smoke, and delivery | Plan 05 implementation and verification complete through `ab6169d`; documentation closure follows | COMPLETE |

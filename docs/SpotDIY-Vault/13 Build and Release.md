@@ -24,3 +24,14 @@ Plan 04 final delivery used the external target, passed the release build, and
 passed both the real synthetic-mpv smoke and the isolated packaged playback/
 restart/owned-process cleanup smoke. No repository-local `src-tauri\target`,
 SpotDIY-owned `mpv.exe`, temporary profile, or harness database row remained.
+
+## Plan 05 release and packaged search smoke
+
+The Plan 05 release gate uses the same external
+`C:\CargoTarget\SpotDIY` target and `pnpm tauri build`. The generated release
+executable is exercised by `scripts/provider-search-smoke.ps1 -RunPackaged`
+with a temporary data root, synthetic WAV fixtures, missing yt-dlp/mpv paths,
+and a WebView2 CDP connection. The smoke confirms Local indexing and search,
+independent online-provider failure sections, cancellation, the Spotify gate,
+and cleanup of the packaged process and helper processes. The temporary profile
+is removed after the run and no repository-local Cargo target is retained.

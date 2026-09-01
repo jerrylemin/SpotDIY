@@ -43,3 +43,26 @@ State date: 2026-08-31
 ## Next slice
 
 Plan 05 — Source Adapters and Search. Do not begin Source Fusion or provider playback in that slice until its own boundary is specified.
+
+## Plan 05 delivery snapshot (2026-09-01)
+
+- Delivery status: COMPLETE. Provider adapters, SearchService lifecycle,
+  strict search IPC, frontend search surface, Spotify PKCE gate, browser
+  matrix, native smoke, live metadata smoke, and packaged smoke are delivered
+  through `ab6169d` plus the documentation closure commit.
+- Search execution is concurrent and provider-independent. Local, YouTube, and
+  SoundCloud participate in unified lenses; Spotify is isolated to the Spotify
+  lens and remains disabled without explicit developer authorization.
+- Search IDs, cancellation, timeout/error sections, stale-event rejection,
+  exact completion, provider-local sorting, and bounded cache behavior are
+  covered by native and frontend tests. Early native events are buffered until
+  the start response supplies the active SearchId.
+- Spotify uses loopback Authorization Code with S256 PKCE, memory/keyring token
+  storage, no client secret, and no Spotify data in SQLite.
+- Plan 05 adds no database migration. Cargo/Tauri output remains external at
+  `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` remains absent.
+
+## Next slice after Plan 05
+
+Plan 06 - Source Fusion and Resolver is not started; stop here until that
+boundary is active.

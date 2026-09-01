@@ -124,3 +124,40 @@ below.
 - `graphify update .` — passed once after documentation finalization; derived
   output reports 1,933 nodes, 3,493 edges, and 151 communities, built from
   `af66127d`.
+
+## Plan 05 source adapters and search (2026-09-01)
+
+- `cargo test --manifest-path src-tauri/Cargo.toml search::tests -- --nocapture`
+  - passed: 17 focused SearchService tests.
+- `pnpm typecheck` - passed.
+- `pnpm lint` - passed.
+- `pnpm test` - passed: 38 Vitest tests across 9 files.
+- `pnpm exec playwright test` - passed: 45 runs across the 1280, 1920, and
+  2560 viewport projects.
+- `pnpm build` - passed. Browserslist and Tailwind content notices remained
+  non-fatal.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` - passed.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+  --all-features -- -D warnings` - passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` - passed:
+  250 unit tests and 1 `mpv_smoke` integration test, 0 failures.
+- `scripts/provider-search-smoke.ps1` - passed: five focused native Local/
+  playback checks. With `-RunLiveProviders`, YouTube and SoundCloud each
+  returned 25 structured metadata entries; Spotify was skipped because no
+  developer authorization was available.
+- `scripts/provider-search-smoke.ps1 -RunPackaged` - passed after rebuilding
+  the release binary: isolated Local indexing/result rendering, missing
+  yt-dlp provider failure isolation, concurrent cancellation, Spotify gate,
+  and helper-process cleanup.
+- `pnpm tauri build` - passed with release executable and NSIS bundle under
+  external `C:\CargoTarget\SpotDIY`.
+- `graphify update .` - passed once after the final implementation refresh;
+  Graphify reports 2,741 nodes, 5,049 edges, and 189 communities.
+- `codegraph sync .` and `codegraph status .` - passed; CodeGraph reports 93
+  files, 2,762 nodes, 9,607 edges, and an up-to-date index.
+- The concrete packaged runtime race was fixed by using the Tauri async
+  runtime for SearchService tasks; the frontend now buffers provider events
+  that arrive before the native `start_search` response.
+- `src-tauri\target` was absent; generated Playwright result output was
+  removed after verification. No provider credentials, tokens, raw tool
+  output, or provider payloads were retained in the repository.

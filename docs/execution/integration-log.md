@@ -52,3 +52,23 @@
   correctness/security medium findings. The final frontend/native/release,
   real-mpv, and packaged lifecycle gates passed; the documentation closure is
   recorded in this delivery boundary and remains a separate docs commit.
+
+## Plan 05 source adapters and search
+
+- Integrated the common `SourceAdapter` contract, Local SQLite search,
+  yt-dlp-backed YouTube and SoundCloud metadata search, and isolated Spotify
+  catalog metadata search.
+- Integrated concurrent `SearchService` execution with exact lens mappings,
+  SearchId lifecycle, cancellation, provider timeouts, partial events, exact
+  completion, stale-event handling, provider-local sorting, and a bounded TTL
+  cache.
+- Integrated strict Rust/Zod search DTOs, the 250 ms debounced frontend hook,
+  provider sections, local playback actions, safe provider URL opening, and
+  the development-only browser E2E adapter.
+- Integrated Spotify loopback Authorization Code with S256 PKCE, no client
+  secret, keyring/memory-only token handling, and the explicit disabled-by-
+  default compliance gate. Plan 05 adds no database migration or provider
+  persistence.
+- Integrated browser, native, metadata-only live, and isolated packaged smoke
+  coverage. The packaged harness validates local indexing/result rendering,
+  failure isolation, cancellation, Spotify gating, and owned-process cleanup.

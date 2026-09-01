@@ -36,3 +36,24 @@ outside this boundary.
 
 Plan 05 — Source Adapters and Search. Preserve the local playback boundary and
 do not begin Source Fusion until its own specification is active.
+
+## Plan 05 delivery
+
+Plan 05 is complete. The `SourceAdapter` registry and `SearchService` now
+provide concurrent Local, YouTube, SoundCloud, and isolated Spotify search with
+typed SearchIds, cancellation, timeouts, partial updates, exact completion,
+stale-event rejection, provider-local sorting, and a bounded TTL cache. The
+frontend search surface is strict, debounced, provider-independent, and keeps
+Spotify out of unified lenses. Spotify authorization uses loopback S256 PKCE,
+keyring/memory-only tokens, no client secret, and an explicit disabled-by-
+default gate.
+
+The delivery commits run from `58b5adc` through `ab6169d`; exact test and smoke
+evidence is in `docs/execution/verification-log.md`. Plan 05 adds no database
+migration and leaves Source Fusion, resolver policy, provider playback,
+downloads, and persistent queue behavior for later plans.
+
+## Next atomic task
+
+Plan 06 - Source Fusion and Resolver is not started. Stop here until its
+approved specification is active.

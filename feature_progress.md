@@ -13,7 +13,7 @@ verification gates.
 | Durable application settings | 02 | COMPLETE | 2ec431b | Rust/frontend settings tests | Typed ordinary settings remain separated from future secret storage. |
 | Local library indexing | 03 | COMPLETE | Plan 03 delivery | Rust library tests, frontend tests, packaged smoke | Persistent roots, recursive reconciliation, metadata/artwork, watchers, and managed path ownership are implemented. |
 | mpv playback engine and transient queue | 04 | COMPLETE | af66127 | 117 Rust tests, 26 Vitest tests, 9 Playwright runs, real mpv smoke, packaged smoke | External mpv JSON IPC, serialized PlaybackService, queue policy, recovery, typed IPC, controls, and review fixes are implemented. |
-| Provider adapters and search | 05 | NOT STARTED | — | — | Independent partial results; live calls remain opt-in in CI. |
+| Provider adapters and search | 05 | COMPLETE | `ab6169d` | 250 Rust + 38 Vitest + 45 Playwright; native/live/packaged smoke | Concurrent provider sections, strict SearchId lifecycle, Spotify PKCE gate, and bounded no-persistence search boundary. |
 | Source Fusion and resolver | 06 | NOT STARTED | — | — | Conservative weighted matcher with merge guards. |
 | Downloads | 07 | NOT STARTED | — | — | yt-dlp/FFmpeg provenance and restart recovery. |
 | Playlists, persistent queue, likes, tags | 08 | NOT STARTED | — | — | Persistent queue sections and snapshots belong here. |

@@ -6,9 +6,11 @@ src/                         React/TanStack frontend
   components/                Shared shell, icons, empty states, badges
     library/                 Folder rows, track rows, quality/provenance states
     player/                  Playback controls, progress, volume, audio device menu
+    search/                  Search controls, provider sections, result cards
   hooks/                     TanStack Query and playback hooks
     useLibrary.ts            Library status/page mutations and scan progress
     usePlayback.ts           Playback snapshot and transport mutations
+    useSearch.ts             Debounced provider search lifecycle and stale-ID handling
   pages/                     Route-level screens
   services/                  Typed native IPC boundary
   stores/                    Zustand interaction state
@@ -22,6 +24,9 @@ src-tauri/                   Tauri 2 Rust application
   src/library/               Folder ownership, scanner, metadata, fingerprints, artwork, watcher
   src/media_tools/           mpv discovery, validation, version, and health
   src/playback/              Typed playback contracts, JSON IPC, mpv backend, queue, and controller
+  src/search/                Concurrent provider search, cache, cancellation, and timeouts
+  src/sources/               Local, YouTube, SoundCloud, and Spotify adapters
+  src/credentials/           Keyring-backed and memory-only credential seam
   src/settings/              Typed durable settings repository
   capabilities/              Narrow dialog/opener permissions for the desktop window
   icons/                     Generated Windows/app icon assets
@@ -40,8 +45,8 @@ IPC, and settings modules. `PlaybackService` owns the serialized playback
 controller and transient queue; `MpvBackend` owns the external process and
 JSON IPC; `LibraryService` remains the only source-path ownership boundary.
 The Plan 04 delivery tip is `af66127`; backend commands are enqueue-only and
-generation-stamped events are filtered at the controller boundary.
-`SearchService`, `SourceFusionService`, `SourceResolver`, `DownloadService`,
-`LyricsService`, `PlaylistService`, `QueueService`, `BackupService`, and
-`AnalyticsService` remain later-plan boundaries and have no empty facade
-modules.
+generation-stamped events are filtered at the controller boundary. Plan 05
+adds `SearchService`, the provider adapter boundary, and the credentials seam.
+`SourceFusionService`, `SourceResolver`, `DownloadService`, `LyricsService`,
+`PlaylistService`, `QueueService`, `BackupService`, and `AnalyticsService`
+remain later-plan boundaries and have no empty facade modules.

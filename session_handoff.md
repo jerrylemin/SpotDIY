@@ -1,10 +1,12 @@
 # SpotDIY session handoff
 
-Date: 2026-08-31
+Date: 2026-09-01
 Branch: `main`
 Origin: `https://github.com/jerrylemin/SpotDIY`
 Plan 04 feature commit: `536617d` (`feat: add mpv playback service and queue transport`)
 Plan 04 review-fix commit: `af66127` (`fix: harden mpv playback lifecycle and event ordering`)
+Plan 05 delivery commits: `58b5adc`, `cbcb43e`, `facab20`, `0db5eac`,
+`6c16747`, `51da804`, `905f322`, `0d52f9b`, `9b2a6d8`, and `ab6169d`.
 
 ## Completed
 
@@ -43,6 +45,26 @@ Plan 04 review-fix commit: `af66127` (`fix: harden mpv playback lifecycle and ev
   documentation closure is the final Plan 04 record before remote SHA
   verification.
 
+## Plan 05 completion
+
+- Concurrent Local, YouTube, SoundCloud, and isolated Spotify source adapters
+  are wired through `SearchService`. Unified lenses exclude Spotify; the
+  Spotify lens alone can query Spotify, and only after the explicit PKCE
+  development/compliance gate is enabled.
+- Search uses typed request/result DTOs, SearchIds, provider-local sorting,
+  bounded provider timeouts, partial section updates, exact completion,
+  stale-event rejection, and a maximum-100-entry TTL cache. The browser-only
+  E2E adapter remains gated by `!isTauriRuntime() && import.meta.env.DEV &&
+  VITE_SPOTDIY_E2E === "1"`.
+- Verification for this handoff is recorded in
+  `docs/execution/verification-log.md`: 250 Rust tests, 38 Vitest tests, 45
+  Playwright runs, native synthetic smoke, opt-in YouTube/SoundCloud metadata
+  smoke, and isolated packaged search smoke passed. Spotify live smoke was
+  skipped because no developer authorization was available.
+- Plan 05 adds no migration and stores no provider credentials, tokens, raw
+  tool output, or provider payloads in SQLite. The repository-local Cargo
+  target remains absent.
+
 ## Known limitations
 
 - The queue is intentionally transient. Persistent queue state and queue
@@ -57,5 +79,5 @@ Plan 04 review-fix commit: `af66127` (`fix: harden mpv playback lifecycle and ev
 
 ## Next atomic task
 
-Plan 05 — Source Adapters and Search. Preserve the local playback boundary and
-do not begin Source Fusion until its own specification is active.
+Plan 06 - Source Fusion and Resolver is not started. Preserve the local
+playback and provider boundaries until that specification is active.
