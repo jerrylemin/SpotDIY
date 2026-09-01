@@ -6,25 +6,46 @@ import { useUiStore } from "../stores/ui-store";
 import { CommandPalette } from "../components/shell/CommandPalette";
 import { PlayerBar } from "../components/shell/PlayerBar";
 import { QueueDrawer } from "../components/queue/QueueDrawer";
+import { SearchResultInspector, TrackInspector } from "../components/inspector/TrackInspector";
 import { Sidebar } from "../components/shell/Sidebar";
 import { Topbar } from "../components/shell/Topbar";
 
 export function AppShell() {
   const appStatus = useAppStatus();
   const toggleCommandPalette = useUiStore((state) => state.toggleCommandPalette);
-  const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         toggleCommandPalette();
+        return;
       }
-      if (event.key === "Escape") setCommandPaletteOpen(false);
+      if (event.key !== "Escape" || event.defaultPrevented) {
+        return;
+      }
+
+      const state = useUiStore.getState();
+      if (state.commandPaletteOpen) {
+        event.preventDefault();
+        state.setCommandPaletteOpen(false);
+      } else if (state.inspector.kind !== "closed") {
+        event.preventDefault();
+        state.closeInspector();
+      } else if (state.queueDrawerOpen) {
+        event.preventDefault();
+        state.setQueueDrawerOpen(false);
+      } else if (state.playerMode === "expanded") {
+        event.preventDefault();
+        state.setPlayerMode("standard");
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [setCommandPaletteOpen, toggleCommandPalette]);
+  }, [toggleCommandPalette]);
+
+  const inspector = useUiStore((state) => state.inspector);
+  const closeInspector = useUiStore((state) => state.closeInspector);
 
   return (
     <div className="app-shell">
@@ -35,6 +56,8 @@ export function AppShell() {
         <PlayerBar />
         <QueueDrawer />
       </div>
+      {inspector.kind === "track" ? <TrackInspector manageEscape onClose={closeInspector} trackId={inspector.trackId} /> : null}
+      {inspector.kind === "search" ? <SearchResultInspector manageEscape onClose={closeInspector} result={inspector.result} /> : null}
       <CommandPalette />
     </div>
   );

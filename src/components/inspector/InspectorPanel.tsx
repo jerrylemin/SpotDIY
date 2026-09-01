@@ -15,26 +15,44 @@ export interface InspectorPanelProps {
   sections: readonly InspectorSection[];
   onClose: () => void;
   open?: boolean;
+  manageEscape?: boolean;
 }
 
-export function InspectorPanel({ onClose, open = true, sections, subtitle, title }: InspectorPanelProps) {
+export function InspectorPanel({ manageEscape = false, onClose, open = true, sections, subtitle, title }: InspectorPanelProps) {
   const panelRef = useRef<HTMLElement>(null);
+  const originRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
 
   useEffect(() => {
     if (!open) {
       return undefined;
     }
+    originRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      if (originRef.current?.isConnected) {
+        originRef.current.focus();
+      }
+      originRef.current = null;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
     panelRef.current?.focus();
+    if (manageEscape) {
+      return undefined;
+    }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         onClose();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, open]);
+  }, [manageEscape, onClose, open]);
 
   if (!open) {
     return null;

@@ -600,6 +600,56 @@ export interface TrackCollectionState {
   inInbox: boolean;
 }
 
+export interface TrackInspectorCollectionState {
+  liked: boolean;
+  rating: number | null;
+  tags: Tag[];
+  playlistMemberships: PlaylistMembership[];
+  inInbox: boolean;
+}
+
+export interface TrackInspectorQuality {
+  container: string | null;
+  codec: string | null;
+  bitrateKbps: number | null;
+  sampleRateHz: number | null;
+  bitDepth: number | null;
+}
+
+export interface TrackInspectorCapabilities {
+  search: boolean;
+  metadata: boolean;
+  artwork: boolean;
+  playback: boolean;
+  lyrics: boolean;
+  downloads: boolean;
+}
+
+export interface TrackInspectorSource {
+  sourceId: SourceId;
+  provider: ProviderKind;
+  providerItemId: string;
+  available: boolean;
+  availabilityDetail: string | null;
+  capabilities: TrackInspectorCapabilities;
+  durationMs: number | null;
+  versionQualifiers: VersionQualifier[];
+  quality: TrackInspectorQuality;
+  canonicalUrl: string | null;
+}
+
+export interface TrackInspector {
+  trackId: TrackId;
+  title: string;
+  artists: string[];
+  album: string | null;
+  durationMs: number | null;
+  versionQualifiers: VersionQualifier[];
+  preferredSourceId: SourceId | null;
+  collectionState: TrackInspectorCollectionState;
+  sources: TrackInspectorSource[];
+}
+
 export type PlaylistErrorCode =
   | "invalidName"
   | "invalidTagName"

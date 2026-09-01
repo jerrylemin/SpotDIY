@@ -66,6 +66,7 @@ import type {
   Tag,
   TagId,
   TrackCollectionState,
+  TrackInspector,
   QueueSection,
   QueueSnapshot,
   QueueSnapshotEntryId,
@@ -478,6 +479,49 @@ const versionQualifierSchema = z.enum([
   "nightcore",
   "unknown",
 ]);
+const trackInspectorQualitySchema = z.object({
+  container: z.string().nullable(),
+  codec: z.string().nullable(),
+  bitrateKbps: z.number().int().nonnegative().nullable(),
+  sampleRateHz: z.number().int().nonnegative().nullable(),
+  bitDepth: z.number().int().nonnegative().nullable(),
+}).strict();
+const trackInspectorSourceSchema = z.object({
+  sourceId: sourceIdSchema,
+  provider: providerKindSchema,
+  providerItemId: z.string().min(1),
+  available: z.boolean(),
+  availabilityDetail: z.string().nullable(),
+  capabilities: z.object({
+    search: z.boolean(),
+    metadata: z.boolean(),
+    artwork: z.boolean(),
+    playback: z.boolean(),
+    lyrics: z.boolean(),
+    downloads: z.boolean(),
+  }).strict(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  versionQualifiers: z.array(versionQualifierSchema),
+  quality: trackInspectorQualitySchema,
+  canonicalUrl: z.string().url().nullable(),
+}).strict();
+const trackInspectorSchema = z.object({
+  trackId: trackIdSchema,
+  title: z.string(),
+  artists: z.array(z.string()),
+  album: z.string().nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  versionQualifiers: z.array(versionQualifierSchema),
+  preferredSourceId: sourceIdSchema.nullable(),
+  collectionState: z.object({
+    liked: z.boolean(),
+    rating: z.number().int().min(1).max(5).nullable(),
+    tags: z.array(tagSchema),
+    playlistMemberships: z.array(playlistMembershipSchema),
+    inInbox: z.boolean(),
+  }).strict(),
+  sources: z.array(trackInspectorSourceSchema),
+}).strict();
 const fusionDecisionSchema = z.enum(["already_unified", "forced_merge", "auto_merge", "forced_split", "rejected", "excluded"]);
 const fusionReasonSchema = z.enum([
   "matched",
@@ -1717,6 +1761,82 @@ function browserPreviewLibraryPage(request: LibraryPageRequest): LibraryPage {
   };
 }
 
+function browserPreviewTrackInspector(trackId: TrackId): TrackInspector {
+  const track = e2eTrackMap.get(trackId);
+  if (!track) {
+    throw new IpcError("That track is not available in the browser preview.");
+  }
+
+  return {
+    trackId: track.trackId,
+    title: track.title,
+    artists: track.artists,
+    album: track.album,
+    durationMs: track.durationMs,
+    versionQualifiers: ["standard"],
+    preferredSourceId: track.sourceId,
+    collectionState: {
+      liked: false,
+      rating: null,
+      tags: [],
+      playlistMemberships: [],
+      inInbox: false,
+    },
+    sources: [
+      {
+        sourceId: track.sourceId,
+        provider: "local",
+        providerItemId: track.trackId,
+        available: track.available,
+        availabilityDetail: track.availabilityDetail,
+        capabilities: {
+          search: true,
+          metadata: true,
+          artwork: Boolean(track.artworkPath),
+          playback: track.available,
+          lyrics: false,
+          downloads: false,
+        },
+        durationMs: track.durationMs,
+        versionQualifiers: ["standard"],
+        quality: {
+          container: track.container,
+          codec: track.codec,
+          bitrateKbps: track.bitrateKbps,
+          sampleRateHz: track.sampleRateHz,
+          bitDepth: track.bitDepth,
+        },
+        canonicalUrl: null,
+      },
+      {
+        sourceId: e2eAlternateSourceId(track),
+        provider: "youtube",
+        providerItemId: "spotdiy-e2e",
+        available: true,
+        availabilityDetail: "Online playback is not implemented in Plan 11.",
+        capabilities: {
+          search: true,
+          metadata: true,
+          artwork: false,
+          playback: false,
+          lyrics: false,
+          downloads: true,
+        },
+        durationMs: track.durationMs,
+        versionQualifiers: ["standard"],
+        quality: {
+          container: null,
+          codec: null,
+          bitrateKbps: null,
+          sampleRateHz: null,
+          bitDepth: null,
+        },
+        canonicalUrl: "https://www.youtube.com/watch?v=spotdiy-e2e",
+      },
+    ],
+  };
+}
+
 export const SEARCH_PROVIDER_UPDATE_EVENT = "search://provider-update";
 export const SEARCH_COMPLETED_EVENT = "search://complete";
 export const SPOTIFY_AUTH_STATE_EVENT = "spotify://auth-state";
@@ -2214,6 +2334,30 @@ export async function getSourceResolution(trackId: TrackId): Promise<SourceResol
       throw error;
     }
     throw new IpcError("SpotDIY could not resolve a playback source.", error);
+  }
+}
+
+export function parseTrackInspector(value: unknown): TrackInspector {
+  return trackInspectorSchema.parse(value) as TrackInspector;
+}
+
+export async function getTrackInspector(trackId: TrackId): Promise<TrackInspector> {
+  try {
+    const parsedTrackId = trackIdSchema.parse(trackId);
+    if (!isTauriRuntime()) {
+      if (isPlaybackE2EAdapterEnabled()) {
+        return parseTrackInspector(browserPreviewTrackInspector(parsedTrackId));
+      }
+      throw new IpcError("Track Inspector requires the native SpotDIY runtime.");
+    }
+    return parseTrackInspector(await invoke<unknown>("get_track_inspector", {
+      trackId: parsedTrackId,
+    }));
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not read that track inspector.", error);
   }
 }
 

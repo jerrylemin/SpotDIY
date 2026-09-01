@@ -4,6 +4,7 @@ pub mod db;
 pub mod domain;
 pub mod downloads;
 pub mod fusion;
+pub mod inspector;
 pub mod ipc;
 pub mod library;
 pub mod lyrics;
@@ -25,6 +26,7 @@ use bookmarks::{AbLoopPreset, Bookmark, BookmarkErrorDto, BookmarkService};
 use db::{standard_database_path, Database};
 use downloads::{DownloadMode, DownloadService, DownloadSnapshot, DownloadTask, DownloadTaskId};
 use fusion::{FusionEvaluation, FusionOverride, FusionOverrideDecision, SourceFusionService};
+use inspector::{TrackInspector, TrackInspectorService};
 use ipc::{app_status_with_runtime, source_capabilities, AppStatus, ProviderCapabilities};
 use library::{LibraryService, ProgressSink, LIBRARY_PROGRESS_EVENT};
 use lyrics::{LyricsCandidate, LyricsDocument, LyricsErrorDto, LyricsService, ManualLyricsMode};
@@ -66,6 +68,7 @@ struct AppState {
     spotify_auth: sources::spotify::SpotifyAuthService,
     fusion: SourceFusionService,
     source_resolver: SourceResolver,
+    inspector: TrackInspectorService,
 }
 
 #[tauri::command]
@@ -219,6 +222,17 @@ fn get_source_resolution(
     state
         .source_resolver
         .resolve(&track)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_track_inspector(
+    track_id: TrackId,
+    state: State<'_, AppState>,
+) -> Result<TrackInspector, String> {
+    state
+        .inspector
+        .get_track_inspector(track_id)
         .map_err(|error| error.to_string())
 }
 
@@ -1250,6 +1264,8 @@ pub fn run() {
             let search = search::SearchService::new(adapters);
             let fusion = SourceFusionService::new(database.clone());
             let source_resolver = SourceResolver::new(library.clone());
+            let playlists = PlaylistService::new(library.database().clone());
+            let inspector = TrackInspectorService::new(database.clone(), playlists.clone());
             let playback_sink = {
                 let app_handle = app.handle().clone();
                 Arc::new(move |snapshot: PlaybackSnapshot| {
@@ -1279,11 +1295,12 @@ pub fn run() {
                 playback,
                 lyrics,
                 bookmarks,
-                playlists: PlaylistService::new(library.database().clone()),
+                playlists,
                 search,
                 spotify_auth,
                 fusion,
                 source_resolver,
+                inspector,
             });
             library.start_all_scans(sink)?;
             Ok(())
@@ -1304,6 +1321,7 @@ pub fn run() {
             set_fusion_override,
             clear_fusion_override,
             get_source_resolution,
+            get_track_inspector,
             get_settings_snapshot,
             set_setting,
             get_download_snapshot,
