@@ -29,6 +29,11 @@ export interface UseSearchOptions {
 
 export type SearchSections = Partial<Record<ProviderKind, ProviderSearchSection>>;
 
+interface PendingSearchStart {
+  sections: Map<SearchId, SearchSections>;
+  completedSearchIds: Set<SearchId>;
+}
+
 export interface UseSearchResult {
   sections: SearchSections;
   activeSearchId: SearchId | null;
@@ -115,6 +120,7 @@ export function useSearch({ query, lens, sortField, sortDirection, limit = 25 }:
   const [error, setError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const activeSearchIdRef = useRef<SearchId | null>(null);
+  const pendingSearchStartRef = useRef<PendingSearchStart | null>(null);
   const generationRef = useRef(0);
   const debounceTimerRef = useRef<number | null>(null);
 
@@ -125,23 +131,38 @@ export function useSearch({ query, lens, sortField, sortDirection, limit = 25 }:
 
     void Promise.all([
       subscribeToSearchProviderUpdates((event) => {
-        if (!mounted || activeSearchIdRef.current !== event.searchId) {
+        if (!mounted) {
           return;
         }
-        setSections((current) => ({ ...current, [event.section.provider]: event.section }));
+        if (activeSearchIdRef.current === event.searchId) {
+          setSections((current) => ({ ...current, [event.section.provider]: event.section }));
+          return;
+        }
+        const pendingStart = pendingSearchStartRef.current;
+        if (pendingStart) {
+          const sections = pendingStart.sections.get(event.searchId) ?? {};
+          pendingStart.sections.set(event.searchId, {
+            ...sections,
+            [event.section.provider]: event.section,
+          });
+        }
       }, (bridgeError) => {
         if (mounted) {
           setError(bridgeError.message);
         }
       }),
       subscribeToSearchCompleted((event) => {
-        if (!mounted || activeSearchIdRef.current !== event.searchId) {
+        if (!mounted) {
           return;
         }
-        activeSearchIdRef.current = null;
-        setActiveSearchId(null);
-        setIsSearching(false);
-        setIsDebouncing(false);
+        if (activeSearchIdRef.current === event.searchId) {
+          activeSearchIdRef.current = null;
+          setActiveSearchId(null);
+          setIsSearching(false);
+          setIsDebouncing(false);
+          return;
+        }
+        pendingSearchStartRef.current?.completedSearchIds.add(event.searchId);
       }, (bridgeError) => {
         if (mounted) {
           setError(bridgeError.message);
@@ -174,6 +195,7 @@ export function useSearch({ query, lens, sortField, sortDirection, limit = 25 }:
     const normalizedQuery = query.trim();
     const previousSearchId = activeSearchIdRef.current;
     activeSearchIdRef.current = null;
+    pendingSearchStartRef.current = null;
     setActiveSearchId(null);
     setSections({});
     setError(null);
@@ -210,13 +232,34 @@ export function useSearch({ query, lens, sortField, sortDirection, limit = 25 }:
       }
       setIsDebouncing(false);
       setSections(loadingSections(lens));
+      const pendingStart: PendingSearchStart = {
+        sections: new Map(),
+        completedSearchIds: new Set(),
+      };
+      pendingSearchStartRef.current = pendingStart;
       void startSearch(request).then((started) => {
+        if (pendingSearchStartRef.current === pendingStart) {
+          pendingSearchStartRef.current = null;
+        }
         if (generationRef.current !== generation) {
           return;
         }
         activeSearchIdRef.current = started.searchId;
         setActiveSearchId(started.searchId);
+        const bufferedSections = pendingStart.sections.get(started.searchId);
+        if (bufferedSections) {
+          setSections((current) => ({ ...current, ...bufferedSections }));
+        }
+        if (pendingStart.completedSearchIds.has(started.searchId)) {
+          activeSearchIdRef.current = null;
+          setActiveSearchId(null);
+          setIsSearching(false);
+          setIsDebouncing(false);
+        }
       }).catch((searchError) => {
+        if (pendingSearchStartRef.current === pendingStart) {
+          pendingSearchStartRef.current = null;
+        }
         if (generationRef.current !== generation) {
           return;
         }

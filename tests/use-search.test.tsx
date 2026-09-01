@@ -71,6 +71,41 @@ describe("useSearch", () => {
     expect(result.current.sections.local?.state).toBe("ready");
   });
 
+  it("applies native events emitted before start_search resolves", async () => {
+    vi.useFakeTimers();
+    let providerListener: ((event: ReturnType<typeof readyEvent>) => void) | undefined;
+    let completedListener: ((event: { searchId: string }) => void) | undefined;
+    let resolveStart: ((value: { searchId: string }) => void) | undefined;
+    subscribeProviderMock.mockImplementation(async (listener: typeof providerListener) => {
+      providerListener = listener;
+      return () => undefined;
+    });
+    subscribeCompletedMock.mockImplementation(async (listener: typeof completedListener) => {
+      completedListener = listener;
+      return () => undefined;
+    });
+    startSearchMock.mockImplementation(() => new Promise((resolve) => {
+      resolveStart = resolve;
+    }));
+
+    const { result } = renderHook(() => useSearch({ query: "signal", ...requestOptions }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(startSearchMock).toHaveBeenCalledOnce();
+
+    act(() => providerListener?.(readyEvent("search-native-race")));
+    act(() => completedListener?.({ searchId: "search-native-race" }));
+    await act(async () => {
+      resolveStart?.({ searchId: "search-native-race" });
+      await Promise.resolve();
+    });
+
+    expect(result.current.sections.local?.state).toBe("ready");
+    expect(result.current.activeSearchId).toBeNull();
+    expect(result.current.isSearching).toBe(false);
+  });
+
   it("cancels the previous active search when a query is replaced", async () => {
     vi.useFakeTimers();
     let providerListener: ((event: ReturnType<typeof readyEvent>) => void) | undefined;
