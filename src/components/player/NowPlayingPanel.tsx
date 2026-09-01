@@ -10,6 +10,7 @@ import { useUiStore } from "../../stores/ui-store";
 import { SourceSwitcher } from "./SourceSwitcher";
 import { PlaybackControls } from "./PlaybackControls";
 import { ProgressControl } from "./ProgressControl";
+import { VolumeControl } from "./VolumeControl";
 import { SpotIcon } from "../icons/SpotIcon";
 
 function formatDuration(durationMs: number | null): string {
@@ -92,6 +93,7 @@ export function NowPlayingPanel() {
             onSwitch={(sourceId) => { if (snapshot.currentTrackId) void playback.switchSource(snapshot.currentTrackId, sourceId); }}
             sources={snapshot.sources}
           />
+          <VolumeControl disabled={snapshot.phase === "failed" || snapshot.phase === "recovering"} muted={snapshot.muted} onSetVolume={(volumePercent) => { void playback.setVolume(volumePercent); }} onToggleMuted={() => { void playback.toggleMuted(); }} pending={playback.pending} volumePercent={snapshot.volumePercent} />
         </div>
       </div>
 

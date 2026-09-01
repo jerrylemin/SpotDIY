@@ -123,7 +123,7 @@ function SourceCard({
   source,
 }: {
   current: boolean;
-  onAction: (source: TrackInspectorSource, action: "play" | "switch" | "reveal" | "open" | "download" | "lyrics") => void;
+  onAction: (source: TrackInspectorSource, action: "play" | "play-next" | "queue" | "switch" | "reveal" | "open" | "download" | "lyrics") => void;
   source: TrackInspectorSource;
 }) {
   const canPlay = source.available && source.capabilities.playback && (isTauriRuntime() || previewPlaybackEnabled());
@@ -162,6 +162,8 @@ function SourceCard({
         ) : (
           <button className="button button-primary button-small" disabled={!canPlay} onClick={() => onAction(source, "switch")} title={canPlay ? "Switch the current track to this source" : playReason} type="button">Switch source</button>
         )}
+        <button className="button button-quiet button-small" disabled={!canPlay} onClick={() => onAction(source, "play-next")} title={canPlay ? "Play this source after the current track" : playReason} type="button">Play next</button>
+        <button className="button button-quiet button-small" disabled={!canPlay} onClick={() => onAction(source, "queue")} title={canPlay ? "Add this source to the persistent queue" : playReason} type="button">Add to queue</button>
         <button className="button button-quiet button-small" disabled={!canReveal} onClick={() => onAction(source, "reveal")} title={canReveal ? "Reveal this managed local file" : source.provider === "local" ? "Local file reveal requires the native app and an available file." : "Only local sources have managed file locations."} type="button">Open location</button>
         <button className="button button-quiet button-small" disabled={!canOpen} onClick={() => onAction(source, "open")} title={canOpen ? "Open the validated provider source" : "No validated provider URL is available."} type="button">Open source</button>
         <button className="button button-quiet button-small" disabled={!canDownload} onClick={() => onAction(source, "download")} title={canDownload ? "Queue this managed provider download" : "Downloads require a supported YouTube or SoundCloud source in the native app."} type="button"><SpotIcon name="download" size={13} /> Download</button>
@@ -211,10 +213,10 @@ function QualityState({ inspector, currentSourceId }: { inspector: TrackInspecto
   );
 }
 
-function inspectorSections(inspector: TrackInspectorDto, currentSourceId: string | null, sourceAction: (source: TrackInspectorSource, action: "play" | "switch" | "reveal" | "open" | "download" | "lyrics") => void): InspectorSection[] {
+function inspectorSections(inspector: TrackInspectorDto, currentSourceId: string | null, sourceAction: (source: TrackInspectorSource, action: "play" | "play-next" | "queue" | "switch" | "reveal" | "open" | "download" | "lyrics") => void, downloadMode: DownloadMode, onDownloadModeChange: (mode: DownloadMode) => void): InspectorSection[] {
   return [
     { id: "overview", title: "OVERVIEW", content: <Overview inspector={inspector} /> },
-    { id: "sources", title: "SOURCES", content: <div className="inspector-source-list">{inspector.sources.map((source) => <SourceCard current={source.sourceId === currentSourceId} key={source.sourceId} onAction={sourceAction} source={source} />)}</div> },
+    { id: "sources", title: "SOURCES", content: <div className="inspector-source-list"><label className="inspector-download-control">Provider download format<select aria-label="Download mode" onChange={(event) => onDownloadModeChange(event.target.value as DownloadMode)} value={downloadMode}><option value="audio">Audio</option><option value="video">Video</option></select></label>{inspector.sources.map((source) => <SourceCard current={source.sourceId === currentSourceId} key={source.sourceId} onAction={sourceAction} source={source} />)}</div> },
     { id: "quality", title: "QUALITY", content: <QualityState currentSourceId={currentSourceId} inspector={inspector} /> },
     { id: "collection", title: "COLLECTION", content: <CollectionState inspector={inspector} /> },
     { id: "capabilities", title: "CAPABILITIES", content: <div className="inspector-capability-source-list">{inspector.sources.map((source) => <div className="inspector-capability-source" key={source.sourceId}><div><ProviderBadge kind={source.provider} /><strong>{providerName(source.provider)}</strong></div><CapabilityList source={source} /></div>)}</div> },
@@ -231,11 +233,15 @@ export function TrackInspector({ manageEscape = false, onClose, trackId }: Track
   const currentTrack = playback.snapshot.currentTrackId === trackId;
   const currentSourceId = currentTrack ? playback.snapshot.currentSourceId : null;
 
-  const sourceAction = useCallback(async (source: TrackInspectorSource, action: "play" | "switch" | "reveal" | "open" | "download" | "lyrics") => {
+  const sourceAction = useCallback(async (source: TrackInspectorSource, action: "play" | "play-next" | "queue" | "switch" | "reveal" | "open" | "download" | "lyrics") => {
     setActionError(null);
     try {
       if (action === "play") {
         await playback.playNow(trackId, source.sourceId);
+      } else if (action === "play-next") {
+        await playback.playNext(trackId, source.sourceId);
+      } else if (action === "queue") {
+        await playback.addToQueue(trackId, source.sourceId);
       } else if (action === "switch") {
         await playback.switchSource(trackId, source.sourceId);
       } else if (action === "reveal") {
@@ -252,7 +258,7 @@ export function TrackInspector({ manageEscape = false, onClose, trackId }: Track
     }
   }, [downloadMode, navigate, playback, trackId]);
 
-  const sections = useMemo(() => inspector ? inspectorSections(inspector, currentSourceId, sourceAction) : [], [currentSourceId, inspector, sourceAction]);
+  const sections = useMemo(() => inspector ? inspectorSections(inspector, currentSourceId, sourceAction, downloadMode, setDownloadMode) : [], [currentSourceId, downloadMode, inspector, sourceAction]);
 
   if (query.isLoading) {
     return <InspectorPanel manageEscape={manageEscape} onClose={onClose} sections={[{ id: "loading", title: "OVERVIEW", content: <div className="inspector-pending" role="status"><SpotIcon name="spark" size={17} /> Reading track details…</div> }]} subtitle="Local track" title="Track Inspector" />;
@@ -264,9 +270,6 @@ export function TrackInspector({ manageEscape = false, onClose, trackId }: Track
   return (
     <>
       {actionError ? <div className="inspector-floating-message" role="alert">{actionError}</div> : null}
-      <div className="inspector-download-mode" aria-label="Download mode">
-        <label>Provider download<select onChange={(event) => setDownloadMode(event.target.value as DownloadMode)} value={downloadMode}><option value="audio">Audio</option><option value="video">Video</option></select></label>
-      </div>
       <InspectorPanel manageEscape={manageEscape} onClose={onClose} sections={sections} subtitle={`${inspector.artists.join(" · ") || "Unknown artist"} · ${inspector.sources.length} sources`} title={inspector.title} />
     </>
   );

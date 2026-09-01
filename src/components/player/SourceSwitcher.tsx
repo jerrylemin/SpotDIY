@@ -24,7 +24,7 @@ export function SourceSwitcher({ currentSourceId, disabled = false, onSwitch, so
       <span className="player-source-switcher-control">
         <ProviderBadge kind={selectedSource.provider} />
         <select aria-label="Playback source" disabled={disabled} onChange={(event) => onSwitch(event.target.value as SourceId)} title={selectedSource.availabilityDetail ?? "Choose an available playback source"} value={currentSourceId ?? selectedSource.sourceId}>
-          {sources.map((source) => <option disabled={!source.available} key={source.sourceId} value={source.sourceId}>{sourceLabel(source)}{source.available ? "" : " · unavailable"}</option>)}
+          {sources.map((source) => <option disabled={!source.available} key={source.sourceId} title={source.availabilityDetail ?? undefined} value={source.sourceId}>{sourceLabel(source)}{source.available ? "" : " · unavailable"}</option>)}
         </select>
       </span>
     </label>
