@@ -34,8 +34,8 @@ test.describe("provider search browser contract", () => {
     await openSearch(page);
     await typeSearch(page, "signal");
 
-    await expect(provider(page, "local").locator(".search-result-card").first()).toBeVisible();
     await expect(provider(page, "youtube").locator(".provider-result-loading")).toBeVisible();
+    await expect(provider(page, "local").locator(".search-result-card").first()).toBeVisible();
   });
 
   test("youtube_completion", async ({ page }) => {

@@ -1396,7 +1396,7 @@ function startBrowserSearch(request: SearchRequest): SearchStarted {
       if (run.pending === 0) {
         finishBrowserSearch(run);
       }
-    }, provider === "local" ? 45 : provider === "soundcloud" ? 90 : 130);
+    }, provider === "local" ? 45 : provider === "soundcloud" ? 180 : 500);
     run.timers.push(timer);
   });
 

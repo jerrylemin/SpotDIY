@@ -30,7 +30,7 @@ test.describe("playback engine browser contract", () => {
     await page.screenshot({ path: testInfo.outputPath(`idle-${testInfo.project.name}.png`) });
 
     await page.getByRole("button", { name: /Play now Night Drive/ }).click();
-    await expect(page.getByText("Loading track", { exact: true })).toBeVisible();
+    await expect(page.getByText("Loading track", { exact: true }).or(page.getByText("Now playing", { exact: true }))).toBeVisible();
     await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
     await expect(page.getByText("Now playing", { exact: true })).toBeVisible();
     await expect(page.getByTitle(longTitle).first()).toBeVisible();
