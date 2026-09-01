@@ -134,9 +134,12 @@ export interface ProviderStatus {
   label: string;
   configured: boolean;
   available: boolean;
+  runtimeStatus: ProviderRuntimeStatus;
   capabilities: SourceCapabilities;
   detail: string;
 }
+
+export type ProviderRuntimeStatus = "unknown" | "ready" | "missing" | "unsupported" | "broken" | "disabled";
 
 export interface AppStatus {
   version: string;
@@ -146,6 +149,92 @@ export interface AppStatus {
   tracksIndexed: number;
   musicFolders: string[];
   providers: ProviderStatus[];
+}
+
+export type SearchId = string & { readonly __brand: "SearchId" };
+export type SearchLens = "all" | "tracks" | "artists" | "albums" | "playlists" | "local" | "youtube" | "soundcloud" | "spotify";
+export type SearchEntityKind = "track" | "artist" | "album" | "playlist";
+export type SearchSortField = "relevance" | "popularity" | "newest" | "oldest" | "duration" | "dateAdded" | "downloaded" | "audioQuality";
+export type SearchSortDirection = "ascending" | "descending";
+
+export interface SearchRequest {
+  query: string;
+  lens: SearchLens;
+  sortField: SearchSortField;
+  sortDirection: SearchSortDirection;
+  limit: number;
+}
+
+export type EngagementKind = "views" | "plays";
+export type PartialDatePrecision = "year" | "month" | "day";
+
+export interface PartialDate {
+  value: string;
+  precision: PartialDatePrecision;
+}
+
+export interface SearchResult {
+  provider: ProviderKind;
+  entityKind: SearchEntityKind;
+  providerItemId: string;
+  canonicalUrl: string | null;
+  title: string;
+  artists: string[];
+  album: string | null;
+  durationMs: number | null;
+  artworkUrl: string | null;
+  publishedAt: PartialDate | null;
+  engagementCount: number | null;
+  engagementKind: EngagementKind | null;
+  explicit: boolean | null;
+  localTrackId: TrackId | null;
+  localSourceId: SourceId | null;
+  originalRank: number;
+}
+
+export type ProviderSearchState = "idle" | "loading" | "ready" | "failed" | "cancelled";
+export type ProviderSearchErrorCode = "unavailable" | "timeout" | "cancelled" | "rate_limited" | "quota_exceeded" | "disabled" | "invalid_response" | "failed";
+
+export interface ProviderSearchError {
+  code: ProviderSearchErrorCode;
+  detail: string | null;
+  retryAfterSeconds: number | null;
+}
+
+export interface ProviderSearchSection {
+  provider: ProviderKind;
+  state: ProviderSearchState;
+  results: SearchResult[];
+  error: ProviderSearchError | null;
+}
+
+export interface ProviderSearchEvent {
+  searchId: SearchId;
+  section: ProviderSearchSection;
+}
+
+export interface SearchStarted {
+  searchId: SearchId;
+}
+
+export interface SearchCompleted {
+  searchId: SearchId;
+}
+
+export type SpotifyAuthState = "disabled" | "setup_required" | "connected" | "unavailable";
+
+export interface SpotifySetupStatus {
+  enabled: boolean;
+  configured: boolean;
+  available: boolean;
+  state: SpotifyAuthState;
+  market: string | null;
+  detail: string | null;
+}
+
+export interface SpotifyAuthorizationRequest {
+  authorizationUrl: string;
+  redirectUri: string;
 }
 
 export type LibraryFolderStatus = "idle" | "queued" | "scanning" | "complete" | "failed";

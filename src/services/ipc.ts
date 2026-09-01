@@ -19,11 +19,21 @@ import type {
   PlaybackSnapshot,
   PlaybackSourceOption,
   ProviderKind,
+  ProviderSearchEvent,
+  ProviderSearchSection,
   QueueEntryId,
   RepeatMode,
+  SearchCompleted,
+  SearchId,
+  SearchLens,
+  SearchRequest,
+  SearchResult,
+  SearchStarted,
   ScanProgress,
   SettingValue,
   SettingsSnapshot,
+  SpotifyAuthorizationRequest,
+  SpotifySetupStatus,
   TrackPlaybackRequest,
   TrackId,
   SourceId,
@@ -40,7 +50,7 @@ const sourceCapabilitiesSchema = z.object({
   popularity: z.boolean(),
   releaseDate: z.boolean(),
   lyricsMetadata: z.boolean(),
-});
+}).strict();
 
 const appStatusSchema = z.object({
   version: z.string(),
@@ -55,11 +65,78 @@ const appStatusSchema = z.object({
       label: z.string(),
       configured: z.boolean(),
       available: z.boolean(),
+      runtimeStatus: z.enum(["unknown", "ready", "missing", "unsupported", "broken", "disabled"]),
       capabilities: sourceCapabilitiesSchema,
       detail: z.string(),
-    }),
+    }).strict(),
   ),
-});
+}).strict();
+
+const searchIdSchema = z.string().min(1).transform((value) => value as SearchId);
+const searchLensSchema = z.enum(["all", "tracks", "artists", "albums", "playlists", "local", "youtube", "soundcloud", "spotify"]);
+const searchEntityKindSchema = z.enum(["track", "artist", "album", "playlist"]);
+const searchSortFieldSchema = z.enum(["relevance", "popularity", "newest", "oldest", "duration", "dateAdded", "downloaded", "audioQuality"]);
+const searchSortDirectionSchema = z.enum(["ascending", "descending"]);
+const searchRequestSchema = z.object({
+  query: z.string().trim().min(1).max(256),
+  lens: searchLensSchema,
+  sortField: searchSortFieldSchema,
+  sortDirection: searchSortDirectionSchema,
+  limit: z.number().int().min(1).max(50),
+}).strict();
+const partialDateSchema = z.object({
+  value: z.string().min(4),
+  precision: z.enum(["year", "month", "day"]),
+}).strict();
+const searchResultSchema = z.object({
+  provider: providerKindSchema,
+  entityKind: searchEntityKindSchema,
+  providerItemId: z.string().min(1),
+  canonicalUrl: z.string().url().nullable(),
+  title: z.string(),
+  artists: z.array(z.string()),
+  album: z.string().nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  artworkUrl: z.string().url().nullable(),
+  publishedAt: partialDateSchema.nullable(),
+  engagementCount: z.number().int().nonnegative().nullable(),
+  engagementKind: z.enum(["views", "plays"]).nullable(),
+  explicit: z.boolean().nullable(),
+  localTrackId: z.string().min(1).transform((value) => value as TrackId).nullable(),
+  localSourceId: z.string().min(1).transform((value) => value as SourceId).nullable(),
+  originalRank: z.number().int().nonnegative(),
+}).strict();
+const providerSearchStateSchema = z.enum(["idle", "loading", "ready", "failed", "cancelled"]);
+const providerSearchErrorCodeSchema = z.enum(["unavailable", "timeout", "cancelled", "rate_limited", "quota_exceeded", "disabled", "invalid_response", "failed"]);
+const providerSearchErrorSchema = z.object({
+  code: providerSearchErrorCodeSchema,
+  detail: z.string().nullable(),
+  retryAfterSeconds: z.number().int().nonnegative().nullable(),
+}).strict();
+const providerSearchSectionSchema = z.object({
+  provider: providerKindSchema,
+  state: providerSearchStateSchema,
+  results: z.array(searchResultSchema),
+  error: providerSearchErrorSchema.nullable(),
+}).strict();
+const providerSearchEventSchema = z.object({
+  searchId: searchIdSchema,
+  section: providerSearchSectionSchema,
+}).strict();
+const searchStartedSchema = z.object({ searchId: searchIdSchema }).strict();
+const searchCompletedSchema = z.object({ searchId: searchIdSchema }).strict();
+const spotifySetupStatusSchema = z.object({
+  enabled: z.boolean(),
+  configured: z.boolean(),
+  available: z.boolean(),
+  state: z.enum(["disabled", "setup_required", "connected", "unavailable"]),
+  market: z.string().regex(/^[A-Z]{2}$/).nullable(),
+  detail: z.string().nullable(),
+}).strict();
+const spotifyAuthorizationRequestSchema = z.object({
+  authorizationUrl: z.string().url(),
+  redirectUri: z.string().url(),
+}).strict();
 
 const themeSchema = z.enum(["dark", "light", "system"]);
 const sourcePreferenceOrderSchema = z
@@ -878,6 +955,7 @@ function browserPreviewStatus(): AppStatus {
           label: "Local library",
           configured: true,
           available: true,
+          runtimeStatus: "ready",
           capabilities: {
             search: true,
             playback: true,
@@ -896,15 +974,16 @@ function browserPreviewStatus(): AppStatus {
           label: "YouTube",
           configured: false,
           available: false,
+          runtimeStatus: "missing",
           capabilities: {
             search: true,
-            playback: true,
+            playback: false,
             metadata: true,
             artwork: true,
             lyrics: false,
-            downloads: true,
+            downloads: false,
             popularity: true,
-            releaseDate: true,
+            releaseDate: false,
             lyricsMetadata: false,
           },
           detail: "Provider adapter awaits media-tool verification.",
@@ -914,15 +993,16 @@ function browserPreviewStatus(): AppStatus {
           label: "SoundCloud",
           configured: false,
           available: false,
+          runtimeStatus: "missing",
           capabilities: {
             search: true,
-            playback: true,
+            playback: false,
             metadata: true,
             artwork: true,
             lyrics: false,
-            downloads: true,
+            downloads: false,
             popularity: true,
-            releaseDate: true,
+            releaseDate: false,
             lyricsMetadata: false,
           },
           detail: "Provider adapter awaits media-tool verification.",
@@ -932,6 +1012,7 @@ function browserPreviewStatus(): AppStatus {
           label: "Spotify catalog",
           configured: false,
           available: false,
+          runtimeStatus: "disabled",
           capabilities: {
             search: true,
             playback: false,
@@ -939,11 +1020,11 @@ function browserPreviewStatus(): AppStatus {
             artwork: true,
             lyrics: false,
             downloads: false,
-            popularity: true,
+            popularity: false,
             releaseDate: true,
             lyricsMetadata: false,
           },
-          detail: "Connect Client Credentials locally to search the catalog.",
+          detail: "Spotify catalog search is disabled by default.",
         },
       ],
     };
@@ -962,6 +1043,7 @@ function browserPreviewStatus(): AppStatus {
         label: "Local library",
         configured: false,
         available: true,
+        runtimeStatus: "ready",
         capabilities: {
           search: true,
           playback: true,
@@ -980,15 +1062,16 @@ function browserPreviewStatus(): AppStatus {
         label: "YouTube",
         configured: false,
         available: false,
+        runtimeStatus: "missing",
         capabilities: {
           search: true,
-          playback: true,
+          playback: false,
           metadata: true,
           artwork: true,
           lyrics: false,
-          downloads: true,
+          downloads: false,
           popularity: true,
-          releaseDate: true,
+          releaseDate: false,
           lyricsMetadata: false,
         },
         detail: "Provider adapter awaits media-tool verification.",
@@ -998,15 +1081,16 @@ function browserPreviewStatus(): AppStatus {
         label: "SoundCloud",
         configured: false,
         available: false,
+        runtimeStatus: "missing",
         capabilities: {
           search: true,
-          playback: true,
+          playback: false,
           metadata: true,
           artwork: true,
           lyrics: false,
-          downloads: true,
+          downloads: false,
           popularity: true,
-          releaseDate: true,
+          releaseDate: false,
           lyricsMetadata: false,
         },
         detail: "Provider adapter awaits media-tool verification.",
@@ -1016,6 +1100,7 @@ function browserPreviewStatus(): AppStatus {
         label: "Spotify catalog",
         configured: false,
         available: false,
+        runtimeStatus: "disabled",
         capabilities: {
           search: true,
           playback: false,
@@ -1023,11 +1108,11 @@ function browserPreviewStatus(): AppStatus {
           artwork: true,
           lyrics: false,
           downloads: false,
-          popularity: true,
+          popularity: false,
           releaseDate: true,
           lyricsMetadata: false,
         },
-        detail: "Connect Client Credentials locally to search the catalog.",
+        detail: "Spotify catalog search is disabled by default.",
       },
     ],
   };
@@ -1089,6 +1174,422 @@ function browserPreviewLibraryPage(request: LibraryPageRequest): LibraryPage {
     sort: request.sort,
     descending: request.descending,
   };
+}
+
+export const SEARCH_PROVIDER_UPDATE_EVENT = "search://provider-update";
+export const SEARCH_COMPLETED_EVENT = "search://complete";
+export const SPOTIFY_AUTH_STATE_EVENT = "spotify://auth-state";
+
+type SearchProviderUpdateListener = (event: ProviderSearchEvent) => void;
+type SearchCompletedListener = (event: SearchCompleted) => void;
+type SearchEventErrorListener = (error: IpcError) => void;
+
+interface BrowserSearchRun {
+  searchId: SearchId;
+  timers: number[];
+  pending: number;
+  completed: boolean;
+}
+
+const browserSearchRuns = new Map<SearchId, BrowserSearchRun>();
+const browserSearchProviderListeners = new Set<SearchProviderUpdateListener>();
+const browserSearchCompletedListeners = new Set<SearchCompletedListener>();
+let browserActiveSearchId: SearchId | null = null;
+
+const searchProviderOrder = (lens: SearchLens): ProviderKind[] => {
+  switch (lens) {
+    case "local":
+      return ["local"];
+    case "youtube":
+      return ["youtube"];
+    case "soundcloud":
+      return ["soundcloud"];
+    case "spotify":
+      return ["spotify"];
+    case "artists":
+    case "albums":
+      return ["local"];
+    default:
+      return ["local", "youtube", "soundcloud"];
+  }
+};
+
+function makeBrowserSearchId(): SearchId {
+  const randomUuid = globalThis.crypto?.randomUUID?.();
+  return (randomUuid ?? `browser-search-${Date.now()}-${Math.random().toString(16).slice(2)}`) as SearchId;
+}
+
+function emitBrowserSearchProviderEvent(event: ProviderSearchEvent) {
+  for (const listener of browserSearchProviderListeners) {
+    listener(event);
+  }
+}
+
+function emitBrowserSearchCompletedEvent(event: SearchCompleted) {
+  for (const listener of browserSearchCompletedListeners) {
+    listener(event);
+  }
+}
+
+function browserSearchResult(provider: ProviderKind, query: string, track?: LibraryTrack): SearchResult {
+  if (provider === "local" && track) {
+    return {
+      provider,
+      entityKind: "track",
+      providerItemId: track.trackId,
+      canonicalUrl: null,
+      title: track.title,
+      artists: track.artists,
+      album: track.album,
+      durationMs: track.durationMs,
+      artworkUrl: null,
+      publishedAt: null,
+      engagementCount: null,
+      engagementKind: null,
+      explicit: null,
+      localTrackId: track.trackId,
+      localSourceId: track.sourceId,
+      originalRank: 0,
+    };
+  }
+
+  const slug = encodeURIComponent(query.trim().toLowerCase().replace(/\s+/g, "-"));
+  return {
+    provider,
+    entityKind: "track",
+    providerItemId: `e2e-${provider}-${slug}`,
+    canonicalUrl: provider === "youtube"
+      ? "https://www.youtube.com/watch?v=spotdiy-e2e"
+      : provider === "soundcloud"
+        ? "https://soundcloud.com/spotdiy/e2e-result"
+        : "https://open.spotify.com/track/spotdiy-e2e",
+    title: `${query.trim()} — ${provider === "youtube" ? "YouTube" : provider === "soundcloud" ? "SoundCloud" : "Spotify"}`,
+    artists: [provider === "spotify" ? "SpotDIY Catalog" : "SpotDIY E2E"],
+    album: provider === "spotify" ? "Catalog fixture" : null,
+    durationMs: 198_000,
+    artworkUrl: null,
+    publishedAt: null,
+    engagementCount: null,
+    engagementKind: null,
+    explicit: null,
+    localTrackId: null,
+    localSourceId: null,
+    originalRank: 0,
+  };
+}
+
+function browserSearchSection(provider: ProviderKind, request: SearchRequest): ProviderSearchSection {
+  if (provider === "soundcloud") {
+    return {
+      provider,
+      state: "failed",
+      results: [],
+      error: {
+        code: "unavailable",
+        detail: "Synthetic partial-provider failure for browser E2E coverage.",
+        retryAfterSeconds: null,
+      },
+    };
+  }
+
+  if (provider === "local") {
+    const needle = request.query.trim().toLocaleLowerCase();
+    const tracks = e2eLibraryTracks.filter((track) => [track.title, track.album ?? "", ...track.artists]
+      .some((value) => value.toLocaleLowerCase().includes(needle)));
+    return {
+      provider,
+      state: "ready",
+      results: (tracks.length > 0 ? tracks : e2eLibraryTracks).map((track, index) => ({
+        ...browserSearchResult(provider, request.query, track),
+        originalRank: index,
+      })),
+      error: null,
+    };
+  }
+
+  return {
+    provider,
+    state: "ready",
+    results: [browserSearchResult(provider, request.query)],
+    error: null,
+  };
+}
+
+function finishBrowserSearch(run: BrowserSearchRun) {
+  if (run.completed) {
+    return;
+  }
+  run.completed = true;
+  browserSearchRuns.delete(run.searchId);
+  if (browserActiveSearchId === run.searchId) {
+    browserActiveSearchId = null;
+  }
+  emitBrowserSearchCompletedEvent({ searchId: run.searchId });
+}
+
+function cancelBrowserSearch(searchId: SearchId): boolean {
+  const run = browserSearchRuns.get(searchId);
+  if (!run || run.completed) {
+    return false;
+  }
+  for (const timer of run.timers) {
+    window.clearTimeout(timer);
+  }
+  run.timers = [];
+  for (const provider of searchProviderOrder("all")) {
+    emitBrowserSearchProviderEvent({
+      searchId,
+      section: {
+        provider,
+        state: "cancelled",
+        results: [],
+        error: { code: "cancelled", detail: "Search cancelled.", retryAfterSeconds: null },
+      },
+    });
+  }
+  finishBrowserSearch(run);
+  return true;
+}
+
+function startBrowserSearch(request: SearchRequest): SearchStarted {
+  if (browserActiveSearchId) {
+    cancelBrowserSearch(browserActiveSearchId);
+  }
+
+  const searchId = makeBrowserSearchId();
+  const run: BrowserSearchRun = { searchId, timers: [], pending: 0, completed: false };
+  browserSearchRuns.set(searchId, run);
+  browserActiveSearchId = searchId;
+  const providers = searchProviderOrder(request.lens);
+
+  for (const provider of providers) {
+    emitBrowserSearchProviderEvent({
+      searchId,
+      section: { provider, state: "loading", results: [], error: null },
+    });
+  }
+
+  run.pending = providers.length;
+  providers.forEach((provider) => {
+    const timer = window.setTimeout(() => {
+      if (run.completed || browserActiveSearchId !== searchId) {
+        return;
+      }
+      emitBrowserSearchProviderEvent({
+        searchId,
+        section: browserSearchSection(provider, request),
+      });
+      run.pending -= 1;
+      if (run.pending === 0) {
+        finishBrowserSearch(run);
+      }
+    }, provider === "local" ? 45 : provider === "soundcloud" ? 90 : 130);
+    run.timers.push(timer);
+  });
+
+  return { searchId };
+}
+
+export function parseProviderSearchEvent(value: unknown): ProviderSearchEvent {
+  return providerSearchEventSchema.parse(value);
+}
+
+export function parseSearchCompleted(value: unknown): SearchCompleted {
+  return searchCompletedSchema.parse(value);
+}
+
+export function parseSpotifySetupStatus(value: unknown): SpotifySetupStatus {
+  return spotifySetupStatusSchema.parse(value);
+}
+
+export async function startSearch(request: SearchRequest): Promise<SearchStarted> {
+  try {
+    const parsedRequest = searchRequestSchema.parse(request) as SearchRequest;
+    if (isPlaybackE2EAdapterEnabled()) {
+      return startBrowserSearch(parsedRequest);
+    }
+    if (!isTauriRuntime()) {
+      throw new IpcError("Search requires the native SpotDIY runtime.");
+    }
+    return searchStartedSchema.parse(await invoke<unknown>("start_search", { request: parsedRequest })) as SearchStarted;
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not start the source search.", error);
+  }
+}
+
+export async function cancelSearch(): Promise<SearchId | null> {
+  if (isPlaybackE2EAdapterEnabled()) {
+    const searchId = browserActiveSearchId;
+    if (searchId) {
+      cancelBrowserSearch(searchId);
+    }
+    return searchId;
+  }
+  if (!isTauriRuntime()) {
+    throw new IpcError("Search cancellation requires the native SpotDIY runtime.");
+  }
+  try {
+    return z.union([searchIdSchema, z.null()]).parse(await invoke<unknown>("cancel_search"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not cancel the source search.", error);
+  }
+}
+
+export async function subscribeToSearchProviderUpdates(
+  listener: SearchProviderUpdateListener,
+  onError?: SearchEventErrorListener,
+): Promise<() => void> {
+  if (isPlaybackE2EAdapterEnabled()) {
+    browserSearchProviderListeners.add(listener);
+    return () => browserSearchProviderListeners.delete(listener);
+  }
+  if (!isTauriRuntime()) {
+    return () => undefined;
+  }
+  try {
+    return await listen<unknown>(SEARCH_PROVIDER_UPDATE_EVENT, (event) => {
+      try {
+        listener(parseProviderSearchEvent(event.payload));
+      } catch (error) {
+        onError?.(new IpcError("SpotDIY received an invalid provider search event.", error));
+      }
+    });
+  } catch (error) {
+    throw new IpcError("SpotDIY could not subscribe to provider search updates.", error);
+  }
+}
+
+export async function subscribeToSearchCompleted(
+  listener: SearchCompletedListener,
+  onError?: SearchEventErrorListener,
+): Promise<() => void> {
+  if (isPlaybackE2EAdapterEnabled()) {
+    browserSearchCompletedListeners.add(listener);
+    return () => browserSearchCompletedListeners.delete(listener);
+  }
+  if (!isTauriRuntime()) {
+    return () => undefined;
+  }
+  try {
+    return await listen<unknown>(SEARCH_COMPLETED_EVENT, (event) => {
+      try {
+        listener(parseSearchCompleted(event.payload));
+      } catch (error) {
+        onError?.(new IpcError("SpotDIY received an invalid search completion event.", error));
+      }
+    });
+  } catch (error) {
+    throw new IpcError("SpotDIY could not subscribe to search completion updates.", error);
+  }
+}
+
+export async function getSpotifySetupStatus(): Promise<SpotifySetupStatus> {
+  if (!isTauriRuntime()) {
+    return {
+      enabled: false,
+      configured: false,
+      available: false,
+      state: "disabled",
+      market: null,
+      detail: "Spotify catalog search is disabled by default.",
+    };
+  }
+  try {
+    return parseSpotifySetupStatus(await invoke<unknown>("get_spotify_setup_status"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not read Spotify setup status.", error);
+  }
+}
+
+const spotifyClientIdSchema = z.string().trim().min(1).max(128);
+const spotifyMarketSchema = z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/);
+
+export async function beginSpotifyAuthorization(clientId: string, market: string): Promise<SpotifyAuthorizationRequest> {
+  try {
+    const parsedClientId = spotifyClientIdSchema.parse(clientId);
+    const parsedMarket = spotifyMarketSchema.parse(market);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Spotify authorization requires the native SpotDIY runtime.");
+    }
+    return spotifyAuthorizationRequestSchema.parse(await invoke<unknown>("begin_spotify_authorization", {
+      clientId: parsedClientId,
+      market: parsedMarket,
+    }));
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not begin Spotify authorization.", error);
+  }
+}
+
+export async function disconnectSpotify(): Promise<SpotifySetupStatus> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Spotify disconnect requires the native SpotDIY runtime.");
+  }
+  try {
+    return parseSpotifySetupStatus(await invoke<unknown>("disconnect_spotify"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not disconnect Spotify.", error);
+  }
+}
+
+const providerUrlHosts: Record<ProviderKind, string[]> = {
+  local: [],
+  youtube: ["youtube.com", "www.youtube.com", "music.youtube.com", "youtu.be"],
+  soundcloud: ["soundcloud.com", "www.soundcloud.com"],
+  spotify: ["open.spotify.com", "spotify.com", "www.spotify.com"],
+};
+
+function providerUrlIsSafe(provider: ProviderKind, value: string): boolean {
+  try {
+    const url = new URL(value);
+    const hasSensitiveQuery = [...url.searchParams.keys()].some((key) => /token|secret|password|cookie|auth|oauth|code/i.test(key));
+    return url.protocol === "https:" && !url.username && !url.password && !hasSensitiveQuery && providerUrlHosts[provider].includes(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+export async function openProviderResult(provider: ProviderKind, url: string): Promise<void> {
+  if (!providerUrlIsSafe(provider, url)) {
+    throw new IpcError("SpotDIY refused an unsafe provider result URL.");
+  }
+  if (!isTauriRuntime()) {
+    if (typeof window.open === "function") {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+    throw new IpcError("Opening provider results requires a browser window.");
+  }
+  try {
+    await invoke("open_provider_result", { provider, url });
+  } catch (error) {
+    throw new IpcError("SpotDIY could not open that provider result.", error);
+  }
+}
+
+export async function subscribeToSpotifyAuthState(
+  listener: (status: SpotifySetupStatus) => void,
+  onError?: SearchEventErrorListener,
+): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    return () => undefined;
+  }
+  try {
+    return await listen<unknown>(SPOTIFY_AUTH_STATE_EVENT, (event) => {
+      try {
+        listener(parseSpotifySetupStatus(event.payload));
+      } catch (error) {
+        onError?.(new IpcError("SpotDIY received an invalid Spotify auth event.", error));
+      }
+    });
+  } catch (error) {
+    throw new IpcError("SpotDIY could not subscribe to Spotify auth updates.", error);
+  }
 }
 
 export function isTauriRuntime(): boolean {
