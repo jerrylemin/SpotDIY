@@ -95,3 +95,29 @@
   playback, download path, or automatic search persistence was added.
 - Plan 06 implementation commits are `cf0248f`, `d4f72a7`, `4161810`, and
   `afd0149`; documentation closure follows the final verification gates.
+
+## 2026-09-01 - Plan 07 persistent download manager
+
+- Integrated schema migration 4 with only the `downloads` task table and the
+  singleton `download_settings` row. Existing data is preserved and persisted
+  YouTube/SoundCloud sources gain downloads capability without gaining
+  playback capability.
+- Integrated typed download task/repository/state contracts, UUID task IDs,
+  settings-backed destination validation, owned per-task temp roots, filename
+  sanitization/collision handling, destination-side atomic finalization, and
+  output-missing history.
+- Integrated FFmpeg discovery/probe with the existing `MediaToolManager`, a
+  direct bounded yt-dlp download runner, machine progress/file records,
+  scheduler concurrency 1..4, cancellation/reap, retry, restart recovery,
+  progress write throttling, and bounded shutdown cleanup.
+- Integrated `DownloadService` into `AppState`, the seven narrow Tauri
+  commands, `downloads://state`, strict Zod parsing, TanStack Query snapshot
+  updates, Downloads task controls, search-result Audio/Video actions for
+  YouTube/SoundCloud only, and Settings tool health.
+- The implementation boundary is committed as `0dbb628` (`feat: add
+  persistent download task model`), `22438a0` (`feat: add managed media
+  download execution`), and `6012921` (`feat: add download manager
+  interface`). Documentation closure follows the final verification gates.
+- No Plan 08 work, Spotify/Local download path, online playback, automatic
+  library mutation, source fusion, raw provider payload, credential, token,
+  media artifact, or repository-local Cargo target was integrated.

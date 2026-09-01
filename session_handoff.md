@@ -92,6 +92,39 @@ the v2-to-v3 migration smoke. Spotify remains excluded from Plan 06 fusion,
 acceptance, overrides, and playback; its Plan 05 PKCE/gate boundary is
 unchanged.
 
+## Plan 07 completion
+
+Plan 07 is complete through implementation tip `6012921`. The implementation
+commits are `0dbb628`, `22438a0`, and `6012921`; documentation closure follows
+the final verification gates.
+
+Schema version 4 adds only `downloads` and `download_settings`. DownloadService
+owns persistent UUID tasks, trusted YouTube/SoundCloud creation paths,
+settings-backed destination validation, per-task temp roots, structured
+yt-dlp execution, FFmpeg-aware video merge, bounded machine progress,
+concurrency, cancel/reap, retry, restart recovery, output-missing history,
+and collision-safe destination-side finalization. It does not download Local
+or Spotify sources, play online, fuse sources, create library rows, move media,
+or persist raw provider payloads, credentials, or tokens.
+
+DownloadsPage and SearchResultCard now expose the narrow native controls,
+strict Zod DTOs, revisioned `downloads://state` events, folder selection,
+concurrency, progress/provenance/error/output-missing details, and valid
+cancel/retry/open actions. Tool health is visible in Downloads and Settings.
+
+Final evidence: 308 Rust unit tests plus synthetic mpv, 47 Vitest tests, 45
+Playwright runs, typecheck/lint/build, Rust fmt/clippy, Tauri packaging, real
+mpv smoke, packaged playback/restart/cleanup smoke, and five native provider
+search smoke checks pass. Live provider/download smoke was not run. The
+optional packaged provider-search branch has a known immediate
+`start_search`/`cancel_search` race in the missing-yt-dlp profile; cleanup
+completed and no owned process remained.
+
+Build output remains at `C:\CargoTarget\SpotDIY`; owned task temp is under
+`%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>` and the repository
+`src-tauri\target` path remains absent.
+
 ## Next atomic task
 
-STOPPED AFTER PLAN 06. Awaiting external ChatGPT GitHub review before Plan 07.
+STOPPED AFTER PLAN 07. Do not start Plan 08 until external ChatGPT GitHub
+review is complete.

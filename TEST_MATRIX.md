@@ -56,3 +56,32 @@
   no provider-search bulk persistence, no Spotify fusion rows, no secrets or
   tokens in SQLite, no media mutation, and no repository-local
   `src-tauri\target`.
+
+## Plan 07 verification
+
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass;
+  Vitest reports 47 tests across 13 files, including strict download DTOs,
+  event validation, queue actions, filtering, folder selection, and search
+  provider download actions.
+- Browser: `pnpm exec playwright test` passes 45 runs across the 1280, 1920,
+  and 2560 viewport projects. Existing search/playback browser contracts stay
+  green after the Downloads UI and AppStatus changes.
+- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`,
+  all-features Clippy with warnings denied, and `cargo test --all-targets`
+  pass. The final Rust run reports 308 unit tests plus the synthetic mpv
+  integration test.
+- Focused Plan 07 coverage includes schema 3-to-4 preservation, repository
+  round trips, state transitions, queue ordering, concurrency limits, machine
+  progress parsing, bounded argv/output, FFmpeg availability, cancellation,
+  retry, restart recovery, output-missing history, sanitization, collisions,
+  cross-volume finalization, no-fake-lossless provenance, and cleanup.
+- Runtime: explicit synthetic real-mpv smoke, packaged playback/restart/owned
+  process cleanup smoke, five native provider-search smoke checks, and the
+  external-target `pnpm tauri build` pass. Optional live provider/download
+  smoke was not run. The optional packaged provider-search harness remains
+  blocked by its existing immediate `start_search`/`cancel_search` race when
+  yt-dlp is deliberately missing; no owned process remained after the run.
+- Storage: schema version 4 adds only `downloads` and `download_settings`;
+  build output remains at `C:\CargoTarget\SpotDIY`, task temp roots are
+  owned under `%LOCALAPPDATA%\SpotDIY\cache\downloads`, and the repository
+  `src-tauri\target` path remains absent.

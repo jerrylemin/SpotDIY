@@ -189,3 +189,45 @@ below.
 - `src-tauri\target` remained absent. No media files were modified or deleted;
   no provider credentials, tokens, raw output, or provider payloads were
   retained in SQLite or the repository.
+
+## 2026-09-01 - Plan 07 persistent download manager
+
+- Baseline before implementation was clean at `6380ccd715c1958cb09b0df684f521639e0561db`; local and remote matched, `CARGO_TARGET_DIR` was `C:\CargoTarget\SpotDIY`, and `Test-Path .\src-tauri\target` was `False`.
+- Focused implementation checks passed: 24 `downloads::` tests, 33
+  `media_tools::` tests, 9 `media_tools::yt_dlp::` tests, 7 new frontend
+  download/Downloads/search tests, 13 existing domain/search frontend tests,
+  and 11 focused Rust IPC tests.
+- `pnpm typecheck` - passed. `pnpm lint` - passed. `pnpm test` - passed:
+  47 tests across 13 files.
+- `pnpm exec playwright test` - passed: 45 runs across the 1280, 1920, and
+  2560 viewport projects. Existing search and playback contracts remain green.
+- `pnpm build` - passed. Existing Browserslist, Tailwind content, and chunk
+  size notices remain non-fatal.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` - passed.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+  --all-features -- -D warnings` - passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` - passed:
+  308 Rust unit tests, one synthetic mpv integration test, and zero failures.
+- `git diff --check` - passed before documentation edits. `pnpm tauri build` -
+  passed; release executable and NSIS bundle were generated under external
+  `C:\CargoTarget\SpotDIY`.
+- Explicit real mpv smoke with `SPOTDIY_REAL_MPV_SMOKE=1` - passed: one
+  synthetic-WAV integration test with owned-process cleanup.
+- Packaged playback smoke with `SPOTDIY_PACKAGED_SMOKE=1` - passed:
+  synthetic indexing/playback, restart persistence, graceful close, and
+  owned-mpv cleanup. No SpotDIY-owned mpv process remained.
+- `scripts/provider-search-smoke.ps1 -RunPackaged` passed its five native
+  synthetic Local/playback checks and skipped live providers/Spotify as
+  configured. Its optional packaged-search branch reached the existing
+  immediate `start_search`/`cancel_search` race and returned no active
+  SearchId under the deliberately missing-yt-dlp profile; the harness cleaned
+  up and no owned process remained. This branch is recorded as a harness
+  limitation, not a fabricated pass.
+- `graphify update .` passed once after code changes: 3,235 nodes, 6,108
+  edges, 210 communities. `codegraph sync .` and `codegraph status .` passed
+  once after implementation: 107 files, 3,496 nodes, 12,434 edges, index up
+  to date.
+- The local tool probes report yt-dlp `2026.08.19` and FFmpeg `8.1.1`; no tool
+  binary, downloaded media, runtime database, cache temp, credential, token,
+  or generated test artifact is part of the repository changes.
+- Repository-local `src-tauri\target` remains absent after all checks.

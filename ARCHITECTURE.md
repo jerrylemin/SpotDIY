@@ -16,6 +16,10 @@ Rust services -- SQLite WAL / local filesystem / managed tools / providers
         +-- PlaybackService (serialized controller / transient queue)
                 |
                 +-- PlaybackBackend -> MpvBackend -> Windows named pipe -> one mpv.exe
+        +-- DownloadService (persistent task scheduler / owned children)
+                |
+                +-- TokioYtDlpProcessRunner -> yt-dlp -> task temp -> safe finalization
+                `-- MediaToolManager -> FFmpeg discovery/probe for video merge/remux
 ```
 
 Frontend state uses Zustand for command palette, player presentation, overlay,
@@ -58,8 +62,11 @@ shared DTOs. `SourceFusionService` will match sources into `UnifiedTrack`
 records, while `SourceResolver` will select playable sources according to the
 user's ordered preferences. Spotify catalog sources remain metadata-only.
 
-Standard storage targets `%LOCALAPPDATA%\SpotDIY\spotdiy.sqlite3`; the current
-application opens that path through an explicit `Database::open(path)` seam.
+Standard storage targets `%LOCALAPPDATA%\SpotDIY\spotdiy.sqlite3`; managed
+download task temp storage is `%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>`
+and final output uses the persisted user-selected `downloads_directory`. The
+current application opens the database path through an explicit
+`Database::open(path)` seam.
 Portable startup and its beside-executable layout remain a later-plan concern,
 and persisted portable mode is rejected until that startup path exists. Secrets
 use Windows Credential Manager, never SQLite or source control.
@@ -163,3 +170,33 @@ bitrate, and stable `SourceId`. YouTube and SoundCloud remain
 `ProviderPlaybackNotImplemented`, Spotify remains `MetadataOnly`, and no
 online URL or yt-dlp playback path reaches mpv. Its narrow readiness probe is
 the test seam for future provider playback.
+
+## Plan 07 download boundary
+
+```text
+SearchResult / persisted TrackSource
+              |
+              v
+typed queue command -> DownloadService -> downloads repository (schema 4)
+                              |
+                              +--> owned task temp -> bounded yt-dlp child
+                              +--> progress/state snapshots -> downloads://state
+                              `--> destination-side temp -> collision-safe final file
+```
+
+`DownloadService` is the sole owner of persistent download lifecycle. It
+validates YouTube/SoundCloud provider identity and canonical URLs, reads the
+existing `downloads_directory` setting, creates UUID task roots, and never
+passes provider-derived filenames directly to the filesystem. It supports
+audio provider encoding and video best-video-plus-best-audio with FFmpeg when
+available; missing video tooling fails truthfully. Progress is machine-readable
+and throttled for SQLite persistence while snapshots remain revisioned and
+bounded for the UI.
+
+Cancellation kills and reaps only the child owned by that task. Restart
+recovery requeues only interrupted active states and cleans only their owned
+task temp roots. Finalization validates a regular output inside that root,
+copies through a destination-side temporary file, renames without overwrite,
+persists the trusted path, and cleans the owned temp root. Plan 07 does not
+create library tracks, move library media, fuse sources, or provide online
+playback; Spotify and Local download requests are rejected.

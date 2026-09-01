@@ -7,23 +7,26 @@ src/                         React/TanStack frontend
     library/                 Folder rows, track rows, quality/provenance states
     player/                  Playback controls, progress, volume, audio device menu
     search/                  Search controls, provider sections, result cards
+    downloads/               Persistent task rows, progress, provenance, and actions
   hooks/                     TanStack Query and playback hooks
     useLibrary.ts            Library status/page mutations and scan progress
     usePlayback.ts           Playback snapshot and transport mutations
     useSearch.ts             Debounced provider search lifecycle and stale-ID handling
+    useDownloads.ts          Persistent download snapshots, events, and task mutations
   pages/                     Route-level screens
   services/                  Typed native IPC boundary
   stores/                    Zustand interaction state
   styles/                    SpotDIY visual system
   types/                     Shared frontend domain vocabulary
 src-tauri/                   Tauri 2 Rust application
-  migrations/                Ordered SQLite schema migrations (through 0003)
+  migrations/                Ordered SQLite schema migrations (through 0004)
   src/domain/                Typed unified music domain model
   src/db/                    SQLite initialization and focused repositories
   src/fusion/                Deterministic normalization, matching, and overrides
   src/ipc/                   Serialized native DTOs and status commands
   src/library/               Folder ownership, scanner, metadata, fingerprints, artwork, watcher
-  src/media_tools/           mpv discovery, validation, version, and health
+  src/media_tools/           mpv, yt-dlp, and FFmpeg discovery, validation, version, and health
+  src/downloads/              Persistent tasks, scheduler, bounded runner lifecycle, and finalization
   src/playback/              Typed playback contracts, JSON IPC, mpv backend, queue, and controller
   src/search/                Concurrent provider search, cache, cancellation, and timeouts
   src/sources/               Local, YouTube, SoundCloud, Spotify adapters, and SourceResolver
@@ -41,16 +44,21 @@ public/                      Brand source assets
 ```
 
 The implemented Rust service boundaries are `LibraryService`,
-`PlaybackService`, and `MediaToolManager`, plus the existing domain, database,
-IPC, and settings modules. `PlaybackService` owns the serialized playback
-controller and transient queue; `MpvBackend` owns the external process and
-JSON IPC; `LibraryService` remains the only source-path ownership boundary.
+`PlaybackService`, `DownloadService`, and `MediaToolManager`, plus the existing
+domain, database, IPC, and settings modules. `PlaybackService` owns the
+serialized playback controller and transient queue; `DownloadService` owns
+persistent task lifecycle, bounded yt-dlp children, progress, cancellation,
+retry, recovery, and destination-side finalization. `MpvBackend` owns the
+external playback process and JSON IPC; `LibraryService` remains the only
+library source-path ownership boundary.
 The Plan 04 delivery tip is `af66127`; backend commands are enqueue-only and
 generation-stamped events are filtered at the controller boundary. Plan 05
 adds `SearchService`, the provider adapter boundary, and the credentials seam.
 Plan 06 adds `SourceFusionService` and `SourceResolver`: search results remain
 ephemeral until explicit YouTube/SoundCloud acceptance, local playback remains
 owned by `LibraryService`, and provider capability truth remains backend-owned.
-`DownloadService`, `LyricsService`, `PlaylistService`, `QueueService`,
-`BackupService`, and `AnalyticsService` remain later-plan boundaries and have
-no empty facade modules.
+`LyricsService`, `PlaylistService`, `QueueService`, `BackupService`, and
+`AnalyticsService` remain later-plan boundaries and have no empty facade
+modules. Persistent playback queue state remains Plan 08 work; Plan 07
+downloads do not create library tracks, move media, or inject paths into
+playback.

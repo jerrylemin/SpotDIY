@@ -70,3 +70,22 @@ process cleanup smoke pass. The named v2-to-v3 migration smoke passes without
 losing existing tracks, sources, or settings. Spotify remains excluded from
 Plan 06 fusion and playback, and no media, credentials, tokens, or raw
 provider output are retained.
+
+## Plan 07 verification
+
+Plan 07 passes 308 Rust unit tests plus one synthetic mpv integration test,
+47 Vitest tests, 45 Playwright runs across the three viewport projects,
+frontend typecheck/lint/build, Rust fmt, all-features Clippy with warnings
+denied, and the external-target Tauri release build. Focused download tests
+cover schema 3-to-4 preservation, repository round trips, state transitions,
+queue ordering, concurrency, bounded progress/argv/output, FFmpeg status,
+cancellation and reaping, retry, restart recovery, missing outputs,
+sanitization, collision naming, cross-volume finalization, provider-encoded
+provenance, and cleanup.
+
+The explicit real-mpv and packaged playback/restart/owned-process smokes pass.
+The provider-search smoke passes its five native synthetic checks; live
+provider/download work is opt-in and was not run. The optional packaged search
+branch has a known immediate `start_search`/`cancel_search` race when the
+profile intentionally has no yt-dlp; it is recorded as a harness limitation,
+not treated as a successful download or search result.

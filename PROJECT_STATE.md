@@ -1,6 +1,6 @@
 # SpotDIY project state
 
-State date: 2026-08-31
+State date: 2026-09-01
 
 ## Repository
 
@@ -8,7 +8,8 @@ State date: 2026-08-31
 - Origin: `https://github.com/jerrylemin/SpotDIY`
 - Plan 04 feature commit: `536617d` (`feat: add mpv playback service and queue transport`)
 - Plan 04 review-fix commit: `af66127` (`fix: harden mpv playback lifecycle and event ordering`)
-- Delivery status: implementation, independent review, final gates, and documentation closure are recorded on `main`; remote SHA verification is the final delivery check.
+- Plan 07 implementation commits: `0dbb628`, `22438a0`, and `6012921`.
+- Delivery status: Plan 07 implementation and final verification are complete; documentation closure and remote SHA verification are the remaining delivery records.
 
 ## Runtime
 
@@ -18,6 +19,8 @@ State date: 2026-08-31
 - Playback: `PlaybackService` is the sole serialized controller. It owns the transient ID-only queue, snapshot revisions, transport, repeat/shuffle/previous/EOF policy, source switching, recovery, and shutdown.
 - Backend: `MpvBackend` starts one external `mpv.exe` child over one fresh Windows named pipe and keeps JSON protocol/process details behind the backend boundary. Discovery is `SPOTDIY_MPV_PATH`, then PATH.
 - Tauri playback surface: `get_playback_snapshot`, `play_track`, `enqueue_track`, `play_track_next`, `toggle_play_pause`, `seek_playback`, `next_track`, `previous_track`, `set_playback_volume`, `set_playback_muted`, `set_repeat_mode`, `set_shuffle_enabled`, `get_audio_devices`, `set_audio_device`, `switch_playback_source`, `retry_playback_backend`, and `clear_playback_queue`; state events use `playback://state`.
+- Downloads: `DownloadService` owns schema-v4 task persistence, yt-dlp/FFmpeg execution, bounded progress, scheduling, cancellation, retry, restart recovery, destination-side finalization, and `downloads://state` snapshots. Tasks support YouTube and SoundCloud only; Spotify and Local are rejected.
+- Tauri download surface: `get_download_snapshot`, `queue_search_result_download`, `queue_source_download`, `cancel_download`, `retry_download`, `set_download_concurrency`, and `open_download_location`.
 - Build cache: Rust/Tauri output is external at `C:\CargoTarget\SpotDIY`; `src-tauri\target` is absent and the path is not committed.
 
 ## Decisions in force
@@ -28,6 +31,8 @@ State date: 2026-08-31
 - Keep the Plan 04 queue transient and non-persistent; persistent queue and queue snapshots belong to Plan 08.
 - Use the exact mpv startup arguments in the Plan 04 specification, positive request IDs, bounded 1 MiB frames, six property observations, generation-scoped events, and bounded quit/kill/reap.
 - Keep standard data under `%LOCALAPPDATA%\SpotDIY`; `SPOTDIY_PACKAGED_DATA_ROOT` is a smoke-only isolation seam because Windows known-folder resolution does not follow a child `LOCALAPPDATA` override.
+- Keep download task temp files under `%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>`, create final names inside the user-selected `downloads_directory`, and never expose arbitrary paths through IPC.
+- Preserve provider-encoded provenance for YouTube/SoundCloud downloads; no lossy-to-FLAC claim, raw provider payload, credential, token, or automatic library mutation is allowed.
 - Keep provider playback/search, Source Fusion, downloads, lyrics, playlists, overlays, media keys/SMTC, portable mode, analytics, EQ, normalization, crossfade, ReplayGain, and unrelated refactors out of Plan 04.
 
 ## Plan 04 verification snapshot
@@ -93,6 +98,19 @@ Plan 06 - Source Fusion and Resolver is complete through implementation tip
   smoke all pass. Cargo output remains at `C:\CargoTarget\SpotDIY`; the
   repository-local `src-tauri\target` is absent.
 
-## Next slice after Plan 06
+## Prior Plan 06 handoff
 
-STOPPED AFTER PLAN 06. Awaiting external ChatGPT GitHub review before Plan 07.
+Plan 06 was the predecessor boundary; its external review gate was completed before Plan 07 implementation began.
+
+## Plan 07 delivery snapshot (2026-09-01)
+
+- Delivery status: COMPLETE through implementation tip `6012921`; documentation closure is the final Plan 07 commit.
+- Schema version 4 adds only `downloads` and the singleton `download_settings` table. Existing schema-3 data is preserved, YT/SC sources gain downloads capability, and playback capability remains unchanged.
+- `DownloadService` persists UUID tasks, owns bounded yt-dlp children, parses machine progress, schedules up to four tasks, cancels/reaps owned processes, retries without duplication, recovers active tasks after restart, retains missing completed outputs, and finalizes across volumes without overwriting existing files.
+- Downloads UI exposes task history, progress, bytes, speed, ETA, state, retry count, provider-encoded provenance, output format, errors, output-missing state, folder selection, concurrency, cancel/retry, and trusted folder opening. Search offers Audio/Video only for YouTube/SoundCloud tracks; Spotify and Local remain unavailable.
+- Final evidence: 308 Rust unit tests plus the synthetic mpv integration test, 47 Vitest tests, 45 Playwright runs, typecheck/lint/build, fmt/clippy, Tauri release packaging, explicit real-mpv smoke, packaged playback/restart/cleanup smoke, and five native provider-search smoke checks pass. Optional live provider/download smoke was not run; the existing optional packaged-search harness still has an immediate start/cancel race when yt-dlp is intentionally missing.
+- Storage remains external at `C:\CargoTarget\SpotDIY` for build output and `%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>` for owned task temp files. No media, credentials, tokens, or raw provider payloads are committed.
+
+## Next slice after Plan 07
+
+STOPPED AFTER PLAN 07. Do not start Plan 08 until external GitHub review is complete.

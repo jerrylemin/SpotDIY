@@ -41,5 +41,39 @@ availability explanations, and five narrow IPC commands are present.
 The final log records 279 Rust unit tests plus real mpv smoke, 40 Vitest tests,
 45 Playwright runs, release/package smoke, and v2-to-v3 migration coverage.
 Cargo output is external at `C:\CargoTarget\SpotDIY`; repository-local
-`src-tauri\target` is absent. STOPPED AFTER PLAN 06 pending external GitHub
-review before Plan 07.
+`src-tauri\target` is absent. Plan 07 completion is recorded below.
+
+## Plan 07 handoff
+
+Plan 07 is complete through implementation tip `6012921`, with documentation
+closure following the final verification. The three implementation commits
+are `0dbb628` (schema, contracts, repository, settings, and state model),
+`22438a0` (FFmpeg/yt-dlp tooling, scheduler, lifecycle, recovery, and safe
+finalization), and `6012921` (AppState, typed IPC/events, Downloads UI, search
+actions, settings/tool status, and frontend coverage).
+
+Schema version 4 adds only `downloads` and `download_settings`. DownloadService
+owns persistent tasks, validates trusted provider/source identity and the
+existing downloads directory setting, keeps yt-dlp inside UUID-owned temp
+roots, reports machine progress, limits concurrency to 1..4, cancels and
+reaps owned children, retries without duplicate rows, requeues interrupted
+tasks on restart, and finalizes destination files without overwrite or
+cross-volume rename assumptions. Completed history exposes `outputMissing`.
+
+The final verification log records 308 Rust unit tests plus synthetic mpv,
+47 Vitest tests, 45 Playwright runs, strict quality gates, Tauri packaging,
+real-mpv smoke, packaged playback/restart/cleanup, and five native provider
+search smoke checks. Live provider/download smoke was not run. The optional
+packaged provider-search harness has a known immediate cancellation race when
+yt-dlp is intentionally missing; its cleanup completed and no owned process
+remained.
+
+Storage remains external at `C:\CargoTarget\SpotDIY` for build output and
+`%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>` for owned task temp.
+Spotify and Local downloads, online playback, automatic fusion/library
+mutation, persistent playback queue, and Plan 08 remain out of scope.
+
+## Next atomic task
+
+STOPPED AFTER PLAN 07. Do not start Plan 08 until external ChatGPT GitHub
+review is complete.

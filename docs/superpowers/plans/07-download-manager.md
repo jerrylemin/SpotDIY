@@ -28,6 +28,22 @@ Mock progress parsing, queued/start/progress/complete/cancel/failure/retry/resta
 
 Unfinished tasks survive restart; output labels preserve source quality and all process arguments are structured.
 
-## Commit boundary
+## Delivered evidence
 
-`feat: add persistent download manager`
+Plan 07 is complete through three implementation commits:
+
+- `0dbb628` - `feat: add persistent download task model`
+- `22438a0` - `feat: add managed media download execution`
+- `6012921` - `feat: add download manager interface`
+
+Schema 4, the persistent repository/service, bounded yt-dlp and FFmpeg
+execution, state/event IPC, Downloads UI, search actions, tool status, and
+focused lifecycle/security tests are delivered. Final verification records
+308 Rust unit tests plus synthetic mpv, 47 Vitest tests, 45 Playwright runs,
+strict quality gates, Tauri packaging, real-mpv smoke, packaged playback smoke,
+and five native provider-search smoke checks. Live provider/download smoke is
+opt-in and was not run; the optional packaged provider-search harness retains
+an immediate start/cancel race when yt-dlp is intentionally missing.
+
+The documentation closure commit is `docs: close Plan 07 download manager
+delivery`. Plan 08 is not started.

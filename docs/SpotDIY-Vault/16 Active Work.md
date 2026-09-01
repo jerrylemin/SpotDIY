@@ -67,6 +67,20 @@ The current boundary remains local-only production playback. Spotify remains
 metadata-only and excluded from fusion; downloads, playlists, persistent queue,
 lyrics, and later visual/performance work remain outside this plan.
 
+## Plan 07 completion
+
+Plan 07 is complete through implementation tip `6012921`. It delivers schema-v4
+persistent download tasks, settings-backed destination selection, bounded
+yt-dlp/FFmpeg execution, machine progress, concurrency, cancellation, retry,
+restart recovery, safe finalization, typed IPC/events, Downloads UI, supported
+YouTube/SoundCloud search actions, and truthful tool/provenance status.
+
+The current boundary still excludes Spotify and Local downloads, online
+playback, automatic source fusion/library mutation, persistent playback queue,
+and all later plans. Final verification evidence is recorded in
+`docs/execution/verification-log.md`.
+
 ## Next atomic task
 
-STOPPED AFTER PLAN 06. Awaiting external ChatGPT GitHub review before Plan 07.
+STOPPED AFTER PLAN 07. Do not start Plan 08 until external ChatGPT GitHub
+review is complete.
