@@ -2,7 +2,8 @@
 param(
     [int]$TimeoutSeconds = 45,
     [switch]$Plan08Persistence,
-    [switch]$Plan09Lyrics
+    [switch]$Plan09Lyrics,
+    [switch]$Plan11Shell
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,14 +13,14 @@ if ($env:SPOTDIY_PACKAGED_SMOKE -ne "1") {
     exit 0
 }
 
-if ($Plan08Persistence -and $Plan09Lyrics) {
+if (($Plan08Persistence -and $Plan09Lyrics) -or ($Plan08Persistence -and $Plan11Shell) -or ($Plan09Lyrics -and $Plan11Shell)) {
     throw "choose one packaged smoke mode"
 }
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
-$smokeLabel = if ($Plan09Lyrics) { "Plan09" } elseif ($Plan08Persistence) { "Plan08" } else { "Plan04" }
-$flowMode = if ($Plan09Lyrics) { "plan09" } elseif ($Plan08Persistence) { "plan08" } else { "flow" }
-$restartMode = if ($Plan09Lyrics) { "plan09-restart" } elseif ($Plan08Persistence) { "plan08-restart" } else { "restart" }
+$smokeLabel = if ($Plan11Shell) { "Plan11" } elseif ($Plan09Lyrics) { "Plan09" } elseif ($Plan08Persistence) { "Plan08" } else { "Plan04" }
+$flowMode = if ($Plan11Shell) { "plan11" } elseif ($Plan09Lyrics) { "plan09" } elseif ($Plan08Persistence) { "plan08" } else { "flow" }
+$restartMode = if ($Plan11Shell) { "plan11-restart" } elseif ($Plan09Lyrics) { "plan09-restart" } elseif ($Plan08Persistence) { "plan08-restart" } else { "restart" }
 $targetRoot = $env:CARGO_TARGET_DIR
 if ([string]::IsNullOrWhiteSpace($targetRoot)) {
     throw "CARGO_TARGET_DIR must point outside the repository before packaged verification"
@@ -115,6 +116,46 @@ $firstApp = $null
 $secondApp = $null
 $ownedMpvIds = [System.Collections.Generic.List[int]]::new()
 
+function Initialize-LegacySchema6Database {
+    $sqliteCommand = Get-Command sqlite3.exe -ErrorAction SilentlyContinue
+    if ($null -eq $sqliteCommand) {
+        $sqliteCommand = Get-Command sqlite3 -ErrorAction SilentlyContinue
+    }
+    if ($null -eq $sqliteCommand) {
+        throw "sqlite3 is required to seed the packaged Plan 11 schema-6 fixture"
+    }
+
+    $databaseDirectory = Join-Path $profileRoot "SpotDIY"
+    New-Item -ItemType Directory -Path $databaseDirectory -Force | Out-Null
+    $databasePath = Join-Path $databaseDirectory "spotdiy.sqlite3"
+    $migrationPaths = @(
+        (Join-Path $repositoryRoot "src-tauri\migrations\fixtures\legacy_schema6_initial.sql"),
+        (Join-Path $repositoryRoot "src-tauri\migrations\0002_local_library.sql"),
+        (Join-Path $repositoryRoot "src-tauri\migrations\0003_source_fusion.sql"),
+        (Join-Path $repositoryRoot "src-tauri\migrations\0004_downloads.sql"),
+        (Join-Path $repositoryRoot "src-tauri\migrations\0005_collections_and_queue.sql"),
+        (Join-Path $repositoryRoot "src-tauri\migrations\0006_lyrics_bookmarks.sql")
+    )
+
+    foreach ($migrationPath in $migrationPaths) {
+        $output = Get-Content -LiteralPath $migrationPath -Raw | & $sqliteCommand.Source $databasePath 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "could not seed packaged schema-6 fixture from $migrationPath`n$output"
+        }
+    }
+
+    $seedSql = @"
+INSERT OR REPLACE INTO settings_metadata (setting_key, value_json, value_type, schema_version, updated_at) VALUES ('theme', '"light"', 'theme', 1, '1970-01-01T00:00:00Z');
+INSERT OR REPLACE INTO settings_metadata (setting_key, value_json, value_type, schema_version, updated_at) VALUES ('source_preference_order', '["local","youtube","soundcloud","spotify"]', 'source_preference_order', 1, '1970-01-01T00:00:00Z');
+UPDATE settings_metadata SET value_json = 'false', value_type = 'boolean' WHERE setting_key = 'first_run';
+PRAGMA user_version = 6;
+"@
+    $output = $seedSql | & $sqliteCommand.Source $databasePath 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "could not finish packaged schema-6 fixture setup`n$output"
+    }
+}
+
 function Start-PackagedApp([int]$debugPort) {
     $stdoutLog = Join-Path $profileRoot ("spotdiy-$debugPort.stdout.log")
     $stderrLog = Join-Path $profileRoot ("spotdiy-$debugPort.stderr.log")
@@ -196,6 +237,9 @@ try {
             [System.Text.UTF8Encoding]::new($false)
         )
     }
+    if ($Plan11Shell) {
+        Initialize-LegacySchema6Database
+    }
 
     $beforeFirstLaunch = Get-MpvProcesses
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
@@ -241,7 +285,9 @@ try {
 
     Close-PackagedApp "second packaged app" $secondApp
     Wait-ForProcessExit $secondApp ($TimeoutSeconds * 1000)
-    if ($Plan09Lyrics) {
+    if ($Plan11Shell) {
+        Write-Output "PASS: packaged Plan 11 schema migration, appearance persistence, shell modes, inspector, queue, lyrics, restart, and owned-process persistence"
+    } elseif ($Plan09Lyrics) {
         Write-Output "PASS: packaged Plan 09 lyrics, bookmarks, A/B loop, presets, queue, restart, and owned-process persistence"
     } elseif ($Plan08Persistence) {
         Write-Output "PASS: packaged Plan 08 playlist, collection, queue, snapshot, restart, and owned-process persistence"

@@ -9,7 +9,7 @@ const fixtureFolder = process.env.SPOTDIY_PACKAGED_FIXTURE;
 if (!cdpUrl) {
   throw new Error("SPOTDIY_PACKAGED_CDP_URL is required");
 }
-if ((mode === "flow" || mode === "plan08" || mode === "plan09") && !fixtureFolder) {
+if ((mode === "flow" || mode === "plan08" || mode === "plan09" || mode === "plan11") && !fixtureFolder) {
   throw new Error("SPOTDIY_PACKAGED_FIXTURE is required for the playback flow");
 }
 
@@ -122,6 +122,138 @@ try {
       return snapshot.currentTrackId && snapshot.phase === "playing" && snapshot.queueLength === 2 && snapshot.currentQueueEntryId && snapshot.currentTrackId !== firstSnapshot.currentTrackId ? snapshot : false;
     });
     console.log("packaged playback flow passed");
+  } else if (mode === "plan11") {
+    const legacySettings = await invoke("get_settings_snapshot");
+    if (legacySettings.theme !== "light" || legacySettings.firstRun !== false || legacySettings.storageMode !== "standard" || legacySettings.layoutProfile !== "comfortable") {
+      throw new Error(`schema-6 settings were not preserved through migration 7: ${JSON.stringify(legacySettings)}`);
+    }
+
+    const customTheme = {
+      schemaVersion: 1,
+      name: "Packaged Plan 11",
+      baseMode: "dark",
+      tokens: {
+        background: "#101113",
+        surface: "#17181D",
+        surfaceRaised: "#1D1E24",
+        surfaceSoft: "#22232A",
+        text: "#F3F1EC",
+        textMuted: "#A8A7AE",
+        textSubtle: "#807F87",
+        border: "#2E2F36",
+        borderStrong: "#4B4C55",
+        accent: "#D7FF60",
+        accentContrast: "#151617",
+        success: "#81E2D0",
+        warning: "#FFB570",
+        danger: "#FF806F",
+        info: "#8E7BFF",
+      },
+    };
+    await invoke("set_setting", { setting: { key: "layoutProfile", value: "dense" } });
+    await invoke("set_setting", { setting: { key: "customTheme", value: customTheme } });
+    const savedSettings = await invoke("set_setting", { setting: { key: "theme", value: "custom" } });
+    if (savedSettings.theme !== "custom" || savedSettings.layoutProfile !== "dense" || savedSettings.customTheme?.name !== customTheme.name) {
+      throw new Error(`Plan 11 appearance settings did not persist after migration 7: ${JSON.stringify(savedSettings)}`);
+    }
+
+    await invoke("add_library_folders", { paths: [fixtureFolder] });
+    const status = await waitFor("the Plan 11 synthetic folder scan", async () => {
+      const next = await invoke("get_library_status");
+      return next.folders?.length === 1 && next.indexedTrackCount >= 2 && !next.isScanning ? next : false;
+    });
+    if (!status) {
+      throw new Error("the Plan 11 library scan did not complete");
+    }
+
+    await page.reload();
+    await page.getByRole("link", { name: "Home", exact: true }).waitFor({ state: "visible" });
+    await page.getByRole("link", { name: "Home", exact: true }).click();
+    await page.getByText("YOUR MUSIC, YOUR MACHINE", { exact: true }).waitFor({ state: "visible" });
+    if (await page.getByText("START HERE", { exact: true }).count() > 0) {
+      throw new Error("the populated Plan 11 home dashboard still rendered onboarding");
+    }
+
+    await page.getByRole("link", { name: "Your library", exact: true }).click();
+    await page.getByRole("heading", { name: "Your local collection" }).waitFor({ state: "visible" });
+    const rows = page.locator("[data-testid^='library-track-']");
+    await waitFor("two indexed Plan 11 tracks", async () => (await rows.count()) === 2);
+    const firstRow = rows.nth(0);
+    const secondRow = rows.nth(1);
+    const firstTrack = await invoke("get_library_page", {
+      request: { page: 0, pageSize: 1, sort: "title", descending: false, folderId: null },
+    });
+    const firstItem = firstTrack.items?.[0];
+    if (!firstItem?.trackId || !firstItem.sourceId) {
+      throw new Error(`the Plan 11 library did not expose a playable track identity: ${JSON.stringify(firstTrack)}`);
+    }
+
+    await firstRow.getByRole("button", { name: /Play now/ }).click();
+    const playing = await waitFor("the first Plan 11 track to play", async () => {
+      const snapshot = await invoke("get_playback_snapshot");
+      return snapshot.phase === "playing" ? snapshot : false;
+    });
+    await firstRow.getByRole("button", { name: /Inspect/ }).click();
+    const inspector = page.locator(".inspector-panel");
+    await inspector.getByText("PERSISTED LOCAL TRACK", { exact: true }).waitFor({ state: "visible" });
+    await inspector.getByText("SOURCES", { exact: true }).waitFor({ state: "visible" });
+    const inspectorText = await inspector.innerText();
+    if (inspectorText.includes(fixtureFolder) || inspectorText.includes("spotdiy-mpv-")) {
+      throw new Error("the packaged Track Inspector exposed a local path or owned process detail");
+    }
+    await page.keyboard.press("Escape");
+    await inspector.waitFor({ state: "hidden" });
+
+    const inspectorDto = await invoke("get_track_inspector", { trackId: firstItem.trackId });
+    if (inspectorDto.sources?.some((source) => source.provider === "local" && source.canonicalUrl !== null)) {
+      throw new Error(`the packaged local inspector returned a canonical URL: ${JSON.stringify(inspectorDto)}`);
+    }
+
+    await secondRow.getByRole("button", { name: /Add .* to queue/ }).click();
+    const queued = await waitFor("the second Plan 11 track to join the queue", async () => {
+      const snapshot = await invoke("get_playback_snapshot");
+      return snapshot.queueLength === 2 ? snapshot : false;
+    });
+    const beforeModes = await invoke("get_playback_snapshot");
+    await page.getByRole("button", { name: "Open mini player" }).click();
+    await page.getByRole("contentinfo", { name: "Mini now playing" }).waitFor({ state: "visible" });
+    const miniSnapshot = await invoke("get_playback_snapshot");
+    if (miniSnapshot.currentTrackId !== beforeModes.currentTrackId || miniSnapshot.phase !== beforeModes.phase) {
+      throw new Error(`entering Mini mode changed playback state: ${JSON.stringify({ beforeModes, miniSnapshot })}`);
+    }
+
+    await page.getByRole("button", { name: "Open expanded now playing" }).click();
+    const expanded = page.getByRole("dialog", { name: "Expanded now playing" });
+    await expanded.getByText("QUALITY / PROVENANCE", { exact: true }).waitFor({ state: "visible" });
+    await expanded.getByRole("link", { name: "Lyrics" }).waitFor({ state: "visible" });
+    await expanded.getByRole("button", { name: "Inspect track" }).waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await expanded.waitFor({ state: "hidden" });
+
+    await page.getByRole("button", { name: "Open queue" }).click();
+    const queue = page.getByRole("dialog", { name: "Persistent queue" });
+    await queue.waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await queue.waitFor({ state: "hidden" });
+
+    await page.getByRole("link", { name: "Open lyrics" }).click();
+    await page.waitForURL(/\/lyrics/);
+    await page.getByRole("link", { name: "Your library", exact: true }).click();
+    await page.getByRole("heading", { name: "Your local collection" }).waitFor({ state: "visible" });
+
+    await page.keyboard.press("Control+k");
+    const palette = page.getByRole("region", { name: "Command palette" });
+    await palette.getByRole("button", { name: "Open queue" }).waitFor({ state: "visible" });
+    await palette.getByRole("textbox", { name: "Search commands" }).fill("expanded");
+    await palette.getByRole("button", { name: "Open expanded now playing" }).waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await palette.waitFor({ state: "hidden" });
+
+    const finalSnapshot = await invoke("get_playback_snapshot");
+    if (finalSnapshot.currentTrackId !== playing.currentTrackId || finalSnapshot.queueLength !== queued.queueLength) {
+      throw new Error(`the Plan 11 shell flow changed the persistent playback queue unexpectedly: ${JSON.stringify({ playing, queued, finalSnapshot })}`);
+    }
+    console.log("packaged Plan 11 shell, inspector, appearance, queue, and no-autoplay flow passed");
   } else if (mode === "plan09") {
     await invoke("add_library_folders", { paths: [fixtureFolder] });
     await waitFor("the synthetic lyrics folder scan", async () => {
@@ -347,6 +479,25 @@ try {
       throw new Error(`the Plan 08 current position did not resume: ${JSON.stringify({ queue, resumed })}`);
     }
     console.log("packaged Plan 08 restart persistence passed");
+  } else if (mode === "plan11-restart") {
+    const status = await waitFor("the indexed Plan 11 library after restart", async () => {
+      const next = await invoke("get_library_status");
+      return next.folders?.length === 1 && next.indexedTrackCount >= 2 && !next.isScanning ? next : false;
+    });
+    const settings = await invoke("get_settings_snapshot");
+    if (settings.theme !== "custom" || settings.layoutProfile !== "dense" || settings.customTheme?.name !== "Packaged Plan 11" || settings.firstRun !== false) {
+      throw new Error(`the migrated Plan 11 appearance settings were not retained after restart: ${JSON.stringify(settings)}`);
+    }
+    const snapshot = await invoke("get_playback_snapshot");
+    const queue = await invoke("get_queue_workspace");
+    if (!status || snapshot.phase !== "idle" || snapshot.queueLength !== 2 || !snapshot.currentTrackId || !queue.current || queue.later?.length !== 1) {
+      throw new Error(`the Plan 11 queue did not persist without autoplay: ${JSON.stringify({ status, snapshot, queue })}`);
+    }
+    const inspector = await invoke("get_track_inspector", { trackId: snapshot.currentTrackId });
+    if (inspector.sources?.some((source) => source.provider === "local" && source.canonicalUrl !== null)) {
+      throw new Error(`the restarted Plan 11 inspector returned a local canonical URL: ${JSON.stringify(inspector)}`);
+    }
+    console.log("packaged Plan 11 restart appearance, queue, inspector, and no-autoplay boundary passed");
   } else if (mode === "plan09-restart") {
     const status = await waitFor("the indexed Plan 09 library after restart", async () => {
       const next = await invoke("get_library_status");
