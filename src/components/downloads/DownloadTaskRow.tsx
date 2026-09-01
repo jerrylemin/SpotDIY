@@ -1,5 +1,6 @@
 import { ProviderBadge } from "../common/ProviderBadge";
 import { SpotIcon } from "../icons/SpotIcon";
+import { useUiStore } from "../../stores/ui-store";
 import type { DownloadTask, DownloadTaskId } from "../../types/domain";
 
 interface DownloadTaskRowProps {
@@ -55,6 +56,7 @@ function etaLabel(value: number | null): string {
 }
 
 export function DownloadTaskRow({ task, actionPending, onCancel, onRetry, onOpenLocation }: DownloadTaskRowProps) {
+  const openTrackInspector = useUiStore((state) => state.openTrackInspector);
   const cancellable = task.state === "queued" || task.state === "resolving" || task.state === "downloading" || task.state === "postprocessing";
   const retryable = task.state === "failed" || task.state === "cancelled";
   const hasOutput = task.state === "completed" && !task.outputMissing;
@@ -82,6 +84,7 @@ export function DownloadTaskRow({ task, actionPending, onCancel, onRetry, onOpen
         <div className="download-task-facts"><span>{bytesLabel(task.downloadedBytes)} / {bytesLabel(task.expectedBytes)}</span><span>{speedLabel(task.speedBytesPerSecond)} · {etaLabel(task.etaSeconds)}</span></div>
       </div>
       <div className="download-task-actions">
+        {task.targetTrackId ? <button className="text-link" onClick={() => openTrackInspector(task.targetTrackId!)} type="button"><SpotIcon name="info" size={14} /> Inspect track</button> : null}
         {cancellable ? <button className="button button-small" disabled={actionPending} onClick={() => onCancel(task.id)} type="button">Cancel</button> : null}
         {retryable ? <button className="button button-small" disabled={actionPending} onClick={() => onRetry(task.id)} type="button">Retry</button> : null}
         {hasOutput || task.outputMissing ? <button className="text-link" disabled={actionPending} onClick={() => onOpenLocation(task.id)} type="button"><SpotIcon name="folder" size={14} /> Open folder</button> : null}

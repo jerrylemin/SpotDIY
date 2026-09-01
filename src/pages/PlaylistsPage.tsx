@@ -16,7 +16,10 @@ import { CSS } from "@dnd-kit/utilities";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { EmptyState } from "../components/common/EmptyState";
+import { ContextActionMenu } from "../components/common/ContextActionMenu";
 import { SpotIcon } from "../components/icons/SpotIcon";
+import { usePlayback } from "../hooks/usePlayback";
+import { useUiStore } from "../stores/ui-store";
 import {
   createPlaylist,
   createPlaylistBranch,
@@ -74,9 +77,14 @@ interface SortablePlaylistItemProps {
   editable: boolean;
   onSelect: (item: PlaylistItem) => void;
   onRemove: (item: PlaylistItem) => void;
+  onPlayNow: (item: PlaylistItem) => void;
+  onPlayNext: (item: PlaylistItem) => void;
+  onQueue: (item: PlaylistItem) => void;
+  onInspect: (item: PlaylistItem) => void;
+  playbackPending: boolean;
 }
 
-function SortablePlaylistItem({ item, selected, editable, onSelect, onRemove }: SortablePlaylistItemProps) {
+function SortablePlaylistItem({ item, selected, editable, onSelect, onRemove, onPlayNow, onPlayNext, onQueue, onInspect, playbackPending }: SortablePlaylistItemProps) {
   const {
     attributes,
     listeners,
@@ -87,6 +95,16 @@ function SortablePlaylistItem({ item, selected, editable, onSelect, onRemove }: 
   } = useSortable({ id: item.id, data: { index: item.position } });
 
   return (
+    <ContextActionMenu
+      actions={[
+        { id: "play", label: "Play now", onSelect: () => onPlayNow(item), disabled: playbackPending, disabledReason: "Playback is busy" },
+        { id: "play-next", label: "Play next", onSelect: () => onPlayNext(item), disabled: playbackPending, disabledReason: "Playback is busy" },
+        { id: "queue", label: "Add to queue", onSelect: () => onQueue(item), disabled: playbackPending, disabledReason: "Playback is busy" },
+        { id: "inspect", label: "Inspect", onSelect: () => onInspect(item) },
+      ]}
+      className="playlist-item-context-menu"
+      label={`Actions for track ${item.trackId}`}
+    >
     <div className={`playlist-item-row${selected ? " playlist-item-row-selected" : ""}`} ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}>
       <input aria-label={`Select track ${item.trackId}`} checked={selected} disabled={!editable} onChange={() => onSelect(item)} type="checkbox" />
       <button aria-label={`Drag track ${item.trackId}`} className="playlist-drag-handle" disabled={!editable} ref={setActivatorNodeRef} type="button" {...attributes} {...listeners}>⋮⋮</button>
@@ -97,11 +115,14 @@ function SortablePlaylistItem({ item, selected, editable, onSelect, onRemove }: 
       </div>
       <button aria-label={`Remove track ${item.trackId}`} className="queue-entry-action queue-entry-remove" disabled={!editable} onClick={() => onRemove(item)} type="button">Remove</button>
     </div>
+    </ContextActionMenu>
   );
 }
 
 export function PlaylistsPage() {
   const nativeRuntime = isTauriRuntime();
+  const playback = usePlayback();
+  const openTrackInspector = useUiStore((state) => state.openTrackInspector);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<PlaylistId | null>(null);
   const selectedPlaylistRef = useRef<PlaylistId | null>(null);
@@ -270,7 +291,7 @@ export function PlaylistsPage() {
                 <DndContext onDragEnd={handleItemDragEnd} sensors={sensors}>
                   <SortableContext items={selectedPlaylist.items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
                     <div className="playlist-item-list">
-                      {selectedPlaylist.items.length === 0 ? <div className="queue-section-empty">No tracks yet. Add one from Your library.</div> : selectedPlaylist.items.map((item) => <SortablePlaylistItem editable={editablePlaylist} item={item} key={item.id} onRemove={(row) => void runAction(() => removePlaylistItem(selectedPlaylist.id, row.id), "SpotDIY could not remove that playlist item.")} onSelect={(row) => setSelectedItemIds((current) => { const next = new Set(current); if (next.has(row.id)) next.delete(row.id); else next.add(row.id); return next; })} selected={selectedItemIds.has(item.id)} />)}
+                      {selectedPlaylist.items.length === 0 ? <div className="queue-section-empty">No tracks yet. Add one from Your library.</div> : selectedPlaylist.items.map((item) => <SortablePlaylistItem editable={editablePlaylist} item={item} key={item.id} onInspect={(row) => openTrackInspector(row.trackId)} onPlayNext={(row) => { void playback.playNext(row.trackId, row.requestedSourceId); }} onPlayNow={(row) => { void playback.playNow(row.trackId, row.requestedSourceId); }} onQueue={(row) => { void playback.addToQueue(row.trackId, row.requestedSourceId); }} onRemove={(row) => void runAction(() => removePlaylistItem(selectedPlaylist.id, row.id), "SpotDIY could not remove that playlist item.")} onSelect={(row) => setSelectedItemIds((current) => { const next = new Set(current); if (next.has(row.id)) next.delete(row.id); else next.add(row.id); return next; })} playbackPending={playback.pending} selected={selectedItemIds.has(item.id)} />)}
                     </div>
                   </SortableContext>
                 </DndContext>

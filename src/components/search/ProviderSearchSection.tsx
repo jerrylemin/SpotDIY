@@ -48,7 +48,7 @@ export function ProviderSearchSection({ section, status, onRetry }: ProviderSear
       {section.state === "loading" ? (
         <div aria-live="polite" className="provider-result-empty provider-result-loading"><SpotIcon name="spark" size={18} /><span>Searching this source independently…</span></div>
       ) : hasResults ? (
-        <div className="provider-result-list">{section.results.map((result) => <SearchResultCard key={`${result.providerItemId}-${result.originalRank}`} result={result} />)}</div>
+        <div className="provider-result-list">{section.results.map((result) => <SearchResultCard capabilities={status?.capabilities} key={`${result.providerItemId}-${result.originalRank}`} result={result} />)}</div>
       ) : section.state === "ready" ? (
         <div className="provider-result-empty"><SpotIcon name="search" size={18} /><span>No results for this source.</span></div>
       ) : (

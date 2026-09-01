@@ -10,7 +10,7 @@ interface Command {
   label: string;
   hint: string;
   icon: SpotIconName;
-  path?: "/" | "/search" | "/library" | "/playlists" | "/downloads" | "/settings";
+  path?: "/" | "/search" | "/library" | "/lyrics" | "/playlists" | "/downloads" | "/settings";
   action?: () => void;
   disabled?: boolean;
 }
@@ -20,7 +20,12 @@ export function CommandPalette() {
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
   const navigate = useNavigate();
   const playback = usePlayback();
+  const playerMode = useUiStore((state) => state.playerMode);
+  const setPlayerMode = useUiStore((state) => state.setPlayerMode);
+  const setQueueDrawerOpen = useUiStore((state) => state.setQueueDrawerOpen);
+  const openTrackInspector = useUiStore((state) => state.openTrackInspector);
   const inputRef = useRef<HTMLInputElement>(null);
+  const originRef = useRef<HTMLElement | null>(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
 
@@ -53,7 +58,7 @@ export function CommandPalette() {
     {
       id: "clear-queue",
       label: "Clear queue",
-      hint: playback.snapshot.queueLength > 0 ? "Stop playback and empty the transient queue" : "Queue is empty",
+      hint: playback.snapshot.queueLength > 0 ? "Stop playback and empty the persistent queue" : "Queue is empty",
       icon: "trash",
       disabled: playback.snapshot.queueLength === 0 || playback.pending,
       action: () => { void playback.clearQueue(); },
@@ -63,11 +68,55 @@ export function CommandPalette() {
   const commands = useMemo<Command[]>(() => [
     { id: "search", label: "Search sources", hint: "Find music across your sources", icon: "search", path: "/search" },
     { id: "library", label: "Open library", hint: "Browse local files and playback actions", icon: "library", path: "/library" },
+    { id: "lyrics", label: "Open lyrics", hint: "Follow lyrics and track notes", icon: "lyrics", path: "/lyrics" },
     { id: "playlists", label: "Open playlists", hint: "Curate and organize listening", icon: "playlist", path: "/playlists" },
     { id: "downloads", label: "Open downloads", hint: "View offline tasks and files", icon: "download", path: "/downloads" },
     { id: "settings", label: "Open settings", hint: "Storage, sources, and appearance", icon: "settings", path: "/settings" },
+    {
+      id: "queue",
+      label: "Open queue",
+      hint: "Open the persistent playback workspace",
+      icon: "queue",
+      action: () => setQueueDrawerOpen(true),
+    },
+    {
+      id: "inspect-current",
+      label: "Inspect current track",
+      hint: playback.snapshot.currentTrackId ? "Open persisted metadata, sources, and collection state" : "Nothing is currently selected",
+      icon: "info",
+      disabled: playback.snapshot.currentTrackId === null,
+      action: () => {
+        if (playback.snapshot.currentTrackId) {
+          openTrackInspector(playback.snapshot.currentTrackId);
+        }
+      },
+    },
+    {
+      id: "standard-player",
+      label: "Use standard player",
+      hint: playerMode === "standard" ? "Standard bottom player is active" : "Use the full transport bar",
+      icon: "collapse",
+      disabled: playerMode === "standard",
+      action: () => setPlayerMode("standard"),
+    },
+    {
+      id: "mini-player",
+      label: "Use mini player",
+      hint: playerMode === "mini" ? "Mini player is active" : "Keep transport compact while browsing",
+      icon: "collapse",
+      disabled: playerMode === "mini",
+      action: () => setPlayerMode("mini"),
+    },
+    {
+      id: "expanded-player",
+      label: "Open expanded now playing",
+      hint: playerMode === "expanded" ? "Expanded now playing is active" : "Open the full in-shell player surface",
+      icon: "expand",
+      disabled: playerMode === "expanded",
+      action: () => setPlayerMode("expanded"),
+    },
     ...transportCommands,
-  ], [transportCommands]);
+  ], [openTrackInspector, playback.snapshot.currentTrackId, playerMode, setPlayerMode, setQueueDrawerOpen, transportCommands]);
 
   const filteredCommands = useMemo(
     () => commands.filter((command) => `${command.label} ${command.hint}`.toLowerCase().includes(query.toLowerCase())),
@@ -76,10 +125,17 @@ export function CommandPalette() {
 
   useEffect(() => {
     if (open) {
+      originRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       setQuery("");
       setSelected(0);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
+    return () => {
+      if (originRef.current?.isConnected) {
+        originRef.current.focus();
+      }
+      originRef.current = null;
+    };
   }, [open]);
 
   if (!open) return null;
@@ -103,7 +159,6 @@ export function CommandPalette() {
               if (event.key === "ArrowDown") { event.preventDefault(); setSelected((value) => Math.min(value + 1, filteredCommands.length - 1)); }
               if (event.key === "ArrowUp") { event.preventDefault(); setSelected((value) => Math.max(value - 1, 0)); }
               if (event.key === "Enter") { event.preventDefault(); execute(filteredCommands[selected]); }
-              if (event.key === "Escape") setOpen(false);
             }}
             placeholder="What do you want to do?"
             ref={inputRef}
@@ -119,6 +174,7 @@ export function CommandPalette() {
               key={command.id}
               onClick={() => execute(command)}
               onMouseEnter={() => setSelected(index)}
+              title={command.disabled ? command.hint : undefined}
               type="button"
             >
               <span className="command-icon"><SpotIcon name={command.icon} size={17} /></span>

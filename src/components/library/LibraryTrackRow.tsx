@@ -5,6 +5,7 @@ import { ProviderBadge } from "../common/ProviderBadge";
 import { ContextActionMenu } from "../common/ContextActionMenu";
 import { SpotIcon } from "../icons/SpotIcon";
 import { isTauriRuntime } from "../../services/ipc";
+import { useUiStore } from "../../stores/ui-store";
 import type { LibraryTrack, Playlist, SourceId, Tag, TrackCollectionState } from "../../types/domain";
 
 interface LibraryTrackRowProps {
@@ -47,13 +48,13 @@ function formatSampleRate(sampleRateHz: number | null): string | null {
 }
 
 function qualityFacts(track: LibraryTrack): string[] {
-  return [
+  return Array.from(new Set([
     track.codec ?? track.container,
     track.bitrateKbps === null ? null : `${track.bitrateKbps} kbps`,
     formatSampleRate(track.sampleRateHz),
     track.bitDepth === null ? null : `${track.bitDepth}-bit`,
     formatDuration(track.durationMs),
-  ].filter((fact): fact is string => Boolean(fact));
+  ].filter((fact): fact is string => Boolean(fact))));
 }
 
 function statusLabel(track: LibraryTrack): string {
@@ -94,6 +95,7 @@ export function LibraryTrackRow({
     ? convertFileSrc(track.artworkPath, "asset")
     : null;
   const [artworkFailed, setArtworkFailed] = useState(false);
+  const openTrackInspector = useUiStore((state) => state.openTrackInspector);
 
   useEffect(() => {
     setArtworkFailed(false);
@@ -134,6 +136,7 @@ export function LibraryTrackRow({
           { id: "play", label: "Play now", onSelect: () => onPlayNow(track), disabled: !canPlay || playbackPending, disabledReason: "Track unavailable" },
           { id: "play-next", label: "Play next", onSelect: () => onPlayNext(track), disabled: !canPlay || playbackPending, disabledReason: "Track unavailable" },
           { id: "queue", label: "Add to queue", onSelect: () => onAddToQueue(track), disabled: !canPlay || playbackPending, disabledReason: "Track unavailable" },
+          { id: "inspect", label: "Inspect", onSelect: () => openTrackInspector(track.trackId) },
           { id: "reveal", label: "Open location", onSelect: () => onReveal(track.sourceId), disabled: !canReveal || revealPending, disabledReason: "File unavailable" },
           { id: "like", label: collectionState?.liked ? "Unlike" : "Like", onSelect: () => onLike(track), disabled: !isTauriRuntime() || collectionPending, disabledReason: "Native app only" },
         ]}
@@ -171,6 +174,15 @@ export function LibraryTrackRow({
         >
           <SpotIcon name="queue" size={14} />
           Add to queue
+        </button>
+        <button
+          aria-label={`Inspect ${track.title}`}
+          className="button button-quiet button-small"
+          onClick={() => openTrackInspector(track.trackId)}
+          type="button"
+        >
+          <SpotIcon name="info" size={14} />
+          Inspect
         </button>
         <button
           aria-label={`Open file location for ${track.title}`}
