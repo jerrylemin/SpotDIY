@@ -66,3 +66,19 @@ stale-generation events, and exposes manual retry after exhaustion. Shutdown pub
 
 See [ADR-0009](ADRs/ADR-0009-external-mpv-json-ipc.md) and the repository
 `ARCHITECTURE.md` for the implementation boundary.
+
+## Plan 06 source resolution
+
+`SourceResolver` now owns source ranking for normal playback and exact-source
+switches. A currently playable `preferredSourceId` wins; otherwise the
+validated settings provider order is used. Local candidates are playable only
+when available, playback-capable, and successfully resolved through
+`LibraryService`. Known lossless local codecs (`flac`, `alac`, `pcm_*`,
+`wavpack`, `ape`) rank ahead of lossy sources, followed by bit depth, sample
+rate, bitrate, and stable `SourceId`.
+
+YouTube and SoundCloud return `ProviderPlaybackNotImplemented`; Spotify
+returns `MetadataOnly`. No online URL is sent to mpv and yt-dlp is not invoked
+for playback. `PlaybackSourceOption` carries `availabilityDetail` so the
+existing source selector/player surface can explain unavailable sources
+without a UI redesign.

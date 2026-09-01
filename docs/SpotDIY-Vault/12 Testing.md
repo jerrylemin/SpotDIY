@@ -53,3 +53,20 @@ The isolated packaged search smoke passes Local indexing/result rendering,
 missing-provider failure isolation, concurrent cancellation, Spotify gating,
 and owned-process cleanup. No provider credentials, tokens, raw output, or
 provider payloads are retained by the smoke runs.
+
+## Plan 06 verification
+
+Plan 06 passes 279 Rust unit tests plus one real `mpv_smoke` integration test,
+40 Vitest tests, 45 Playwright runs across three viewport projects, strict
+frontend typecheck/lint/build, Rust fmt, all-features clippy with warnings
+denied, and the external-target Tauri release build. Focused tests cover
+normalization, all guarded qualifiers, matcher thresholds/duration/version
+guards, merge/split precedence, migration preservation, remote identity
+idempotence/conflicts, resolver preference/quality/readiness explanations,
+and strict fusion/resolution IPC DTOs.
+
+The explicit real mpv synthetic-WAV smoke and packaged playback/restart/owned
+process cleanup smoke pass. The named v2-to-v3 migration smoke passes without
+losing existing tracks, sources, or settings. Spotify remains excluded from
+Plan 06 fusion and playback, and no media, credentials, tokens, or raw
+provider output are retained.

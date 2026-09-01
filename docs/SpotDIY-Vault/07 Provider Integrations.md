@@ -20,3 +20,18 @@ See the dated reports in `Research/` for current API constraints and primary-sou
   process memory, and the explicit gate keeps the provider disabled by default.
 - Search results are transient. Provider payloads, tokens, credentials, and
   raw tool output are not stored in SQLite.
+
+## Plan 06 fusion and playback boundary
+
+Source Fusion may evaluate Local, YouTube, and SoundCloud candidates, but
+Spotify is excluded from automatic/manual fusion, overrides, acceptance,
+resolver playback, and cross-provider candidate selection. Spotify's isolated
+Plan 05 search lens and PKCE/compliance gate are unchanged.
+
+Explicit acceptance persists only a validated YouTube/SoundCloud provider
+identity, canonical URL when present, candidate duration, derived guarded
+version, availability, and backend-owned metadata capabilities. It does not
+persist search results in bulk, create a local-file record, move a track, or
+change target metadata. YouTube and SoundCloud remain metadata/search-only for
+playback in Plan 06; their resolver explanation is
+`ProviderPlaybackNotImplemented`.

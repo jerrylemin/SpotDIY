@@ -13,3 +13,5 @@
 - [ADR-0010](docs/SpotDIY-Vault/ADRs/ADR-0010-source-adapters-and-search.md): concurrent provider adapters, typed SearchId lifecycle, partial results, provider-local sorting, bounded TTL cache, and no provider persistence.
 - [ADR-0011](docs/SpotDIY-Vault/ADRs/ADR-0011-spotify-pkce-compliance-isolation.md): loopback Authorization Code with S256 PKCE, keyring/memory-only tokens, no client secret, explicit development gate, and Spotify lens isolation.
 - Plan 05 delivery (`58b5adc` through `ab6169d`): Local/YouTube/SoundCloud search, isolated Spotify PKCE boundary, strict frontend search UI, browser/native/live/packaged coverage, and no schema migration.
+- [ADR-0012](docs/SpotDIY-Vault/ADRs/ADR-0012-source-fusion-and-resolver.md): conservative deterministic Source Fusion, manual override precedence, and preference-aware SourceResolver with local-only production playback.
+- Plan 06 delivery (`cf0248f`, `d4f72a7`, `4161810`, `afd0149`): migration 3, merge/split overrides, NFKD/Jaro-Winkler matching, explicit YouTube/SoundCloud source acceptance, resolver-backed playback, typed fusion/resolution IPC, and final native/browser/package verification.

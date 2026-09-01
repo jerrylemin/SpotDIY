@@ -125,3 +125,41 @@ Spotify authorization is loopback-only on `127.0.0.1` with a dynamic port and
 S256 PKCE. Access and refresh tokens stay in the Windows credential seam or
 process memory, and catalog search remains disabled until the explicit
 development/compliance gate is enabled.
+
+## Plan 06 source fusion and resolver boundary
+
+```text
+ephemeral SearchResult + UnifiedTrack
+              |
+              v
+  NFKD normalization -> integer Jaro-Winkler matcher
+              |
+              +--> typed FusionEvaluation (read-only)
+              |
+              `--> explicit accept_match -> SourceRepository -> TrackSource
+
+UnifiedTrack + settings preference + runtime readiness
+              |
+              v
+        SourceResolver -> ordered SourceResolution
+              |
+              v
+        PlaybackService -> LibraryService path -> mpv
+```
+
+`SourceFusionService` applies the Spotify exclusion, entity/identity checks,
+target-specific split overrides, one-target merge overrides, guarded version
+comparison, title/artist hard minima, duration bands, and the weighted 8800
+automatic threshold. Evaluation and best-match selection do not write SQLite;
+only explicit acceptance or override operations write. Accepted remote sources
+use backend-owned YouTube/SoundCloud metadata capabilities and never create a
+local-file row or change track metadata/preferred source.
+
+`SourceResolver` first honors a currently playable per-track preference, then
+the validated provider preference order. Local candidates require availability,
+playback capability, and a successful managed `LibraryService` path check;
+local quality ranks known lossless codecs, then bit depth, sample rate,
+bitrate, and stable `SourceId`. YouTube and SoundCloud remain
+`ProviderPlaybackNotImplemented`, Spotify remains `MetadataOnly`, and no
+online URL or yt-dlp playback path reaches mpv. Its narrow readiness probe is
+the test seam for future provider playback.

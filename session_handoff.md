@@ -77,7 +77,21 @@ Plan 05 delivery commits: `58b5adc`, `cbcb43e`, `facab20`, `0db5eac`,
   because Windows known-folder resolution ignores a child `LOCALAPPDATA`
   override; standard startup remains `%LOCALAPPDATA%\SpotDIY`.
 
+## Plan 06 completion
+
+Plan 06 is complete through implementation tip `afd0149`, with documentation
+closure committed separately. The delivery adds migration 3 and durable
+merge/split overrides, a deterministic conservative matcher, explicit remote
+source acceptance, a settings-aware SourceResolver, resolver-backed playback,
+source availability explanations, and narrow typed fusion/resolution IPC.
+
+The final verification log records 279 Rust tests, 40 Vitest tests, 45
+Playwright runs, frontend/native quality gates, the external-target Tauri
+release build, real mpv smoke, packaged playback/restart/process cleanup, and
+the v2-to-v3 migration smoke. Spotify remains excluded from Plan 06 fusion,
+acceptance, overrides, and playback; its Plan 05 PKCE/gate boundary is
+unchanged.
+
 ## Next atomic task
 
-Plan 06 - Source Fusion and Resolver is not started. Preserve the local
-playback and provider boundaries until that specification is active.
+STOPPED AFTER PLAN 06. Awaiting external ChatGPT GitHub review before Plan 07.

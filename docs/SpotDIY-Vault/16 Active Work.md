@@ -49,11 +49,24 @@ keyring/memory-only tokens, no client secret, and an explicit disabled-by-
 default gate.
 
 The delivery commits run from `58b5adc` through `ab6169d`; exact test and smoke
-evidence is in `docs/execution/verification-log.md`. Plan 05 adds no database
-migration and leaves Source Fusion, resolver policy, provider playback,
-downloads, and persistent queue behavior for later plans.
+evidence is in `docs/execution/verification-log.md`. Plan 05 added no database
+migration and left Source Fusion, resolver policy, provider playback,
+downloads, and persistent queue behavior outside its boundary. Plan 06 below
+records the approved follow-on delivery.
+
+## Plan 06 completion
+
+Plan 06 is complete through implementation tip `afd0149`. It delivers the
+conservative deterministic Source Fusion matcher, migration-3 user overrides,
+explicit YouTube/SoundCloud source acceptance, the settings-aware
+`SourceResolver`, resolver-backed playback/source switching, availability
+explanations, and narrow typed IPC. Final verification evidence is recorded in
+`docs/execution/verification-log.md`.
+
+The current boundary remains local-only production playback. Spotify remains
+metadata-only and excluded from fusion; downloads, playlists, persistent queue,
+lyrics, and later visual/performance work remain outside this plan.
 
 ## Next atomic task
 
-Plan 06 - Source Fusion and Resolver is not started. Stop here until its
-approved specification is active.
+STOPPED AFTER PLAN 06. Awaiting external ChatGPT GitHub review before Plan 07.

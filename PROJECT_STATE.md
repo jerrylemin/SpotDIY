@@ -64,5 +64,35 @@ Plan 05 — Source Adapters and Search. Do not begin Source Fusion or provider p
 
 ## Next slice after Plan 05
 
-Plan 06 - Source Fusion and Resolver is not started; stop here until that
-boundary is active.
+Plan 06 - Source Fusion and Resolver is complete through implementation tip
+`afd0149` and the documentation closure that follows. The next slice is Plan
+07 only after the external review requested by the delivery workflow.
+
+## Plan 06 delivery snapshot (2026-09-01)
+
+- Deterministic source normalization uses Unicode NFKD, accent/punctuation and
+  presentation-noise cleanup, feature-artist extraction, guarded version
+  qualifiers including Nightcore, and conservative artist-prefix handling.
+- Automatic matching uses Jaro-Winkler integer basis points with title 55%,
+  artists 35%, duration 10%, an 8800 threshold, 9000 title/artist hard
+  minimums, explicit duration bands, exact guarded-version equality, stable
+  ambiguity handling, and typed explanations.
+- Migration 3 adds only `user_track_overrides`. Merge overrides have one
+  forced target per provider identity; split overrides are target-specific;
+  Spotify is rejected; search evaluation remains read-only; explicit accepted
+  YouTube/SoundCloud sources are persisted without local-file rows or metadata
+  moves.
+- `SourceResolver` ranks the preferred playable source first, then validated
+  settings/provider order and local quality. Local readiness requires the
+  managed library path; YouTube/SoundCloud remain not implemented for
+  playback; Spotify remains metadata-only. Playback and source switching use
+  the resolver, and unavailable sources carry typed explanations.
+- Final evidence: 279 Rust tests, 40 Vitest tests, 45 Playwright runs, strict
+  typecheck/lint/fmt/clippy, frontend and Tauri builds, real mpv smoke,
+  packaged playback/restart/cleanup smoke, and an explicit v2-to-v3 migration
+  smoke all pass. Cargo output remains at `C:\CargoTarget\SpotDIY`; the
+  repository-local `src-tauri\target` is absent.
+
+## Next slice after Plan 06
+
+STOPPED AFTER PLAN 06. Awaiting external ChatGPT GitHub review before Plan 07.

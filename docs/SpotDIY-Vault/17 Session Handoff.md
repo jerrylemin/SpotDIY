@@ -13,9 +13,9 @@ three-width Playwright (9 runs), synthetic real-mpv transport, and packaged
 playback/restart/process cleanup. The single fresh independent review passed
 with no critical, high, or correctness/security medium findings.
 
-The next plan is Plan 05 — Source Adapters and Search. Do not begin Source
-Fusion, provider playback, or persistent queue work in that plan without its
-own approved boundary.
+Plan 05 was the preceding plan: its approved boundary excluded Source Fusion,
+provider playback, and persistent queue work. The completed Plan 06 handoff
+below records the separately approved follow-on delivery.
 
 ## Plan 05 handoff
 
@@ -26,5 +26,20 @@ live metadata smoke, and packaged search smoke are delivered. The final
 verification log records 250 Rust tests, 38 Vitest tests, 45 Playwright runs,
 and the successful release/package gates.
 
-Plan 06 - Source Fusion and Resolver is not started. Provider search results
-remain transient and Spotify remains metadata-only and gated.
+At the Plan 05 boundary, Plan 06 was still pending. The completed Plan 06
+handoff below records the follow-on delivery; provider search results remain
+transient and Spotify remains metadata-only and gated.
+
+## Plan 06 handoff
+
+Plan 06 is complete through implementation tip `afd0149`, with the delivery
+documentation commit following final verification. Migration 3, deterministic
+fusion normalization/matching, durable merge/split overrides, explicit remote
+source acceptance, SourceResolver ranking, resolver-backed playback, typed
+availability explanations, and five narrow IPC commands are present.
+
+The final log records 279 Rust unit tests plus real mpv smoke, 40 Vitest tests,
+45 Playwright runs, release/package smoke, and v2-to-v3 migration coverage.
+Cargo output is external at `C:\CargoTarget\SpotDIY`; repository-local
+`src-tauri\target` is absent. STOPPED AFTER PLAN 06 pending external GitHub
+review before Plan 07.

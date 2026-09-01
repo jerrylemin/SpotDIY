@@ -161,3 +161,31 @@ below.
 - `src-tauri\target` was absent; generated Playwright result output was
   removed after verification. No provider credentials, tokens, raw tool
   output, or provider payloads were retained in the repository.
+
+## Plan 06 source fusion and resolver (2026-09-01)
+
+- `pnpm typecheck` - passed.
+- `pnpm lint` - passed.
+- `pnpm test` - passed: 40 Vitest tests across 10 files.
+- `pnpm exec playwright test` - passed: 45 runs across the 1280, 1920, and
+  2560 viewport projects.
+- `pnpm build` - passed. Existing Browserslist and Tailwind content notices
+  remained non-fatal.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` - passed.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+  --all-features -- -D warnings` - passed after the concrete new-code loop/
+  Option-style corrections.
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` - passed:
+  279 unit tests and 1 `mpv_smoke` integration test, 0 failures.
+- Explicit real mpv smoke with `SPOTDIY_REAL_MPV_SMOKE=1` - passed: 1 test;
+  synthetic WAV load, transport, seek, device, EOF, and cleanup behavior.
+- `pnpm tauri build` - passed. Release executable and NSIS bundle were built
+  under external `C:\CargoTarget\SpotDIY`.
+- Packaged playback smoke with `SPOTDIY_PACKAGED_SMOKE=1` - passed:
+  indexing/playback, restart persistence, graceful close, owned-mpv cleanup,
+  and transient queue boundary.
+- Named v2-to-v3 migration smoke - passed:
+  `schema_two_fixture_upgrades_to_three_without_losing_tracks_sources_or_settings`.
+- `src-tauri\target` remained absent. No media files were modified or deleted;
+  no provider credentials, tokens, raw output, or provider payloads were
+  retained in SQLite or the repository.

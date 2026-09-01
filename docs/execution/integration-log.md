@@ -72,3 +72,26 @@
 - Integrated browser, native, metadata-only live, and isolated packaged smoke
   coverage. The packaged harness validates local indexing/result rendering,
   failure isolation, cancellation, Spotify gating, and owned-process cleanup.
+
+## Plan 06 source fusion and resolver
+
+- Integrated migration 3 and the `user_track_overrides` repository with
+  transactional one-target Merge replacement, target-specific Split rows, and
+  Spotify exclusion.
+- Integrated deterministic NFKD normalization, guarded version extraction,
+  integer Jaro-Winkler scoring, duration bands, hard title/artist minima,
+  weighted automatic matching, stable ambiguity handling, and typed fusion
+  explanations.
+- Integrated explicit YouTube/SoundCloud match acceptance into
+  `TrackSource` persistence. Accepted remote sources use backend capability
+  truth, retain validated provider URLs, and never create `local_files` or
+  mutate target metadata/preferred-source state.
+- Integrated settings-aware `SourceResolver` ranking and its readiness probe
+  seam into automatic playback and exact source switching. Local playback
+  remains gated by availability, capability, and managed-library path
+  resolution; online providers remain non-playable in this plan.
+- Integrated strict frontend fusion/resolution DTOs and only the five scoped
+  Tauri commands. No Fusion UI, automatic SearchPage grouping, provider URL
+  playback, download path, or automatic search persistence was added.
+- Plan 06 implementation commits are `cf0248f`, `d4f72a7`, `4161810`, and
+  `afd0149`; documentation closure follows the final verification gates.

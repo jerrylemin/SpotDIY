@@ -33,3 +33,26 @@
   isolated packaged search smoke passes Local indexing/result rendering,
   provider failure isolation, cancellation, Spotify gating, and helper
   process cleanup.
+
+## Plan 06 verification
+
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass;
+  Vitest reports 40 tests across 10 files. Existing Browserslist and Tailwind
+  content notices remain non-fatal.
+- Browser: `pnpm exec playwright test` passes 45 runs across the 1280, 1920,
+  and 2560 viewport projects.
+- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`,
+  all-features clippy with warnings denied, and all-target Rust tests pass;
+  the suite reports 279 unit tests plus 1 real `mpv_smoke` integration test.
+- Focused Plan 06 coverage includes normalization and all guarded qualifiers,
+  conservative matcher/duration/version/ambiguity rules, override precedence,
+  v2-to-v3 migration preservation, remote-source idempotence/conflicts, local
+  quality ordering, unavailable-source explanations, provider readiness, and
+  strict fusion/resolution IPC DTOs.
+- Runtime: explicit real synthetic-WAV mpv smoke passes; `pnpm tauri build`
+  passes with output under `C:\CargoTarget\SpotDIY`; packaged playback,
+  restart persistence, graceful shutdown, and owned-mpv cleanup smoke passes.
+- Storage: schema version 3, one `user_track_overrides` table plus its indexes,
+  no provider-search bulk persistence, no Spotify fusion rows, no secrets or
+  tokens in SQLite, no media mutation, and no repository-local
+  `src-tauri\target`.
