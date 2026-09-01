@@ -6,7 +6,8 @@ src/                         React/TanStack frontend
   components/                Shared shell, icons, empty states, badges
     library/                 Folder rows, track rows, quality/provenance and collection states
     queue/                   Persistent queue drawer, sections, snapshots, and drag handles
-    player/                  Playback controls, progress, volume, audio device menu
+    player/                  Playback controls, progress, volume, audio device menu, source switcher, Mini/Expanded player surfaces
+    inspector/               InspectorPanel, persisted Track Inspector, ephemeral search-result inspector
     search/                  Search controls, provider sections, result cards
     downloads/               Persistent task rows, progress, provenance, and actions
     lyrics/                  Synchronized lyrics, source precedence, and manual actions
@@ -17,13 +18,14 @@ src/                         React/TanStack frontend
     useDownloads.ts          Persistent download snapshots, events, and task mutations
     useQueue.ts              Queue workspace/event bridge and native queue mutations
     useLyrics.ts             Local-first lyrics queries, edits, provider actions, and sync state
+    useTrackInspector.ts     Read-only persisted Track Inspector query
   pages/                     Route-level screens
   services/                  Typed native IPC boundary
   stores/                    Zustand interaction state
   styles/                    SpotDIY visual system
   types/                     Shared frontend domain vocabulary
 src-tauri/                   Tauri 2 Rust application
-  migrations/                Ordered SQLite schema migrations (through 0006)
+  migrations/                Ordered SQLite schema migrations (through 0007)
   src/domain/                Typed unified music domain model
   src/db/                    SQLite initialization and focused repositories
   src/fusion/                Deterministic normalization, matching, and overrides
@@ -99,3 +101,20 @@ browser preview uses its bounded in-memory adapter. The shared primitives own
 focus, labels, disabled explanations, keyboard behavior, and reduced-motion
 defaults. The InspectorPanel/IconGallery is a development/design surface and
 does not add permanent navigation.
+
+## Plan 11 shell structure
+
+`AppShell` owns cross-surface presentation composition and Escape priority:
+command palette, inspector, queue drawer, then Expanded Now Playing. Zustand
+stores only session UI state (`playerMode` and inspector selection); TanStack
+Query owns inspector data and existing service snapshots. `PlayerBar` routes to
+the Standard footer, `MiniPlayer`, or `NowPlayingPanel`, all of which consume
+the same `usePlayback()` snapshot.
+
+`TrackInspectorService` and `get_track_inspector` expose purpose-built metadata,
+collection state, source capabilities, measured local quality, and validated
+remote canonical URLs without local paths. `track-actions.ts` is the pure
+capability/runtime policy used by search cards and shell menus. The packaged
+Plan 11 smoke covers migration 7, appearance persistence, live Home, inspector
+privacy, player modes, queue/Lyrics/palette navigation, restart persistence,
+and no-autoplay behavior.

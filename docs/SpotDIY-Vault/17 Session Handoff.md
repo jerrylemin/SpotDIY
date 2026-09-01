@@ -123,12 +123,31 @@ with no owned mpv process. Storage remains schema 6 with no migration 7;
 CodeGraph and Graphify were each refreshed once. Build output is external at
 `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
 
-Known limits: browser preview settings are session-scoped in memory, existing
-older v6 databases retain the base migration's historical settings allowlist
-because Plan 10 adds no migration 7, and full Track Inspector/Theme Studio,
-mobile UI, and Plan 11 player refinement remain future work.
+Known limits: browser preview settings are session-scoped in memory. Online
+playback and Spotify downloads remain unavailable; Theme Studio, mobile UI,
+and Plan 12 Windows overlays remain future work.
+
+## Plan 11 handoff
+
+Plan 11 is complete through `15031bf`. Migration 7 repairs the shipped
+schema-6 appearance-settings constraint by rebuilding only
+`settings_metadata`, copying all rows, and advancing the database to schema 7.
+The independent old-constraint fixture, Plan-10-shaped fixture, and fresh DB
+regressions pass.
+
+The shell now uses real Home state and existing service snapshots for persisted
+and ephemeral inspectors, source/quality/provenance surfaces, capability-aware
+actions, command-palette navigation, Escape priority, and Standard/Mini/
+Expanded in-shell players. `PlaybackService` remains the sole playback and
+queue owner; no online playback or Plan 12 work was added.
+
+Verified evidence: 347 Rust unit tests plus one real-mpv integration test, 73
+Vitest tests, 63 Playwright tests at 1280/1920/2560, frontend/native quality
+gates, Tauri packaging, packaged Plan 09 persistence, and packaged Plan 11
+migration/shell/restart smoke. Graphify reports 4,131 nodes, 8,235 edges,
+and 247 communities. Build output is external at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
 
 ## Next atomic task
 
-Plan 11 main-player refinement and Track Inspector work, after external
-ChatGPT GitHub review.
+Plan 12 overlay and Windows integration work remains unstarted.

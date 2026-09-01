@@ -1,6 +1,6 @@
 # SpotDIY session handoff
 
-Date: 2026-09-01
+Date: 2026-09-02
 Branch: `main`
 Origin: `https://github.com/jerrylemin/SpotDIY`
 Plan 04 feature commit: `536617d` (`feat: add mpv playback service and queue transport`)
@@ -8,7 +8,9 @@ Plan 04 review-fix commit: `af66127` (`fix: harden mpv playback lifecycle and ev
 Plan 05 delivery commits: `58b5adc`, `cbcb43e`, `facab20`, `0db5eac`,
 `6c16747`, `51da804`, `905f322`, `0d52f9b`, `9b2a6d8`, and `ab6169d`.
 Plan 10 implementation commits: `cc28ba1`, `f2a5995`, `850bc82`, `8c62aed`,
-and `6eb231d`.
+and `6eb231d`. Plan 11 implementation and smoke commits are `e5129a0`,
+`f5562e1`, `0012a43`, `0026146`, `dba1f24`, `d631a2a`, `d2199d5`,
+`e072fec`, and `15031bf`.
 
 ## Completed
 
@@ -178,8 +180,32 @@ no owned mpv process. CodeGraph and Graphify were each refreshed once; the
 current stats are recorded in the verification log. Build output is external at
 `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
 
+## Plan 11 completion
+
+Plan 11 is complete through `15031bf`. Migration 7 is the only Plan 11
+database change: it rebuilds `settings_metadata`, copies all schema-6 rows,
+and adds the Plan 10 appearance keys without rewriting the historical 0001
+contract. Legacy old-constraint, Plan-10-shaped, and fresh database fixtures
+all pass; latest schema is 7.
+
+The main shell now presents real Home dashboard data, persisted and ephemeral
+inspectors, measured quality/provenance, capability-aware search/library/
+playlist/download actions, source switching, command-palette navigation,
+overlay Escape priority, and Standard/Mini/Expanded in-shell player modes.
+Existing service ownership remains authoritative: PlaybackService owns queue
+and transport, while SearchService, DownloadService, LyricsService, and
+PlaylistService retain their existing boundaries. Online playback, Spotify
+download, and Plan 12 Windows overlays remain out of scope.
+
+Verification: 347 Rust unit tests plus one real-mpv integration test, 73
+Vitest tests, 63 Playwright tests across 1280/1920/2560, frontend/native
+quality gates, Tauri packaging, packaged Plan 09 persistence smoke, and
+packaged Plan 11 migration/shell/restart smoke pass. Lint retains three
+pre-existing Fast Refresh warnings; Graphify reports 4,131 nodes, 8,235
+edges, and 247 communities. Build output is external at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
+
 ## Next atomic task
 
-Plan 11 main-player refinement and Track Inspector work, after external
-ChatGPT GitHub review. No Plan 09 or Plan 10 follow-up is required for the
-delivered local-first playback and design-system boundaries.
+Plan 12 overlay and Windows integration work remains unstarted. No Plan 12
+implementation was included in this delivery.

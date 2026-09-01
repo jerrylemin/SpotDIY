@@ -118,3 +118,19 @@ ownership, source resolution, and all filesystem path handling remain on the
 Rust side. The packaged Plan 09 smoke covers bookmark/preset restart retention,
 queue persistence, no-autoplay behavior, track-boundary clearing, and owned
 mpv cleanup.
+
+## Plan 11 shell presentation boundary
+
+Plan 11 adds no playback state machine or queue owner. `PlayerBar`,
+`MiniPlayer`, and `NowPlayingPanel` all consume the same `usePlayback()`
+snapshot and existing transport/source/queue commands. Standard includes the
+full transport, source, volume, queue, and Lyrics controls; Mini is a compact
+in-shell footer; Expanded Now Playing adds larger artwork, source context,
+quality/provenance facts, queue/Lyrics shortcuts, and Track Inspector access.
+
+`SourceSwitcher` displays every snapshot source and disables unavailable or
+non-playback options with their availability detail. Online playback remains
+unimplemented, Spotify remains metadata-only, and Plan 11 does not resolve
+online media URLs or add native overlays/global media controls. Mode changes
+are presentation-only and do not autoplay, seek, switch sources, or mutate the
+persistent queue.

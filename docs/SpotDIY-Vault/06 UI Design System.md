@@ -33,13 +33,32 @@ also enforced by the CSS motion rule.
 The custom theme format is schema version 1 with a trimmed 1-to-80
 Unicode-scalar name, exactly 15 semantic color tokens, strict `#RRGGBB` values,
 a 64 KiB maximum, and WCAG contrast checks. Dark and Light presets are built in.
-`layout_profile` and `custom_theme` persist as ordinary settings in schema 6;
-Plan 10 intentionally adds no migration 7.
+`layout_profile` and `custom_theme` persist as ordinary settings. Plan 11
+adds migration 7 compatibility for shipped schema-6 databases while keeping
+the Plan 10 settings contract unchanged.
 
 The reusable component contract includes Button, IconButton, Surface,
 StatusChip, Field, SegmentedControl, Tooltip, EmptyState, ProviderBadge, and
 ContextActionMenu. ContextActionMenu supports right-click, More, ContextMenu,
 and Shift+F10 entry, keyboard navigation, disabled reasons, and focus
 restoration. InspectorPanel and IconGallery are development/design surfaces;
-LibraryTrackRow is the representative existing-surface adoption. No permanent
-navigation or full Plan 11 Track Inspector is introduced.
+LibraryTrackRow is the representative Plan 10 adoption. Plan 10 itself did not
+introduce permanent navigation or the full Track Inspector.
+
+## Plan 11 shell surfaces
+
+`AppShell` composes the real-data Home dashboard, route content, queue drawer,
+command palette, inspectors, and the three in-shell player modes. Standard,
+Mini, and Expanded Now Playing all use semantic tokens and the same
+`usePlayback()` snapshot. Expanded Now Playing adds source switching and
+compact measured quality/provenance facts; Mini remains a compact in-shell
+footer rather than a native window.
+
+The persisted Track Inspector uses `InspectorPanel` sections for OVERVIEW,
+SOURCES, QUALITY, COLLECTION, and CAPABILITIES. It exposes actual DTO data,
+keeps local paths out of the DTO, and makes unavailable actions explainable.
+Online SearchResult inspection remains ephemeral and shows the explicit
+metadata-only/unsupported playback limits. Search, Library, Playlists, and
+Downloads reuse capability-aware action derivation, while Dark/Light/System/
+Custom themes, density profiles, reduced motion, and focus behavior remain
+under the Plan 10 semantic token contract.

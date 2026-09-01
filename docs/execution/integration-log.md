@@ -182,3 +182,31 @@
 - The implementation boundary is committed as `cc28ba1`, `f2a5995`,
   `850bc82`, `8c62aed`, and `6eb231d`; documentation closure follows the final
   verification gates.
+
+## 2026-09-02 - Plan 11 main shell, Track Inspector, and player modes
+
+- Restored the historical settings allowlist in migration 1 and added
+  migration 7, which rebuilds only `settings_metadata`, copies every row, and
+  advances schema metadata to version 7. Independent old-constraint,
+  Plan-10-shaped, and fresh fixtures verify settings preservation, appearance
+  writes, custom-theme activation, and clean foreign keys.
+- Integrated `TrackInspectorService` and `get_track_inspector` as a purpose-
+  built read-only DTO. Local paths remain behind source-ID reveal; only
+  validated remote provider URLs can appear as canonical URLs.
+- Integrated real-data Home sections, persisted and ephemeral inspector
+  surfaces, source switching, measured quality/provenance facts, and shared
+  capability/runtime action derivation across Search, Library, Playlists, and
+  Downloads. Online playback and Spotify downloads remain unavailable.
+- Integrated AppShell Escape priority, command-palette navigation, focus
+  restoration, and Standard/Mini/Expanded in-shell player modes. All modes
+  consume the existing `usePlayback()` snapshot; no playback or queue owner
+  was added.
+- Added the packaged Plan 11 smoke to the existing playback harness. It seeds
+  a real schema-6 database, verifies migration 7 and appearance persistence,
+  exercises the shell/inspector/queue/Lyrics paths, and checks restart
+  persistence, no autoplay, and owned-mpv cleanup.
+- Implementation and smoke commits are `e5129a0`, `f5562e1`, `0012a43`,
+  `0026146`, `dba1f24`, `d631a2a`, `d2199d5`, `e072fec`, and `15031bf`.
+- Final Graphify code-only output is 4,131 nodes, 8,235 edges, and 247
+  communities. CodeGraph was refreshed once for the shell/player/inspector
+  dependency query; derived graph files remain ignored.

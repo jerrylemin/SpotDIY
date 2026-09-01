@@ -7,9 +7,9 @@ verification gates.
 | Feature | Plan | Status | Last commit | Tests | Notes |
 |---|---|---|---|---|---|
 | Repository/toolchain bootstrap | 01 | COMPLETE | 403d923 | typecheck, lint, frontend build, Rust fmt/clippy/test, Tauri build | Remote was initialized safely. |
-| Tauri/React application shell | 01, 11 | IN PROGRESS | 403d923 | Vitest, Vite build, Rust test, Playwright and packaged smoke | Routes, truthful empty states, and the Plan 04 player surface exist; later shell polish remains. |
+| Tauri/React application shell | 01, 11 | COMPLETE | `15031bf` | 73 Vitest, 63 Playwright, Tauri build, packaged Plan 11 smoke | Real-data Home, persisted/ephemeral inspectors, source-aware actions, command palette, Escape priority, and Standard/Mini/Expanded in-shell player modes are delivered. |
 | Unified music domain model | 02 | COMPLETE | 2ec431b | Rust/frontend domain tests | Typed IDs, `UnifiedTrack`, sources, capabilities, and provider identity rules are implemented. |
-| SQLite database and migrations | 02, 03, 06, 07, 08, 09 | COMPLETE | `1bc7108` | Rust migration/repository/library/download/playlist/queue/lyrics/bookmark tests | SQLite WAL/FK initialization and non-destructive migrations through schema version 6 are stable; Plan 09 preserves Plan 08 and Plan 07 data while adding lyrics, bookmarks, and A/B presets. |
+| SQLite database and migrations | 02, 03, 06, 07, 08, 09, 11 | COMPLETE | `e5129a0` | Migration 7 legacy/Plan 10/fresh fixtures, repository and FK tests | SQLite WAL/FK initialization and migrations through schema version 7 are stable; migration 7 rebuilds only `settings_metadata` and preserves schema-6 settings. |
 | Durable application settings | 02 | COMPLETE | 2ec431b | Rust/frontend settings tests | Typed ordinary settings remain separated from future secret storage. |
 | Local library indexing | 03 | COMPLETE | Plan 03 delivery | Rust library tests, frontend tests, packaged smoke | Persistent roots, recursive reconciliation, metadata/artwork, watchers, and managed path ownership are implemented. |
 | mpv playback engine and transient queue | 04 | COMPLETE | af66127 | 117 Rust tests, 26 Vitest tests, 9 Playwright runs, real mpv smoke, packaged smoke | External mpv JSON IPC, serialized PlaybackService, queue policy, recovery, typed IPC, controls, and review fixes are implemented. |
@@ -19,9 +19,9 @@ verification gates.
 | Playlists, persistent queue, likes, tags | 08 | COMPLETE | `0a62cad` | 318 Rust + 51 Vitest + 48 Playwright; fmt/clippy/build/package and persistence smoke | Durable playlists, seeded Inbox, one-shot branches, likes/ratings/tags, typed collection IPC, PlaybackService-owned queue sections, snapshots, restart restore, and queue drawer are delivered. |
 | Lyrics, bookmarks, and A/B loop | 09 | COMPLETE | `7b1a097` | 337 Rust + 56 Vitest + 48 Playwright; parser/provider/package persistence smoke | Local-first LRC/embedded lyrics, explicit LRCLIB, synchronized display, durable bookmarks/presets, and PlaybackService-owned A/B loop are delivered. Waveform generation is not claimed. |
 | UI design system | 10 | COMPLETE | `6eb231d` | 70 Vitest, 51 Playwright; typecheck/lint/build | Semantic themes, layout profiles, accessible primitives, context actions, inspector/gallery foundation, and Settings APPEARANCE are delivered. |
-| Main-player refinement | 11 | NOT STARTED | â€” | â€” | Plan 10 is complete; awaits external ChatGPT GitHub review before work begins. |
+| Main-player refinement | 11 | COMPLETE | `15031bf` | 73 Vitest, 63 Playwright, packaged Plan 11 smoke | Source switcher, quality/provenance, Track Inspector, capability-aware actions, Home dashboard, command palette, Escape priority, and three in-shell modes are delivered. |
 | Overlays and Windows integration | 12 | NOT STARTED | — | — | Overlay feasibility requires Tauri/Win32 validation. |
 | Import/export and portable mode | 13 | NOT STARTED | — | — | Transactional `.spotdiy` archive and deterministic portable startup. |
 | Smart features and analytics | 14 | NOT STARTED | — | — | Local-only listening analytics. |
 | Advanced visual exploration | 15 | NOT STARTED | — | — | Music Map, Galaxy, radial menu, Theme Studio. |
-| Quality, performance, release | 16 | IN PROGRESS | `6eb231d` | 343 Rust + 70 Vitest + 51 Playwright; fmt/clippy/build/smoke | Plan 10 verification gates pass locally; clean-install and later performance/accessibility work remain. |
+| Quality, performance, release | 16 | IN PROGRESS | `15031bf` | 347 Rust + 73 Vitest + 63 Playwright; fmt/clippy/build/smoke | Plan 11 verification gates pass locally; clean-install and later performance/accessibility work remain. |

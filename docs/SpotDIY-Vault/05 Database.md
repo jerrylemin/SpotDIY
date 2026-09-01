@@ -45,3 +45,21 @@ the user media path. Migration foreign-key checks run inside the migration
 transaction and again after startup.
 
 Future logical tables such as playlists, queue, downloads, lyrics, history, caches, and overrides belong in later migrations. Secrets never belong in SQLite. See [ADR-0005](ADRs/ADR-0005-sqlite-migrations.md) and [ADR-0008](ADRs/ADR-0008-local-library-identity-and-reconciliation.md).
+
+## Plan 11 migration 7 compatibility repair
+
+Plan 10 introduced `layout_profile` and `custom_theme` as ordinary settings,
+but shipped schema-6 databases still have migration 1's narrower
+`settings_metadata` CHECK constraints. Plan 11 restores the historical
+`0001_initial.sql` allowlist and adds `0007_appearance_settings.sql` as a
+destructive, WAL-safe migration. It creates a replacement
+`settings_metadata_v7`, copies every existing row, drops the old table, renames
+the replacement, and updates `schema_metadata` to version 7. No other table is
+changed and no setting value is rewritten or discarded.
+
+The migration suite explicitly creates an independent old-constraint schema-6
+fixture, a schema-6 database with the already-shipped Plan 10-shaped settings
+table, and a fresh database. All reach schema 7; old settings survive, the two
+appearance keys can be written, a custom theme can become active, and
+`foreign_key_check` remains clean. `LATEST_SCHEMA_VERSION` is 7 and there are
+no additional Plan 11 database changes.

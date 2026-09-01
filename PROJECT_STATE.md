@@ -12,7 +12,8 @@ State date: 2026-09-02
 - Plan 08 implementation commits: `525da8c`, `e5f7161`, `1f31d6a`, and `0a62cad`.
 - Plan 09 implementation commits: `1bc7108`, `e4d62d8`, `c25f954`, and `7b1a097`.
 - Plan 10 implementation commits: `cc28ba1`, `f2a5995`, `850bc82`, `8c62aed`, and `6eb231d`.
-- Delivery status: Plan 10 implementation and final verification are complete; this document is part of the documentation closure boundary.
+- Plan 11 implementation commits: `e5129a0`, `f5562e1`, `0012a43`, `0026146`, `dba1f24`, `d631a2a`, `d2199d5`, `e072fec`, and `15031bf`.
+- Delivery status: Plan 11 implementation and final verification are complete; this document is part of the documentation closure boundary.
 
 ## Runtime
 
@@ -21,6 +22,7 @@ State date: 2026-09-02
 - Library: `LibraryService` owns persistent folder roots, recursive local indexing, metadata/artwork/fingerprint evidence, watcher reconciliation, and managed-source path validation.
 - Playback: `PlaybackService` is the sole serialized controller. It owns the persistent ID-only queue, checkpointed position, immutable snapshots, transport, repeat/shuffle/previous/EOF policy, source switching, recovery, and shutdown.
 - Playlists: `PlaylistService` owns durable playlists, seeded Inbox, playlist items, one-shot branches, likes, ratings, tags, and bounded collection reads.
+- Inspector: `TrackInspectorService` owns the narrow read-only `get_track_inspector` DTO boundary; local filesystem paths never cross it, and provider URLs are revalidated before exposure.
 - Lyrics: `LyricsService` owns local-first precedence, bounded LRC/embedded metadata reads, manual overrides, explicit LRCLIB lookup/cache, and typed lyrics DTOs. Local media reads are read-only through `LibraryService`.
 - Bookmarks and loops: `BookmarkService` owns durable bookmarks and A/B presets; `PlaybackService` owns active A/B transport state and clears it at a new-track boundary.
 - Backend: `MpvBackend` starts one external `mpv.exe` child over one fresh Windows named pipe and keeps JSON protocol/process details behind the backend boundary. Discovery is `SPOTDIY_MPV_PATH`, then PATH.
@@ -43,6 +45,8 @@ State date: 2026-09-02
 - Resolve lyrics with the explicit precedence manual override, exact local `.lrc` sidecar, embedded timed text, embedded plain text, then cached LRCLIB. Local reads never mutate media or metadata.
 - Keep LRCLIB opt-in and metadata-safe: no automatic lookup, no raw provider payload persistence, no full copyrighted lyrics in fixtures or logs, and no provider result is sent to playback.
 - Keep bookmarks and A/B loop state ID-based. `PlaybackService` owns loop commands; a new track clears A/B, same-track source switching and recovery restore it, and presets never autoplay.
+- Keep player modes as presentation-only Zustand state. Standard, Mini, and Expanded surfaces consume the same `usePlayback()` snapshot; `SourceSwitcher` delegates source changes to `PlaybackService`.
+- Derive search and track actions from provider capabilities and runtime availability. Online playback remains disabled, Spotify remains metadata-only, and local reveal remains source-ID based.
 - Keep provider playback/search, lyrics, overlays, media keys/SMTC, portable mode, analytics, EQ, normalization, crossfade, ReplayGain, and unrelated refactors outside the Plan 08 boundary.
 
 ## Plan 04 verification snapshot
@@ -205,6 +209,35 @@ repository-local `src-tauri\target` remains absent.
 
 ## Next slice after Plan 10
 
-Plan 11 main-player refinement and Track Inspector work remain future work.
-Await external ChatGPT GitHub review before beginning Plan 11. Waveform
-generation is not claimed by Plan 09 or Plan 10.
+Plan 11 main-player refinement and Track Inspector work are complete. Plan 12
+overlay and Windows integration work remains unstarted. Waveform generation is
+not claimed by Plan 09, Plan 10, or Plan 11.
+
+## Plan 11 delivery snapshot
+
+Plan 11 is complete through `15031bf`. Migration 7 repairs compatibility for
+shipped schema-6 databases by rebuilding `settings_metadata` with the Plan 10
+appearance keys, copying every existing value, and preserving the historical
+0001 migration contract. The real legacy constraint fixture, Plan-10-shaped
+schema-6 fixture, and fresh database all reach schema 7 without foreign-key
+drift or lost settings.
+
+The delivered shell adds real-data Home dashboard sections, a read-only Track
+Inspector and ephemeral SearchResult inspector, source switching, measured
+quality/provenance facts, capability-aware actions, command-palette routes,
+centralized Escape priority, and Standard/Mini/Expanded in-shell player modes.
+No new queue/playback/search/download/lyrics owner or provider behavior was
+introduced; online playback and Spotify download remain unavailable.
+
+Final evidence: 347 Rust unit tests plus one passing real-mpv integration test,
+73 Vitest tests across 19 files, 63 Playwright tests across 1280/1920/2560
+viewport projects, typecheck, lint, build, fmt, strict all-features Clippy,
+Tauri release packaging, packaged Plan 09 persistence smoke, and packaged Plan
+11 migration/shell/restart smoke. Lint retains three pre-existing Fast Refresh
+warnings; build retains Browserslist, Tailwind content, dynamic-import, and
+large-chunk notices.
+
+Graphify's final code-only refresh reports 4,131 nodes, 8,235 edges, and 247
+communities. CodeGraph was refreshed once for the shell/player/inspector
+dependency query. Build output remains external at `C:\CargoTarget\SpotDIY`;
+repository-local `src-tauri\target` remains absent.

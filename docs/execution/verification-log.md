@@ -336,3 +336,39 @@ below.
   edges. Graphify was refreshed once with the code-only update and reports 4,023
   nodes, 7,913 edges, and 245 communities. Repository-local `src-tauri\target`
   remains absent.
+
+## 2026-09-02 - Plan 11 final verification
+
+- `pnpm typecheck` - passed. `pnpm lint` - passed with the same three
+  pre-existing Fast Refresh warnings in `SpotIcon.tsx` and
+  `theme-controller.tsx`. `pnpm test` - passed: 73 tests across 19 files.
+- `pnpm exec playwright test` - passed: 63 tests across the 1280, 1920, and
+  2560 viewport projects. Coverage includes populated Home, persisted and
+  ephemeral inspectors, Standard/Mini/Expanded player modes, source-aware
+  actions, command-palette navigation, Escape priority, and existing
+  design/search/playback paths.
+- `pnpm build` - passed: 712 modules transformed. Non-fatal notices remain for
+  stale Browserslist data, empty Tailwind content configuration, an ineffective
+  dynamic import, and a frontend chunk over 500 kB.
+- Migration regressions - passed: the independent real old-constraint schema-6
+  fixture and Plan-10-shaped schema-6 fixture both upgrade to schema 7 without
+  losing old settings; fresh startup reaches schema 7; appearance keys work,
+  custom theme activates, and foreign-key checks remain clean.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` and
+  `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+  --all-features -- -D warnings` - passed. The strict lint correction is in
+  `e072fec`.
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` - passed:
+  347 unit tests and one synthetic mpv integration test. Explicit
+  `SPOTDIY_REAL_MPV_SMOKE=1` `mpv_smoke` - passed: one real Windows mpv test.
+- `pnpm tauri build` - passed. Release executable and NSIS bundle are under
+  external `C:\CargoTarget\SpotDIY`. Existing packaged Plan 09
+  playback/lyrics/bookmark/A-B/persistence smoke - passed. Added packaged
+  Plan 11 smoke - passed: schema-6 startup migration, appearance persistence,
+  live Home, inspector path privacy, shell modes, queue/Lyrics/palette,
+  restart persistence, no autoplay, and owned-mpv cleanup.
+- `git diff --check` - passed before documentation closure. Final Graphify
+  refresh reports 4,131 nodes, 8,235 edges, and 247 communities; CodeGraph was
+  refreshed once for the shell/player/inspector dependency query. No live
+  provider/LRCLIB/download smoke was required. Repository-local
+  `src-tauri\target` remains absent.

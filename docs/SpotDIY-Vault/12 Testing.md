@@ -144,3 +144,22 @@ motion, icon rendering, long-content overflow, responsive widths, and the
 only. The packaged settings smoke proves restart persistence and reset for
 theme/layout settings; the packaged Plan 09 playback/lyrics smoke still passes
 with clean shutdown and no owned mpv process.
+
+## Plan 11 verification
+
+Plan 11 passes the independent schema-6 old-constraint and Plan-10-shaped
+migration fixtures plus fresh schema startup at version 7. Settings survive,
+appearance keys write and activate, and foreign-key checks remain clean.
+Frontend verification is 73 Vitest tests across 19 files and 63 Playwright
+tests across 1280, 1920, and 2560 viewport projects. Coverage includes real
+Home data, persisted/ephemeral inspectors, measured quality/provenance,
+capability-aware actions, source switching, Standard/Mini/Expanded modes,
+command-palette navigation, Escape priority, focus restoration, and existing
+search/playback/design regressions.
+
+Native verification is 347 Rust unit tests plus one passing real-mpv integration
+test, fmt, strict all-features Clippy, frontend typecheck/lint/build, and the
+external-target Tauri release build. The explicit real-mpv smoke, packaged
+Plan 09 persistence smoke, and new packaged Plan 11 migration/shell/restart
+smoke all pass with clean owned-process shutdown. Live provider, LRCLIB, and
+download smoke remain optional and were not run.

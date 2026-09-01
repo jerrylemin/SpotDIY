@@ -116,7 +116,22 @@ Studio, mobile UI, and Plan 11 main-player refinement remain out of scope.
 Final verification and packaged settings persistence/reset evidence are recorded
 in `docs/execution/verification-log.md`.
 
+## Plan 11 completion
+
+Plan 11 is complete through `15031bf`. It adds migration 7 compatibility for
+shipped schema-6 settings, a real-data Home dashboard, persisted and ephemeral
+Track Inspector surfaces, source switching, measured quality/provenance,
+capability-aware actions, command-palette and Escape coordination, and
+Standard/Mini/Expanded in-shell player modes. Existing service and queue
+ownership remains unchanged; online playback, Spotify download, native
+overlays, and Theme Studio remain outside the boundary.
+
+Verification passes with 347 Rust unit tests plus real-mpv integration smoke,
+73 Vitest tests, 63 Playwright tests across three viewport projects, frontend
+and native quality gates, Tauri packaging, packaged Plan 09 persistence smoke,
+and packaged Plan 11 migration/shell/restart smoke. See
+`docs/execution/verification-log.md` for the exact run record.
+
 ## Next atomic task
 
-Plan 11 main-player refinement and Track Inspector work, after external
-ChatGPT GitHub review.
+Plan 12 overlay and Windows integration work remains unstarted.

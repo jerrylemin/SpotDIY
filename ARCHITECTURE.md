@@ -279,13 +279,48 @@ to dark with a recoverable Settings error.
 The custom theme contract is schema version 1, contains exactly 15 semantic
 color tokens, accepts strict `#RRGGBB` values, and is checked for byte, name,
 and WCAG contrast limits in both Zod and Rust. `layout_profile` and
-`custom_theme` are ordinary typed settings keys in schema 6; no migration 7 was
-introduced. The browser E2E adapter is an in-memory preview seam, while native
-settings continue through `SettingsRepository`.
+`custom_theme` were introduced as ordinary typed settings during Plan 10;
+Migration 7 now makes those keys compatible with shipped schema-6 databases.
+The browser E2E adapter is an in-memory preview seam, while native settings
+continue through `SettingsRepository`.
 
 Shared Button, IconButton, Surface, StatusChip, Field, SegmentedControl,
 Tooltip, EmptyState, ProviderBadge, and ContextActionMenu primitives centralize
 labels, focus, disabled explanations, keyboard actions, and reduced motion.
 InspectorPanel/IconGallery is a development/design surface. Context actions
-are caller-supplied and are adopted by `LibraryTrackRow`; permanent navigation,
-full Track Inspector, and Plan 11 player refinement remain outside this boundary.
+are caller-supplied and are adopted by `LibraryTrackRow`; permanent navigation
+and the full Track Inspector were intentionally outside the Plan 10 boundary.
+
+## Plan 11 main shell and inspector boundary
+
+```text
+AppShell
+  +--> CommandPalette --> presentation commands / navigation
+  +--> TrackInspector or SearchResultInspector
+  +--> QueueDrawer
+  `--> PlayerBar --> StandardPlayerBar | MiniPlayer | NowPlayingPanel
+                         |
+                         +--> usePlayback() snapshot and existing commands
+                         +--> SourceSwitcher --> PlaybackService source switch
+                         `--> useTrackInspector() quality/provenance read
+```
+
+`AppShell` is the single presentation composition point for player mode,
+inspector selection, queue visibility, command palette visibility, and Escape
+priority. `ui-store.ts` contains session-only presentation state; it does not
+duplicate playback or queue ownership. All three player modes consume the same
+`usePlayback()` snapshot and opening a mode does not autoplay or mutate queue,
+source, or position state.
+
+`TrackInspectorService` exposes a purpose-built read-only DTO assembled from
+the existing Track and collection repositories. It includes source identity,
+availability, capabilities, measured local quality, version qualifiers, and
+validated provider URLs. Local filesystem paths are deliberately excluded;
+reveal remains the existing source-ID command. Online SearchResults use a
+separate ephemeral inspector and cannot persist, fuse, or play online.
+
+`track-actions.ts` is the pure frontend policy boundary for provider and runtime
+capabilities. Search, library, playlist, and download surfaces reuse it or
+existing service hooks; disabled actions keep their reason visible. YouTube
+and SoundCloud downloads remain native/capability-gated, Spotify remains
+metadata-only, and no provider or backend behavior was added in Plan 11.

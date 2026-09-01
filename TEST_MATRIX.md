@@ -4,18 +4,18 @@
 |---|---|---|
 | Frontend type safety | `pnpm typecheck` | Pass. Strict playback/library/settings DTOs and command arguments are checked. |
 | Frontend lint | `pnpm lint` | Pass. |
-| Frontend behavior | `pnpm test` | Pass: 70 Vitest tests across 18 files, including settings/theme schemas, design-system primitives, appearance controls, and existing playback/library/lyrics behavior. |
+| Frontend behavior | `pnpm test` | Pass: 73 Vitest tests across 19 files, including inspector DTO parsing, capability-aware actions, shell state, settings/theme schemas, and existing playback/library/lyrics behavior. |
 | Frontend build | `pnpm build` | Pass. Existing Browserslist/Tailwind content notices are non-fatal. |
 | Rust formatting | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | Pass. |
 | Rust quality | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | Pass. |
-| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | Pass: 343 unit tests plus one synthetic mpv integration test, including settings/theme validation, playback, persistence, and existing service behavior. |
-| Browser playback | `pnpm exec playwright test` | Pass: 51 tests across 1280, 1920, and 2560 viewport projects; includes design-system appearance, context-menu keyboard paths, responsive overflow, and existing playback coverage. |
+| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | Pass: 347 unit tests plus one synthetic mpv integration test, including schema-6-to-7 fixtures, inspector privacy, settings/theme validation, playback, persistence, and existing service behavior. |
+| Browser playback | `pnpm exec playwright test` | Pass: 63 tests across 1280, 1920, and 2560 viewport projects; includes real-data Home, persisted/ephemeral inspectors, player modes, command palette, source-aware shell behavior, appearance, context-menu keyboard paths, responsive overflow, and existing playback coverage. |
 | Real mpv | Windows `mpv_smoke` integration gate | Pass with local `v0.41.0-dev-g41f6a6450`; synthetic WAV transport, device, EOF, shutdown, and process-exit behavior verified. |
-| Packaged lifecycle | `scripts/packaged-playback-smoke.ps1` | Pass with release executable: local indexing, playback transport, graceful close, owned-mpv cleanup, restart persistence, and empty transient queue. |
+| Packaged lifecycle | `scripts/packaged-playback-smoke.ps1` | Pass with release executable: Plan 09 playback/lyrics persistence plus Plan 11 schema migration, appearance, shell, inspector, queue, restart, no-autoplay, and owned-mpv cleanup. |
 | Release | `pnpm tauri build` | Pass. Release executable and NSIS bundle built with external `C:\CargoTarget\SpotDIY`; no repository-local `src-tauri\target`. |
 | Provider contracts | Plan 05 native adapter/search tests and metadata smoke | Pass: 250 Rust tests include provider registry, local search, yt-dlp adapters, Spotify PKCE/error mapping, timeouts, cancellation, sorting, and cache bounds; opt-in YouTube/SoundCloud metadata smoke returned 25 entries each. |
-| Persistence boundary | Schema and restart smoke | Pass: Plan 04 adds no migration; library roots persist while the transient playback queue restarts empty. |
-| Visual follow-up | Playwright screenshots | Plan 10 covers appearance, focus, reduced motion, context actions, icon rendering, and responsive guards; Plan 11 main-player refinement remains pending external review. |
+| Persistence boundary | Schema and restart smoke | Pass: migration 7 preserves schema-6 settings and adds only the appearance allowlist; queue and appearance persist across restart without autoplay. |
+| Visual follow-up | Playwright screenshots | Pass: Plan 11 covers Home/player/inspector shell paths, appearance, focus, reduced motion, context actions, icon rendering, responsive guards, and the 1080-pixel height fallback. |
 
 ## Plan 05 verification
 
@@ -164,3 +164,29 @@
   CodeGraph was refreshed once and is up to date at 138 files, 4,655 nodes,
   and 17,004 edges. Graphify was refreshed once at 4,023 nodes, 7,913 edges,
   and 245 communities. Repository-local `src-tauri\target` remains absent.
+
+## Plan 11 verification
+
+- Migration: the old-constraint schema-6 fixture, Plan-10-shaped schema-6
+  fixture, and fresh database all migrate to schema 7. Existing settings are
+  retained, new appearance keys work afterward, custom theme activation works,
+  and foreign-key checks remain clean.
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass;
+  Vitest reports 73 tests across 19 files. Lint retains three pre-existing Fast
+  Refresh warnings. Build notices for Browserslist, Tailwind content, an
+  ineffective dynamic import, and a large chunk are non-fatal.
+- Browser: `pnpm exec playwright test` passes 63 tests across the 1280, 1920,
+  and 2560 viewport projects. Plan 11 coverage includes populated Home,
+  persisted and ephemeral inspectors, player modes, Escape coordination, and
+  source-aware shell actions; existing design/search/playback coverage remains
+  green.
+- Native: fmt, all-features Clippy with warnings denied, and all-target tests
+  pass: 347 Rust unit tests plus one passing real-mpv integration test.
+- Runtime: `pnpm tauri build` passes with release output under external
+  `C:\CargoTarget\SpotDIY`. The explicit real mpv smoke, packaged Plan 09
+  playback/lyrics persistence smoke, and packaged Plan 11 migration/shell/
+  restart smoke all pass with clean owned-process shutdown.
+- Graphs and safety: final Graphify output is 4,131 nodes, 8,235 edges, and
+  247 communities; CodeGraph was refreshed once for the shell/player/inspector
+  dependency query. No online playback, Spotify download, provider behavior,
+  media mutation, secret, or repository-local `src-tauri\target` is included.

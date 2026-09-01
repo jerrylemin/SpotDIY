@@ -31,3 +31,23 @@ Production UI contains no static provider result fixtures and communicates why u
 ## Commit boundary
 
 `feat: connect SpotDIY shell and main player`
+
+## Delivery evidence
+
+- Completed through `15031bf` with migration compatibility in `e5129a0`, real
+  Track Inspector/Home data in `f5562e1`, player surfaces in `0012a43`, shell
+  actions in `0026146`, interaction coverage in `dba1f24`, and follow-up
+  coverage/strict-gate fixes through `d631a2a`, `d2199d5`, `e072fec`, and
+  `15031bf`.
+- Migration 7 restores the historical migration-1 settings allowlist and
+  rebuilds/copies `settings_metadata` so old schema-6, Plan-10-shaped schema-6,
+  and fresh databases reach schema 7 without value loss or foreign-key drift.
+- Delivered real-data Home, persisted/ephemeral Track Inspectors,
+  source/quality/provenance surfaces, capability-aware actions, command-palette
+  and Escape coordination, and Standard/Mini/Expanded in-shell players with
+  existing service ownership unchanged.
+- Verification evidence: 347 Rust unit tests plus real-mpv smoke, 73 Vitest
+  tests, 63 Playwright tests across 1280/1920/2560, strict quality gates,
+  Tauri packaging, packaged Plan 09 persistence smoke, and packaged Plan 11
+  migration/shell/restart smoke. Online playback, Spotify download, native
+  overlays, and Plan 12 remain out of scope.
