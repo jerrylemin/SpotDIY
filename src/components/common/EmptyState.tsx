@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 
 import { SpotIcon, type SpotIconName } from "../icons/SpotIcon";
 
-interface EmptyStateProps {
+export interface EmptyStateProps extends HTMLAttributes<HTMLElement> {
   icon: SpotIconName;
   eyebrow: string;
   title: string;
@@ -10,9 +10,9 @@ interface EmptyStateProps {
   action?: ReactNode;
 }
 
-export function EmptyState({ icon, eyebrow, title, description, action }: EmptyStateProps) {
+export function EmptyState({ action, className = "", description, eyebrow, icon, title, ...props }: EmptyStateProps) {
   return (
-    <section className="empty-state" aria-label={title}>
+    <section {...props} className={`empty-state${className ? ` ${className}` : ""}`} aria-label={props["aria-label"] ?? title}>
       <div className="empty-state-icon">
         <SpotIcon name={icon} size={23} />
       </div>
