@@ -136,10 +136,7 @@ fn strip_title_annotations(value: &str) -> (String, Vec<String>, Vec<VersionQual
     let mut featured_artists = Vec::new();
     let mut qualifiers = Vec::new();
 
-    loop {
-        let Some((start, content)) = trailing_annotation(&working) else {
-            break;
-        };
+    while let Some((start, content)) = trailing_annotation(&working) {
         let (features, annotation_qualifiers, presentation_noise) = classify_annotation(content);
         if features.is_empty() && annotation_qualifiers.is_empty() && !presentation_noise {
             break;
@@ -150,10 +147,7 @@ fn strip_title_annotations(value: &str) -> (String, Vec<String>, Vec<VersionQual
         working = working.trim_end().to_owned();
     }
 
-    loop {
-        let Some(separator) = working.rfind(" - ") else {
-            break;
-        };
+    while let Some(separator) = working.rfind(" - ") {
         let suffix = working[separator + 3..].trim();
         let (features, suffix_qualifiers, presentation_noise) = classify_annotation(suffix);
         if features.is_empty() && suffix_qualifiers.is_empty() && !presentation_noise {
@@ -225,7 +219,7 @@ fn is_presentation_noise(value: &str) -> bool {
 fn add_text_qualifiers(value: &str, output: &mut Vec<VersionQualifier>) {
     let normalized = normalize_basic(value);
     let words = normalized.split_whitespace().collect::<Vec<_>>();
-    let has = |word: &str| words.iter().any(|candidate| *candidate == word);
+    let has = |word: &str| words.contains(&word);
     if normalized == "live"
         || normalized.starts_with("live session")
         || normalized.starts_with("live version")

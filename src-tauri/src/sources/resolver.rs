@@ -314,9 +314,9 @@ fn local_error_readiness(error: LibraryError) -> SourceReadiness {
 fn local_quality_order(left: &TrackSource, right: &TrackSource) -> Ordering {
     let left_file = left.local_file.as_ref();
     let right_file = right.local_file.as_ref();
-    is_lossless(right_file.map(|file| file.codec.as_deref()).flatten())
+    is_lossless(right_file.and_then(|file| file.codec.as_deref()))
         .cmp(&is_lossless(
-            left_file.map(|file| file.codec.as_deref()).flatten(),
+            left_file.and_then(|file| file.codec.as_deref()),
         ))
         .then_with(|| {
             right_file
