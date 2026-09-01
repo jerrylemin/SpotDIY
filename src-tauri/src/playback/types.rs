@@ -5,7 +5,11 @@ use thiserror::Error;
 
 use crate::domain::{ProviderKind, SourceId, TrackId};
 
-pub use super::queue::{QueueEntry, QueueEntryId, RepeatMode, TransientQueue};
+pub use super::queue::{
+    QueueEntry, QueueEntryId, QueueRepository, QueueRepositoryError, QueueSection, QueueSnapshot,
+    QueueSnapshotEntry, QueueSnapshotSummary, QueueWorkspace, QueueWorkspaceEntry, RepeatMode,
+    TransientQueue,
+};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +55,11 @@ pub enum PlaybackErrorCode {
     QueueEmpty,
     RecoveryRetrying,
     RecoveryExhausted,
+    PersistenceFailed,
+    QueueEntryNotFound,
+    QueueEntryImmutable,
+    InvalidQueuePosition,
+    SnapshotNotFound,
     ShuttingDown,
 }
 

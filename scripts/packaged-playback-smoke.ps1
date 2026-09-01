@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [int]$TimeoutSeconds = 45
+    [int]$TimeoutSeconds = 45,
+    [switch]$Plan08Persistence
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,6 +12,9 @@ if ($env:SPOTDIY_PACKAGED_SMOKE -ne "1") {
 }
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
+$smokeLabel = if ($Plan08Persistence) { "Plan08" } else { "Plan04" }
+$flowMode = if ($Plan08Persistence) { "plan08" } else { "flow" }
+$restartMode = if ($Plan08Persistence) { "plan08-restart" } else { "restart" }
 $targetRoot = $env:CARGO_TARGET_DIR
 if ([string]::IsNullOrWhiteSpace($targetRoot)) {
     throw "CARGO_TARGET_DIR must point outside the repository before packaged verification"
@@ -98,7 +102,7 @@ function New-SilentWav([string]$path, [int]$frequency) {
     }
 }
 
-$profileRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("SpotDIY-Plan04-Packaged-" + [guid]::NewGuid().ToString("N"))
+$profileRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("SpotDIY-$smokeLabel-Packaged-" + [guid]::NewGuid().ToString("N"))
 $fixtureFolder = Join-Path $profileRoot "Synthetic Music"
 $webViewRoot = Join-Path $profileRoot "WebView2"
 $port = $null
@@ -191,9 +195,9 @@ try {
     $cdp = Wait-ForCdp $port ($TimeoutSeconds * 1000)
     $env:SPOTDIY_PACKAGED_CDP_URL = $cdp
     $env:SPOTDIY_PACKAGED_FIXTURE = $fixtureFolder
-    & pnpm exec node $nodeHarness flow
+    & pnpm exec node $nodeHarness $flowMode
     if ($LASTEXITCODE -ne 0) {
-        throw "the packaged playback flow failed with exit code $LASTEXITCODE"
+        throw "the packaged $smokeLabel flow failed with exit code $LASTEXITCODE"
     }
 
     Start-Sleep -Milliseconds 500
@@ -218,14 +222,18 @@ try {
     $secondApp = Start-PackagedApp $secondPort
     $secondCdp = Wait-ForCdp $secondPort ($TimeoutSeconds * 1000)
     $env:SPOTDIY_PACKAGED_CDP_URL = $secondCdp
-    & pnpm exec node $nodeHarness restart
+    & pnpm exec node $nodeHarness $restartMode
     if ($LASTEXITCODE -ne 0) {
-        throw "the packaged restart boundary failed with exit code $LASTEXITCODE"
+        throw "the packaged $smokeLabel restart boundary failed with exit code $LASTEXITCODE"
     }
 
     Close-PackagedApp "second packaged app" $secondApp
     Wait-ForProcessExit $secondApp ($TimeoutSeconds * 1000)
-    Write-Output "PASS: packaged playback, restart boundary, and owned-process cleanup"
+    if ($Plan08Persistence) {
+        Write-Output "PASS: packaged Plan 08 playlist, collection, queue, snapshot, restart, and owned-process persistence"
+    } else {
+        Write-Output "PASS: packaged playback, restart boundary, and owned-process cleanup"
+    }
 } finally {
     Remove-Item Env:SPOTDIY_PACKAGED_CDP_URL -ErrorAction SilentlyContinue
     Remove-Item Env:SPOTDIY_PACKAGED_FIXTURE -ErrorAction SilentlyContinue

@@ -15,7 +15,10 @@ use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::watch;
 
 use crate::db::repository::TrackRepository;
-use crate::domain::{ProviderKind, SourceId, TrackId, TrackSource, UnifiedTrack};
+use crate::domain::{
+    PlaylistId, PlaylistItemId, ProviderKind, QueueSnapshotId, SourceId, TrackId, TrackSource,
+    UnifiedTrack,
+};
 use crate::library::{LibraryError, LibraryService};
 use crate::media_tools::MediaToolManager;
 use crate::sources::{
@@ -29,8 +32,9 @@ pub use self::backend::{
 };
 pub use self::types::{
     AudioDevice, PlaybackBackendHealth, PlaybackError, PlaybackErrorCode, PlaybackErrorDto,
-    PlaybackPhase, PlaybackSnapshot, PlaybackSourceOption, QueueEntry, QueueEntryId, RepeatMode,
-    TrackPlaybackRequest, TransientQueue,
+    PlaybackPhase, PlaybackSnapshot, PlaybackSourceOption, QueueEntry, QueueEntryId,
+    QueueRepository, QueueRepositoryError, QueueSection, QueueSnapshot, QueueSnapshotSummary,
+    QueueWorkspace, QueueWorkspaceEntry, RepeatMode, TrackPlaybackRequest, TransientQueue,
 };
 pub type BackendHealth = PlaybackBackendHealth;
 use self::backend::BackendError;
@@ -38,6 +42,7 @@ use self::mpv::MpvBackend;
 
 pub const PREVIOUS_RESTART_THRESHOLD_MS: u64 = 3_000;
 pub const PLAYBACK_STATE_EVENT: &str = "playback://state";
+pub const QUEUE_STATE_EVENT: &str = "queue://state";
 
 const COMMAND_CAPACITY: usize = 64;
 const COMMAND_SEND_TIMEOUT: Duration = Duration::from_millis(250);
@@ -53,6 +58,7 @@ const RECOVERY_BACKOFF: [Duration; 3] = [
 const MAX_RECOVERY_ATTEMPTS: usize = 3;
 
 pub type SnapshotSink = Arc<dyn Fn(PlaybackSnapshot) + Send + Sync>;
+pub type QueueSink = Arc<dyn Fn(QueueWorkspace) + Send + Sync>;
 type BackendFactory = Arc<dyn Fn(u64) -> PlaybackBackendSession + Send + Sync>;
 
 pub struct PlaybackService {
@@ -77,11 +83,21 @@ impl Clone for PlaybackService {
 
 impl PlaybackService {
     pub fn new(library: LibraryService, manager: MediaToolManager, sink: SnapshotSink) -> Self {
+        Self::new_with_queue_sink(library, manager, sink, Arc::new(|_| {}))
+    }
+
+    pub fn new_with_queue_sink(
+        library: LibraryService,
+        manager: MediaToolManager,
+        sink: SnapshotSink,
+        queue_sink: QueueSink,
+    ) -> Self {
         let backend_manager = manager.clone();
-        Self::new_with_backend_factory(
+        Self::new_with_backend_and_queue_sink(
             library,
             move |generation| MpvBackend::start(backend_manager.clone(), generation),
             sink,
+            queue_sink,
         )
     }
 
@@ -89,6 +105,18 @@ impl PlaybackService {
         library: LibraryService,
         backend_factory: F,
         sink: SnapshotSink,
+    ) -> Self
+    where
+        F: Fn(u64) -> PlaybackBackendSession + Send + Sync + 'static,
+    {
+        Self::new_with_backend_and_queue_sink(library, backend_factory, sink, Arc::new(|_| {}))
+    }
+
+    fn new_with_backend_and_queue_sink<F>(
+        library: LibraryService,
+        backend_factory: F,
+        sink: SnapshotSink,
+        queue_sink: QueueSink,
     ) -> Self
     where
         F: Fn(u64) -> PlaybackBackendSession + Send + Sync + 'static,
@@ -102,7 +130,8 @@ impl PlaybackService {
         let controller_thread = thread::Builder::new()
             .name("spotdiy-playback-controller".to_owned())
             .spawn(move || {
-                let mut controller = Controller::new(library, resolver, factory, sink, snapshot_tx);
+                let mut controller =
+                    Controller::new(library, resolver, factory, sink, queue_sink, snapshot_tx);
                 controller.initialize();
                 let _ = ready_tx.send(());
                 controller.run(command_rx);
@@ -215,6 +244,105 @@ impl PlaybackService {
 
     pub fn clear_playback_queue(&self) -> Result<PlaybackSnapshot, PlaybackError> {
         self.snapshot_command(|reply| Command::ClearQueue { reply })
+    }
+
+    pub fn play_playlist(
+        &self,
+        playlist_id: PlaylistId,
+        item_ids: Vec<PlaylistItemId>,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.snapshot_command(|reply| Command::PlayPlaylist {
+            playlist_id,
+            item_ids,
+            reply,
+        })
+    }
+
+    pub fn queue_playlist(
+        &self,
+        playlist_id: PlaylistId,
+        item_ids: Vec<PlaylistItemId>,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.snapshot_command(|reply| Command::QueuePlaylist {
+            playlist_id,
+            item_ids,
+            reply,
+        })
+    }
+
+    pub fn get_queue_workspace(&self) -> Result<QueueWorkspace, PlaybackError> {
+        self.command(|reply| Command::GetQueueWorkspace { reply }, false)
+    }
+
+    pub fn move_queue_entry(
+        &self,
+        entry_id: QueueEntryId,
+        section: QueueSection,
+        target_index: usize,
+    ) -> Result<QueueWorkspace, PlaybackError> {
+        self.command(
+            |reply| Command::MoveQueueEntry {
+                entry_id,
+                section,
+                target_index,
+                reply,
+            },
+            false,
+        )
+    }
+
+    pub fn remove_queue_entry(
+        &self,
+        entry_id: QueueEntryId,
+    ) -> Result<QueueWorkspace, PlaybackError> {
+        self.command(|reply| Command::RemoveQueueEntry { entry_id, reply }, false)
+    }
+
+    pub fn set_queue_entry_pinned(
+        &self,
+        entry_id: QueueEntryId,
+        pinned: bool,
+    ) -> Result<QueueWorkspace, PlaybackError> {
+        self.command(
+            |reply| Command::SetQueueEntryPinned {
+                entry_id,
+                pinned,
+                reply,
+            },
+            false,
+        )
+    }
+
+    pub fn clear_queue_section(
+        &self,
+        section: QueueSection,
+    ) -> Result<QueueWorkspace, PlaybackError> {
+        self.command(|reply| Command::ClearQueueSection { section, reply }, false)
+    }
+
+    pub fn save_queue_snapshot(&self, name: String) -> Result<QueueSnapshot, PlaybackError> {
+        self.command(|reply| Command::SaveQueueSnapshot { name, reply }, false)
+    }
+
+    pub fn list_queue_snapshots(&self) -> Result<Vec<QueueSnapshotSummary>, PlaybackError> {
+        self.command(|reply| Command::ListQueueSnapshots { reply }, false)
+    }
+
+    pub fn restore_queue_snapshot(
+        &self,
+        snapshot_id: QueueSnapshotId,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.snapshot_command(|reply| Command::RestoreQueueSnapshot { snapshot_id, reply })
+    }
+
+    pub fn delete_queue_snapshot(
+        &self,
+        snapshot_id: QueueSnapshotId,
+    ) -> Result<Vec<QueueSnapshotSummary>, PlaybackError> {
+        self.command(
+            |reply| Command::DeleteQueueSnapshot { snapshot_id, reply },
+            false,
+        )
     }
 
     /// Async product-shaped aliases for callers that already run on Tokio.
@@ -458,12 +586,62 @@ enum Command {
     ClearQueue {
         reply: SnapshotReply,
     },
+    PlayPlaylist {
+        playlist_id: PlaylistId,
+        item_ids: Vec<PlaylistItemId>,
+        reply: SnapshotReply,
+    },
+    QueuePlaylist {
+        playlist_id: PlaylistId,
+        item_ids: Vec<PlaylistItemId>,
+        reply: SnapshotReply,
+    },
+    GetQueueWorkspace {
+        reply: WorkspaceReply,
+    },
+    MoveQueueEntry {
+        entry_id: QueueEntryId,
+        section: QueueSection,
+        target_index: usize,
+        reply: WorkspaceReply,
+    },
+    RemoveQueueEntry {
+        entry_id: QueueEntryId,
+        reply: WorkspaceReply,
+    },
+    SetQueueEntryPinned {
+        entry_id: QueueEntryId,
+        pinned: bool,
+        reply: WorkspaceReply,
+    },
+    ClearQueueSection {
+        section: QueueSection,
+        reply: WorkspaceReply,
+    },
+    SaveQueueSnapshot {
+        name: String,
+        reply: SnapshotReplyFull,
+    },
+    ListQueueSnapshots {
+        reply: SnapshotListReply,
+    },
+    RestoreQueueSnapshot {
+        snapshot_id: QueueSnapshotId,
+        reply: SnapshotReply,
+    },
+    DeleteQueueSnapshot {
+        snapshot_id: QueueSnapshotId,
+        reply: SnapshotListReply,
+    },
     Shutdown {
         reply: SnapshotReply,
     },
 }
 
 type SnapshotReply = Sender<Result<PlaybackSnapshot, PlaybackError>>;
+type WorkspaceReply = Sender<Result<QueueWorkspace, PlaybackError>>;
+type SnapshotReplyFull = Sender<Result<QueueSnapshot, PlaybackError>>;
+type SnapshotListReply = Sender<Result<Vec<QueueSnapshotSummary>, PlaybackError>>;
 
 struct ResolvedPlayback {
     track_id: TrackId,
@@ -525,9 +703,14 @@ struct Controller {
     next_backend_generation: u64,
     terminal_failure_generation: Option<u64>,
     sink: SnapshotSink,
+    queue_sink: QueueSink,
     snapshot_tx: watch::Sender<PlaybackSnapshot>,
     snapshot: PlaybackSnapshot,
     queue: TransientQueue,
+    queue_repository: QueueRepository,
+    queue_revision: u64,
+    last_position_checkpoint: Instant,
+    position_dirty: bool,
     pending_load: Option<PendingLoad>,
     recovery: Option<RecoveryPlan>,
     next_recovery_token: u64,
@@ -543,10 +726,12 @@ impl Controller {
         resolver: SourceResolver,
         backend_factory: BackendFactory,
         sink: SnapshotSink,
+        queue_sink: QueueSink,
         snapshot_tx: watch::Sender<PlaybackSnapshot>,
     ) -> Self {
         let backend_generation = 1;
         let PlaybackBackendSession { backend, events } = backend_factory(backend_generation);
+        let queue_repository = QueueRepository::new(library.database().clone());
         Self {
             library,
             resolver,
@@ -557,9 +742,14 @@ impl Controller {
             next_backend_generation: backend_generation,
             terminal_failure_generation: None,
             sink,
+            queue_sink,
             snapshot_tx,
             snapshot: PlaybackSnapshot::default(),
             queue: TransientQueue::new(),
+            queue_repository,
+            queue_revision: 0,
+            last_position_checkpoint: Instant::now(),
+            position_dirty: false,
             pending_load: None,
             recovery: None,
             next_recovery_token: 0,
@@ -573,7 +763,32 @@ impl Controller {
     fn initialize(&mut self) {
         self.snapshot.phase = PlaybackPhase::Idle;
         self.snapshot.error = None;
+        self.desired_paused = true;
+        match self.queue_repository.load() {
+            Ok(state) => {
+                self.queue_revision = state.revision;
+                self.queue.restore(
+                    state.entries,
+                    state.current_entry_id,
+                    &state.history_order,
+                    &state.traversal_order,
+                    state.shuffle_enabled,
+                );
+                self.snapshot.repeat_mode = state.repeat_mode;
+                self.snapshot.position_ms = state.current_position_ms;
+                if let Some(entry) = self.queue.current_entry() {
+                    self.snapshot.current_queue_entry_id = Some(entry.id);
+                    self.snapshot.current_track_id = Some(entry.track_id);
+                    self.snapshot.current_source_id = entry.requested_source_id;
+                }
+                self.last_position_checkpoint = Instant::now();
+            }
+            Err(error) => {
+                self.set_error(persistence_error(error));
+            }
+        }
         self.publish();
+        self.publish_queue();
     }
 
     fn run(&mut self, mut command_rx: tokio_mpsc::Receiver<Command>) {
@@ -652,13 +867,23 @@ impl Controller {
             }
             Command::SetRepeat { repeat_mode, reply } => {
                 self.snapshot.repeat_mode = repeat_mode;
+                if let Err(error) = self.persist_queue_state(true) {
+                    let _ = reply.send(Err(error));
+                    return;
+                }
                 self.publish();
+                self.publish_queue();
                 let _ = reply.send(Ok(self.snapshot.clone()));
             }
             Command::SetShuffle { enabled, reply } => {
                 self.queue.set_shuffle(enabled);
                 self.snapshot.shuffle_enabled = enabled;
+                if let Err(error) = self.persist_queue_state(true) {
+                    let _ = reply.send(Err(error));
+                    return;
+                }
                 self.publish();
+                self.publish_queue();
                 let _ = reply.send(Ok(self.snapshot.clone()));
             }
             Command::GetAudioDevices { reply } => {
@@ -690,6 +915,66 @@ impl Controller {
                 let result = self.clear_queue();
                 let _ = reply.send(result);
             }
+            Command::PlayPlaylist {
+                playlist_id,
+                item_ids,
+                reply,
+            } => {
+                let result = self.play_playlist(playlist_id, item_ids);
+                let _ = reply.send(result);
+            }
+            Command::QueuePlaylist {
+                playlist_id,
+                item_ids,
+                reply,
+            } => {
+                let result = self.queue_playlist(playlist_id, item_ids);
+                let _ = reply.send(result);
+            }
+            Command::GetQueueWorkspace { reply } => {
+                let _ = reply.send(Ok(self.queue_workspace()));
+            }
+            Command::MoveQueueEntry {
+                entry_id,
+                section,
+                target_index,
+                reply,
+            } => {
+                let result = self.move_queue_entry(entry_id, section, target_index);
+                let _ = reply.send(result);
+            }
+            Command::RemoveQueueEntry { entry_id, reply } => {
+                let result = self.remove_queue_entry(entry_id);
+                let _ = reply.send(result);
+            }
+            Command::SetQueueEntryPinned {
+                entry_id,
+                pinned,
+                reply,
+            } => {
+                let result = self.set_queue_entry_pinned(entry_id, pinned);
+                let _ = reply.send(result);
+            }
+            Command::ClearQueueSection { section, reply } => {
+                let result = self.clear_queue_section(section);
+                let _ = reply.send(result);
+            }
+            Command::SaveQueueSnapshot { name, reply } => {
+                let result = self.save_queue_snapshot(name);
+                let _ = reply.send(result);
+            }
+            Command::ListQueueSnapshots { reply } => {
+                let result = self.list_queue_snapshots();
+                let _ = reply.send(result);
+            }
+            Command::RestoreQueueSnapshot { snapshot_id, reply } => {
+                let result = self.restore_queue_snapshot(snapshot_id);
+                let _ = reply.send(result);
+            }
+            Command::DeleteQueueSnapshot { snapshot_id, reply } => {
+                let result = self.delete_queue_snapshot(snapshot_id);
+                let _ = reply.send(result);
+            }
             Command::Shutdown { reply } => {
                 let result = self.shutdown();
                 let _ = reply.send(result);
@@ -707,6 +992,8 @@ impl Controller {
         self.pending_load = None;
         let entry = self.queue_entry(resolved.track_id, Some(resolved.source_id));
         self.queue.play_now(entry);
+        self.persist_queue_state(true)?;
+        self.publish_queue();
         self.start_load(resolved, 0, false, LoadPurpose::Normal)
     }
 
@@ -722,8 +1009,95 @@ impl Controller {
         } else {
             self.queue.append(entry);
         }
+        self.persist_queue_state(true)?;
         self.publish();
+        self.publish_queue();
         Ok(self.snapshot.clone())
+    }
+
+    fn play_playlist(
+        &mut self,
+        playlist_id: PlaylistId,
+        item_ids: Vec<PlaylistItemId>,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.reject_during_recovery()?;
+        let requests = self.playlist_requests(playlist_id, item_ids)?;
+        let first_request = requests
+            .first()
+            .ok_or_else(|| invalid_state_error("the playlist has no playable items"))?;
+        let resolved = self.resolve_for_play(first_request)?;
+        self.recovery = None;
+        self.pending_load = None;
+        let first_entry = self.queue_entry(resolved.track_id, Some(resolved.source_id));
+        self.queue.play_now(first_entry);
+        for request in requests.into_iter().skip(1) {
+            let entry = self.queue_entry(request.track_id, request.source_id);
+            self.queue.append(entry);
+        }
+        self.persist_queue_state(true)?;
+        self.publish_queue();
+        self.start_load(resolved, 0, false, LoadPurpose::Normal)
+    }
+
+    fn queue_playlist(
+        &mut self,
+        playlist_id: PlaylistId,
+        item_ids: Vec<PlaylistItemId>,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.reject_during_recovery()?;
+        let requests = self.playlist_requests(playlist_id, item_ids)?;
+        for request in requests {
+            let entry = self.queue_entry(request.track_id, request.source_id);
+            self.queue.append(entry);
+        }
+        self.persist_queue_state(true)?;
+        self.publish();
+        self.publish_queue();
+        Ok(self.snapshot.clone())
+    }
+
+    fn playlist_requests(
+        &self,
+        playlist_id: PlaylistId,
+        item_ids: Vec<PlaylistItemId>,
+    ) -> Result<Vec<TrackPlaybackRequest>, PlaybackError> {
+        if item_ids.is_empty() {
+            return Err(invalid_state_error(
+                "at least one playlist item is required",
+            ));
+        }
+        let service = crate::playlists::PlaylistService::new(self.library.database().clone());
+        let playlist = service
+            .get_playlist(playlist_id)
+            .map_err(playback_error_from_playlist)?
+            .ok_or_else(|| {
+                PlaybackError::new(
+                    PlaybackErrorCode::TrackNotFound,
+                    format!("playlist {playlist_id} was not found"),
+                    false,
+                )
+            })?;
+        let selected = item_ids
+            .into_iter()
+            .map(|item_id| {
+                playlist
+                    .items
+                    .iter()
+                    .find(|item| item.id == item_id)
+                    .map(|item| TrackPlaybackRequest {
+                        track_id: item.track_id,
+                        source_id: item.requested_source_id,
+                    })
+                    .ok_or_else(|| {
+                        PlaybackError::new(
+                            PlaybackErrorCode::TrackNotFound,
+                            format!("playlist item {item_id} was not found"),
+                            false,
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(selected)
     }
 
     fn toggle_play_pause(&mut self) -> Result<PlaybackSnapshot, PlaybackError> {
@@ -732,6 +1106,20 @@ impl Controller {
             self.desired_paused = pending.desired_paused;
             self.publish();
             return Ok(self.snapshot.clone());
+        }
+        if self.snapshot.phase == PlaybackPhase::Idle {
+            if let Some(entry) = self.queue.current_entry().cloned() {
+                let resolved = self.resolve_for_play(&TrackPlaybackRequest {
+                    track_id: entry.track_id,
+                    source_id: entry.requested_source_id,
+                })?;
+                return self.start_load(
+                    resolved,
+                    self.snapshot.position_ms,
+                    false,
+                    LoadPurpose::Normal,
+                );
+            }
         }
         if self.snapshot.current_track_id.is_none() && !self.queue.entries().is_empty() {
             let index = self
@@ -750,6 +1138,8 @@ impl Controller {
                 self.backend.send(BackendCommand::SetPaused(true))?;
                 self.snapshot.phase = PlaybackPhase::Paused;
                 self.desired_paused = true;
+                self.persist_position(true)?;
+                self.publish_queue();
             }
             PlaybackPhase::Paused => {
                 self.backend.send(BackendCommand::SetPaused(false))?;
@@ -762,6 +1152,7 @@ impl Controller {
                 self.snapshot.position_ms = 0;
                 self.snapshot.phase = PlaybackPhase::Playing;
                 self.desired_paused = false;
+                self.persist_position(true)?;
             }
             PlaybackPhase::ShuttingDown => return Err(shutting_down_error()),
             _ if self.snapshot.current_track_id.is_none() => return Err(queue_empty_error()),
@@ -773,6 +1164,7 @@ impl Controller {
         }
         self.snapshot.error = None;
         self.publish();
+        self.publish_queue();
         Ok(self.snapshot.clone())
     }
 
@@ -781,6 +1173,7 @@ impl Controller {
         if let Some(pending) = self.pending_load.as_mut() {
             pending.desired_position_ms = position_ms;
             self.snapshot.position_ms = position_ms;
+            self.persist_position(true)?;
             self.publish();
             return Ok(self.snapshot.clone());
         }
@@ -804,7 +1197,9 @@ impl Controller {
         self.snapshot.position_ms = position_ms;
         self.snapshot.phase = return_phase;
         self.snapshot.error = None;
+        self.persist_position(true)?;
         self.publish();
+        self.publish_queue();
         Ok(self.snapshot.clone())
     }
 
@@ -837,6 +1232,8 @@ impl Controller {
             track_id: entry.track_id,
             source_id: entry.requested_source_id,
         })?;
+        self.persist_queue_state(true)?;
+        self.publish_queue();
         self.start_load(resolved, 0, false, LoadPurpose::Normal)
     }
 
@@ -942,7 +1339,9 @@ impl Controller {
         self.snapshot.phase = PlaybackPhase::Idle;
         self.snapshot.recovering = false;
         self.snapshot.error = None;
+        self.persist_queue_state(true)?;
         self.publish();
+        self.publish_queue();
         Ok(self.snapshot.clone())
     }
 
@@ -950,6 +1349,9 @@ impl Controller {
         self.shutting_down = true;
         self.recovery = None;
         self.pending_load = None;
+        let persistence_error = self
+            .persist_position(true)
+            .and_then(|()| self.persist_queue_state(false).map(|_| ()));
         if let Some(reply) = self.pending_audio_devices.take() {
             let _ = reply.send(Err(shutting_down_error()));
         }
@@ -959,6 +1361,7 @@ impl Controller {
         self.publish();
         let result = self.backend.shutdown();
         self.publish();
+        persistence_error?;
         result.map(|()| self.snapshot.clone())
     }
 
@@ -1025,6 +1428,10 @@ impl Controller {
                 if self.snapshot.current_track_id.is_some() && self.pending_load.is_none() {
                     self.snapshot.position_ms =
                         clamp_position(position_ms, self.snapshot.duration_ms);
+                    self.position_dirty = true;
+                    if let Err(error) = self.persist_position(false) {
+                        self.set_error(error);
+                    }
                     self.publish();
                 }
             }
@@ -1041,6 +1448,11 @@ impl Controller {
                         PlaybackPhase::Playing
                     };
                     self.desired_paused = paused;
+                    if paused {
+                        if let Err(error) = self.persist_position(true) {
+                            self.set_error(error);
+                        }
+                    }
                     self.publish();
                 }
             }
@@ -1178,6 +1590,8 @@ impl Controller {
             return Ok(self.snapshot.clone());
         };
         let entry = self.queue.entries()[index].clone();
+        self.persist_queue_state(true)?;
+        self.publish_queue();
         let resolved = self.resolve_for_play(&TrackPlaybackRequest {
             track_id: entry.track_id,
             source_id: entry.requested_source_id,
@@ -1306,7 +1720,11 @@ impl Controller {
                 self.snapshot.error = None;
             }
         }
+        if let Err(error) = self.persist_queue_state(false) {
+            self.set_error(error);
+        }
         self.publish();
+        self.publish_queue();
     }
 
     fn handle_load_failure(&mut self, pending: PendingLoad, error: PlaybackError) {
@@ -1782,6 +2200,274 @@ impl Controller {
         }
     }
 
+    fn persisted_queue(&self) -> crate::queue::PersistedQueue {
+        let traversal_ids = self.queue.active_order();
+        let mut entries = traversal_ids
+            .iter()
+            .filter_map(|id| self.queue.entry(*id).cloned())
+            .collect::<Vec<_>>();
+        entries.extend(
+            self.queue
+                .entries()
+                .iter()
+                .filter(|entry| !traversal_ids.contains(&entry.id))
+                .cloned(),
+        );
+        crate::queue::PersistedQueue {
+            entries,
+            current_entry_id: self.queue.current_entry().map(|entry| entry.id),
+            current_position_ms: self.snapshot.position_ms,
+            repeat_mode: self.snapshot.repeat_mode,
+            shuffle_enabled: self.queue.is_shuffle_enabled(),
+            history_order: self.queue.history_order(),
+            traversal_order: self.queue.traversal_order(),
+            revision: self.queue_revision,
+        }
+    }
+
+    fn persist_queue_state(&mut self, increment_revision: bool) -> Result<(), PlaybackError> {
+        if increment_revision {
+            self.queue_revision = self
+                .queue_revision
+                .checked_add(1)
+                .ok_or_else(|| persistence_error_message("queue revision exhausted"))?;
+        }
+        let state = self.persisted_queue();
+        self.queue_repository
+            .replace(&state)
+            .map_err(persistence_error)?;
+        self.position_dirty = false;
+        self.last_position_checkpoint = Instant::now();
+        Ok(())
+    }
+
+    fn persist_position(&mut self, force: bool) -> Result<(), PlaybackError> {
+        if !force
+            && (!self.position_dirty
+                || self.last_position_checkpoint.elapsed() < Duration::from_secs(1))
+        {
+            return Ok(());
+        }
+        self.queue_repository
+            .save_position(
+                self.queue.current_entry().map(|entry| entry.id),
+                self.snapshot.position_ms,
+                self.queue_revision,
+            )
+            .map_err(persistence_error)?;
+        self.position_dirty = false;
+        self.last_position_checkpoint = Instant::now();
+        Ok(())
+    }
+
+    fn queue_workspace(&self) -> QueueWorkspace {
+        let current = self
+            .queue
+            .current_entry()
+            .map(|entry| self.workspace_entry(entry, 0));
+        let section_entries = |section: QueueSection| {
+            self.queue
+                .upcoming_entries(section)
+                .into_iter()
+                .enumerate()
+                .map(|(position, entry)| self.workspace_entry(entry, position as u32))
+                .collect::<Vec<_>>()
+        };
+        QueueWorkspace {
+            revision: self.queue_revision,
+            current,
+            up_next: section_entries(QueueSection::UpNext),
+            later: section_entries(QueueSection::Later),
+            autoplay: section_entries(QueueSection::Autoplay),
+            current_position_ms: self.snapshot.position_ms,
+            repeat_mode: self.snapshot.repeat_mode,
+            shuffle_enabled: self.queue.is_shuffle_enabled(),
+        }
+    }
+
+    fn workspace_entry(&self, entry: &QueueEntry, position: u32) -> QueueWorkspaceEntry {
+        let metadata = TrackRepository::new(self.library.database())
+            .get(entry.track_id)
+            .ok()
+            .flatten();
+        QueueWorkspaceEntry {
+            id: entry.id,
+            track_id: entry.track_id,
+            requested_source_id: entry.requested_source_id,
+            section: entry.section,
+            position,
+            pinned: entry.pinned,
+            title: metadata.as_ref().map(|track| track.title.clone()),
+            artists: metadata
+                .as_ref()
+                .map(|track| {
+                    track
+                        .artists
+                        .iter()
+                        .map(|artist| artist.name.clone())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            album: metadata
+                .as_ref()
+                .and_then(|track| track.album.as_ref().map(|album| album.title.clone())),
+        }
+    }
+
+    fn move_queue_entry(
+        &mut self,
+        entry_id: QueueEntryId,
+        section: QueueSection,
+        target_index: usize,
+    ) -> Result<QueueWorkspace, PlaybackError> {
+        self.queue
+            .move_entry(entry_id, section, target_index)
+            .map_err(queue_mutation_error)?;
+        self.persist_queue_state(true)?;
+        self.publish_queue();
+        Ok(self.queue_workspace())
+    }
+
+    fn remove_queue_entry(
+        &mut self,
+        entry_id: QueueEntryId,
+    ) -> Result<QueueWorkspace, PlaybackError> {
+        self.queue
+            .remove_entry(entry_id)
+            .map_err(queue_mutation_error)?;
+        self.persist_queue_state(true)?;
+        self.publish();
+        self.publish_queue();
+        Ok(self.queue_workspace())
+    }
+
+    fn set_queue_entry_pinned(
+        &mut self,
+        entry_id: QueueEntryId,
+        pinned: bool,
+    ) -> Result<QueueWorkspace, PlaybackError> {
+        self.queue
+            .set_entry_pinned(entry_id, pinned)
+            .map_err(queue_mutation_error)?;
+        self.persist_queue_state(true)?;
+        self.publish_queue();
+        Ok(self.queue_workspace())
+    }
+
+    fn clear_queue_section(
+        &mut self,
+        section: QueueSection,
+    ) -> Result<QueueWorkspace, PlaybackError> {
+        if !self.queue.clear_section(section).is_empty() {
+            self.persist_queue_state(true)?;
+            self.publish();
+            self.publish_queue();
+        }
+        Ok(self.queue_workspace())
+    }
+
+    fn save_queue_snapshot(&mut self, name: String) -> Result<QueueSnapshot, PlaybackError> {
+        self.persist_position(true)?;
+        let state = self.persisted_queue();
+        self.queue_repository
+            .save_snapshot(name, &state)
+            .map_err(snapshot_repository_error)
+    }
+
+    fn list_queue_snapshots(&self) -> Result<Vec<QueueSnapshotSummary>, PlaybackError> {
+        self.queue_repository
+            .list_snapshots()
+            .map_err(snapshot_repository_error)
+    }
+
+    fn restore_queue_snapshot(
+        &mut self,
+        snapshot_id: QueueSnapshotId,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.reject_during_recovery()?;
+        let snapshot = self
+            .queue_repository
+            .load_snapshot(snapshot_id)
+            .map_err(snapshot_repository_error)?;
+        if self.snapshot.current_track_id.is_some() && self.backend.health().connected {
+            self.backend.send(BackendCommand::Stop)?;
+        }
+        self.pending_load = None;
+        self.recovery = None;
+        let mut snapshot_entries = snapshot.entries;
+        snapshot_entries.sort_by_key(|entry| {
+            (
+                entry.section.priority(),
+                entry.position,
+                entry.id.to_string(),
+            )
+        });
+        let mut id_map = std::collections::HashMap::new();
+        let entries = snapshot_entries
+            .iter()
+            .map(|entry| {
+                let id = QueueEntryId::new();
+                id_map.insert(entry.id, id);
+                QueueEntry {
+                    id,
+                    track_id: entry.track_id,
+                    requested_source_id: entry.requested_source_id,
+                    section: entry.section,
+                    pinned: entry.pinned,
+                }
+            })
+            .collect::<Vec<_>>();
+        let current_entry_id = snapshot
+            .current_snapshot_entry_id
+            .and_then(|id| id_map.get(&id).copied());
+        let history_order = snapshot
+            .history_order
+            .iter()
+            .filter_map(|id| id_map.get(id).copied())
+            .collect::<Vec<_>>();
+        let traversal_order = snapshot
+            .traversal_order
+            .iter()
+            .filter_map(|id| id_map.get(id).copied())
+            .collect::<Vec<_>>();
+        self.queue.restore(
+            entries,
+            current_entry_id,
+            &history_order,
+            &traversal_order,
+            snapshot.shuffle_enabled,
+        );
+        self.queue_revision = self
+            .queue_revision
+            .checked_add(1)
+            .ok_or_else(|| persistence_error_message("queue revision exhausted"))?;
+        self.snapshot.repeat_mode = snapshot.repeat_mode;
+        self.clear_current_metadata();
+        self.snapshot.position_ms = snapshot.current_position_ms;
+        if let Some(entry) = self.queue.current_entry() {
+            self.snapshot.current_queue_entry_id = Some(entry.id);
+            self.snapshot.current_track_id = Some(entry.track_id);
+            self.snapshot.current_source_id = entry.requested_source_id;
+        }
+        self.snapshot.phase = PlaybackPhase::Idle;
+        self.snapshot.error = None;
+        self.desired_paused = true;
+        self.persist_queue_state(false)?;
+        self.publish();
+        self.publish_queue();
+        Ok(self.snapshot.clone())
+    }
+
+    fn delete_queue_snapshot(
+        &self,
+        snapshot_id: QueueSnapshotId,
+    ) -> Result<Vec<QueueSnapshotSummary>, PlaybackError> {
+        self.queue_repository
+            .delete_snapshot(snapshot_id)
+            .map_err(snapshot_repository_error)?;
+        self.list_queue_snapshots()
+    }
+
     fn reject_during_recovery(&self) -> Result<(), PlaybackError> {
         if self.shutting_down {
             return Err(shutting_down_error());
@@ -1794,7 +2480,7 @@ impl Controller {
         Ok(())
     }
 
-    fn queue_entry(&mut self, track_id: TrackId, source_id: Option<SourceId>) -> QueueEntry {
+    fn queue_entry(&self, track_id: TrackId, source_id: Option<SourceId>) -> QueueEntry {
         QueueEntry::new(track_id, source_id)
     }
 
@@ -1829,6 +2515,12 @@ impl Controller {
         let snapshot = self.snapshot.clone();
         let sink = self.sink.clone();
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink(snapshot)));
+    }
+
+    fn publish_queue(&self) {
+        let workspace = self.queue_workspace();
+        let sink = self.queue_sink.clone();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink(workspace)));
     }
 }
 
@@ -1872,6 +2564,63 @@ fn playback_error_from_library(error: LibraryError) -> PlaybackError {
             true,
         ),
     }
+}
+
+fn persistence_error(error: QueueRepositoryError) -> PlaybackError {
+    let retryable = !matches!(error, QueueRepositoryError::InvalidSnapshotName);
+    PlaybackError::new(
+        PlaybackErrorCode::PersistenceFailed,
+        error.to_string(),
+        retryable,
+    )
+}
+
+fn persistence_error_message(detail: impl Into<String>) -> PlaybackError {
+    PlaybackError::new(PlaybackErrorCode::PersistenceFailed, detail, true)
+}
+
+fn snapshot_repository_error(error: QueueRepositoryError) -> PlaybackError {
+    if matches!(
+        &error,
+        QueueRepositoryError::InvalidValue { field, .. }
+            if *field == "queue_snapshots.id"
+    ) {
+        PlaybackError::new(
+            PlaybackErrorCode::SnapshotNotFound,
+            error.to_string(),
+            false,
+        )
+    } else {
+        persistence_error(error)
+    }
+}
+
+fn queue_mutation_error(error: crate::queue::QueueMutationError) -> PlaybackError {
+    let code = match error {
+        crate::queue::QueueMutationError::EntryNotFound(_) => PlaybackErrorCode::QueueEntryNotFound,
+        crate::queue::QueueMutationError::CurrentEntry
+        | crate::queue::QueueMutationError::ConsumedEntry => PlaybackErrorCode::QueueEntryImmutable,
+        crate::queue::QueueMutationError::InvalidTarget(_) => {
+            PlaybackErrorCode::InvalidQueuePosition
+        }
+    };
+    PlaybackError::new(code, error.to_string(), false)
+}
+
+fn playback_error_from_playlist(error: crate::playlists::PlaylistError) -> PlaybackError {
+    let code = match &error {
+        crate::playlists::PlaylistError::TrackNotFound(_) => PlaybackErrorCode::TrackNotFound,
+        crate::playlists::PlaylistError::SourceNotFound { .. } => PlaybackErrorCode::SourceNotFound,
+        crate::playlists::PlaylistError::SourceMismatch { .. } => PlaybackErrorCode::SourceMismatch,
+        crate::playlists::PlaylistError::Database(_)
+        | crate::playlists::PlaylistError::Sqlite(_) => PlaybackErrorCode::PersistenceFailed,
+        _ => PlaybackErrorCode::PersistenceFailed,
+    };
+    PlaybackError::new(
+        code,
+        error.to_string(),
+        matches!(code, PlaybackErrorCode::PersistenceFailed),
+    )
 }
 
 fn playback_error_from_resolver(error: SourceResolverError) -> PlaybackError {
@@ -2575,6 +3324,43 @@ mod tests {
         });
         assert_eq!(playing.queue_length, 1);
         service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn persistent_queue_restores_current_position_without_autoplaying_after_restart() {
+        let library = test_library(1);
+        let (service, control, _) = service_with(&library);
+        control.auto_file_loaded(true, Some(10_000));
+        service.play_track(library.tracks[0].clone()).unwrap();
+        wait_until_playing(&service);
+        service.seek_playback(4_250).unwrap();
+        service.toggle_play_pause().unwrap();
+        assert_eq!(service.snapshot().phase, PlaybackPhase::Paused);
+        let persisted_entry_id = service.snapshot().current_queue_entry_id;
+        service.shutdown().unwrap();
+
+        let (restarted, restarted_control, _) = service_with(&library);
+        let restored = restarted.snapshot();
+        assert_eq!(restored.phase, PlaybackPhase::Idle);
+        assert_eq!(restored.current_track_id, Some(library.tracks[0].track_id));
+        assert_eq!(restored.current_queue_entry_id, persisted_entry_id);
+        assert_eq!(restored.position_ms, 4_250);
+        assert_eq!(restored.queue_length, 1);
+        assert!(!restarted_control
+            .operations()
+            .iter()
+            .any(|operation| matches!(operation, FakeOperation::Load(_))));
+
+        restarted_control.auto_file_loaded(true, Some(10_000));
+        restarted.toggle_play_pause().unwrap();
+        wait_for_snapshot(&restarted, |snapshot| {
+            snapshot.phase == PlaybackPhase::Playing && snapshot.position_ms == 4_250
+        });
+        assert!(restarted_control
+            .operations()
+            .iter()
+            .any(|operation| matches!(operation, FakeOperation::Seek(4_250))));
+        restarted.shutdown().unwrap();
     }
 
     #[test]
