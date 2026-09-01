@@ -5,6 +5,7 @@ import { useAppStatus } from "../hooks/useAppStatus";
 import { useUiStore } from "../stores/ui-store";
 import { CommandPalette } from "../components/shell/CommandPalette";
 import { PlayerBar } from "../components/shell/PlayerBar";
+import { QueueDrawer } from "../components/queue/QueueDrawer";
 import { Sidebar } from "../components/shell/Sidebar";
 import { Topbar } from "../components/shell/Topbar";
 
@@ -32,6 +33,7 @@ export function AppShell() {
         <Topbar status={appStatus.data} statusError={appStatus.isError} />
         <main className="page-content"><Outlet /></main>
         <PlayerBar />
+        <QueueDrawer />
       </div>
       <CommandPalette />
     </div>

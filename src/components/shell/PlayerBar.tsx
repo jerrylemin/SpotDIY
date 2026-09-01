@@ -9,6 +9,7 @@ import { VolumeControl } from "../player/VolumeControl";
 import { SpotIcon } from "../icons/SpotIcon";
 import { isTauriRuntime } from "../../services/ipc";
 import { usePlayback } from "../../hooks/usePlayback";
+import { useUiStore } from "../../stores/ui-store";
 
 function phaseCaption(phase: ReturnType<typeof usePlayback>["snapshot"]["phase"]): string {
   switch (phase) {
@@ -35,6 +36,8 @@ function phaseCaption(phase: ReturnType<typeof usePlayback>["snapshot"]["phase"]
 
 export function PlayerBar() {
   const playback = usePlayback();
+  const queueDrawerOpen = useUiStore((state) => state.queueDrawerOpen);
+  const setQueueDrawerOpen = useUiStore((state) => state.setQueueDrawerOpen);
   const [artworkFailed, setArtworkFailed] = useState(false);
   const currentSource = playback.snapshot.sources.find((source) => source.sourceId === playback.snapshot.currentSourceId) ?? null;
   const sourceLabel = currentSource?.label ?? "—";
@@ -130,6 +133,16 @@ export function PlayerBar() {
 
       <div className="player-right">
         <span className="player-source-label" title={currentSource?.availabilityDetail ?? undefined}>SOURCE <strong>{sourceLabel}</strong></span>
+        <button
+          aria-expanded={queueDrawerOpen}
+          aria-label="Open queue"
+          className={`button button-quiet button-small player-queue-toggle${queueDrawerOpen ? " player-queue-toggle-active" : ""}`}
+          onClick={() => setQueueDrawerOpen(!queueDrawerOpen)}
+          type="button"
+        >
+          <SpotIcon name="queue" size={14} />
+          Queue {playback.snapshot.queueLength > 0 ? `· ${playback.snapshot.queueLength}` : ""}
+        </button>
         <AudioDeviceMenu
           devices={playback.audioDevices}
           disabled={playback.snapshot.phase === "failed" || playback.snapshot.phase === "recovering"}

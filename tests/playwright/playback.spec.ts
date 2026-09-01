@@ -149,4 +149,19 @@ test.describe("playback engine browser contract", () => {
     expect(states.after.currentSourceId).toBe("source-e2e-2-alternate");
     expect(states.after.currentSourceId).not.toBe(states.before.currentSourceId);
   });
+
+  test("opens the queue workspace with section priorities and the Autoplay empty state", async ({ page }) => {
+    await openLibrary(page);
+    await page.getByRole("button", { name: /Play now Night Drive/ }).click();
+    await expect(page.getByRole("button", { name: "Open queue" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Open queue" }).click();
+    await expect(page.getByRole("dialog", { name: "Persistent queue" })).toBeVisible();
+    await expect(page.getByText("CURRENT", { exact: true })).toBeVisible();
+    await expect(page.getByText("UP NEXT", { exact: true })).toBeVisible();
+    await expect(page.getByText("LATER", { exact: true })).toBeVisible();
+    await expect(page.getByText("AUTOPLAY", { exact: true })).toBeVisible();
+    await expect(page.getByText("Autoplay recommendations are not enabled yet.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Queue editing and snapshots are available in the native SpotDIY app.", { exact: true })).toBeVisible();
+  });
 });
