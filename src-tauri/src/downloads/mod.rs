@@ -1,7 +1,7 @@
 pub mod progress;
 pub mod task;
 
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -18,8 +18,8 @@ use crate::media_tools::{FfmpegToolStatus, MediaToolHealth, MediaToolManager, Yt
 use crate::search::types::{SearchCancellation, SearchResult};
 use crate::settings::SettingsRepository;
 use crate::sources::yt_dlp::{
-    TokioYtDlpProcessRunner, YtDlpDownloadEvent, YtDlpDownloadProcessError,
-    YtDlpDownloadProcessOutput, YtDlpDownloadRunner, YT_DLP_DOWNLOAD_EVENT_CHANNEL_CAPACITY,
+    TokioYtDlpProcessRunner, YtDlpDownloadEvent, YtDlpDownloadProcessError, YtDlpDownloadRunner,
+    YT_DLP_DOWNLOAD_EVENT_CHANNEL_CAPACITY,
 };
 use crate::sources::{sanitize_artwork_url, validate_provider_url};
 
@@ -370,6 +370,12 @@ impl DownloadService {
         Ok(output)
     }
 
+    pub fn trusted_destination_path(&self, id: DownloadTaskId) -> Result<PathBuf, DownloadError> {
+        let task = self.task(id)?;
+        validate_download_directory(&task.destination_directory)
+            .map_err(|error| invalid(DownloadErrorCode::DownloadDirectoryInvalid, &error))
+    }
+
     pub fn shutdown(&self) -> Result<(), DownloadError> {
         let cancellations = self.begin_shutdown();
         for cancellation in cancellations {
@@ -504,16 +510,16 @@ impl DownloadService {
                             >= usize::from(self.max_concurrent().unwrap_or(DEFAULT_MAX_CONCURRENT))
                     {
                         false
-                    } else if runtime.running.contains_key(&task.id) {
-                        false
                     } else {
-                        runtime.running.insert(
-                            task.id,
-                            RunningTask {
-                                cancellation: cancellation.clone(),
-                            },
-                        );
-                        true
+                        match runtime.running.entry(task.id) {
+                            Entry::Vacant(entry) => {
+                                entry.insert(RunningTask {
+                                    cancellation: cancellation.clone(),
+                                });
+                                true
+                            }
+                            Entry::Occupied(_) => false,
+                        }
                     }
                 }
                 Err(_) => false,
@@ -1258,7 +1264,7 @@ fn tool_error_code(status: crate::search::types::ProviderRuntimeStatus) -> Downl
     }
 }
 
-fn media_tools_snapshot(media_tools: &MediaToolManager) -> MediaToolsSnapshot {
+pub fn media_tools_snapshot(media_tools: &MediaToolManager) -> MediaToolsSnapshot {
     let yt_dlp = media_tools.yt_dlp_status();
     let ffmpeg = media_tools.ffmpeg_status();
     MediaToolsSnapshot {
@@ -1330,6 +1336,7 @@ mod tests {
     use crate::media_tools::{FfmpegToolStatus, YtDlpToolStatus};
     use crate::search::types::{SafeUrl, SearchEntityKind};
     use crate::settings::{SettingValue, SettingsRepository};
+    use crate::sources::yt_dlp::YtDlpDownloadProcessOutput;
 
     #[derive(Clone, Copy)]
     enum FakeBehavior {

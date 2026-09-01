@@ -22,6 +22,8 @@ downloads/
 Data/
 !src-tauri/src/downloads/
 !src-tauri/src/downloads/*.rs
+!src/components/downloads/
+!src/components/downloads/*.tsx
 
 # Tooling indexes and local reports
 .codegraph/

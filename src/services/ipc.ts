@@ -5,6 +5,11 @@ import { z } from "zod";
 
 import type {
   AppStatus,
+  DownloadMode,
+  DownloadSnapshot,
+  DownloadTask,
+  DownloadTaskId,
+  MediaToolsSnapshot,
   LibraryFolder,
   LibraryFolderId,
   LibraryPage,
@@ -75,6 +80,18 @@ const appStatusSchema = z.object({
       detail: z.string(),
     }).strict(),
   ),
+  mediaTools: z.object({
+    ytDlp: z.object({
+      status: z.enum(["unknown", "ready", "missing", "unsupported", "broken", "disabled"]),
+      version: z.string().nullable(),
+      detail: z.string().nullable(),
+    }).strict(),
+    ffmpeg: z.object({
+      status: z.enum(["unknown", "ready", "missing", "unsupported", "broken", "disabled"]),
+      version: z.string().nullable(),
+      detail: z.string().nullable(),
+    }).strict(),
+  }).strict(),
 }).strict();
 
 const searchIdSchema = z.string().min(1).transform((value) => value as SearchId);
@@ -160,6 +177,77 @@ const settingValueSchema = z.discriminatedUnion("key", [
   z.object({ key: z.literal("downloadsDirectory"), value: z.string().nullable() }),
   z.object({ key: z.literal("sourcePreferenceOrder"), value: sourcePreferenceOrderSchema }),
 ]);
+
+const downloadTaskIdSchema = z.string().min(1).transform((value) => value as DownloadTaskId);
+const downloadModeSchema = z.enum(["audio", "video"]);
+const downloadStateSchema = z.enum(["queued", "resolving", "downloading", "postprocessing", "completed", "failed", "cancelled"]);
+const sourceQualityProvenanceSchema = z.enum(["providerEncoded", "unknown"]);
+const downloadErrorCodeSchema = z.enum([
+  "invalidRequest",
+  "unsupportedProvider",
+  "invalidProviderUrl",
+  "downloadDirectoryNotConfigured",
+  "downloadDirectoryInvalid",
+  "sourceNotFound",
+  "sourceTrackMismatch",
+  "toolMissing",
+  "toolBroken",
+  "processFailed",
+  "outputInvalid",
+  "finalizationFailed",
+  "cancelled",
+  "persistenceFailed",
+  "shuttingDown",
+  "unknown",
+]);
+const downloadToolStatusSchema = z.object({
+  status: z.enum(["unknown", "ready", "missing", "unsupported", "broken", "disabled"]),
+  version: z.string().nullable(),
+  detail: z.string().nullable(),
+}).strict();
+const mediaToolsSnapshotSchema = z.object({
+  ytDlp: downloadToolStatusSchema,
+  ffmpeg: downloadToolStatusSchema,
+}).strict();
+const downloadTaskSchema = z.object({
+  id: downloadTaskIdSchema,
+  providerKind: providerKindSchema,
+  providerItemId: z.string().min(1),
+  canonicalUrl: z.string().url(),
+  targetTrackId: z.string().min(1).transform((value) => value as TrackId).nullable(),
+  targetSourceId: z.string().min(1).transform((value) => value as SourceId).nullable(),
+  title: z.string(),
+  artists: z.array(z.string()),
+  artworkUrl: z.string().url().nullable(),
+  mode: downloadModeSchema,
+  state: downloadStateSchema,
+  destinationDirectory: z.string().min(1),
+  outputPath: z.string().min(1).nullable(),
+  outputExtension: z.string().min(1).nullable(),
+  outputCodec: z.string().min(1).nullable(),
+  sourceQualityProvenance: sourceQualityProvenanceSchema,
+  transcoded: z.boolean(),
+  expectedBytes: z.number().int().nonnegative().nullable(),
+  downloadedBytes: z.number().int().nonnegative(),
+  progressPermille: z.number().int().min(0).max(1000),
+  speedBytesPerSecond: z.number().int().nonnegative().nullable(),
+  etaSeconds: z.number().int().nonnegative().nullable(),
+  retryCount: z.number().int().nonnegative(),
+  errorCode: downloadErrorCodeSchema.nullable(),
+  errorDetail: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+  outputMissing: z.boolean(),
+}).strict();
+const downloadSnapshotSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  tasks: z.array(downloadTaskSchema),
+  maxConcurrent: z.number().int().min(1).max(4),
+  downloadsDirectory: z.string().min(1).nullable(),
+  tools: mediaToolsSnapshotSchema,
+}).strict();
 
 const libraryFolderSchema = z.object({
   id: z.string().transform((value) => value as LibraryFolderId),
@@ -469,9 +557,12 @@ export class IpcError extends Error {
 
 export const LIBRARY_PROGRESS_EVENT = "library://scan-progress";
 export const PLAYBACK_STATE_EVENT = "playback://state";
+export const DOWNLOAD_STATE_EVENT = "downloads://state";
 
 type PlaybackSnapshotListener = (snapshot: PlaybackSnapshot) => void;
 type PlaybackSnapshotErrorListener = (error: IpcError) => void;
+export type DownloadSnapshotListener = (snapshot: DownloadSnapshot) => void;
+export type DownloadSnapshotErrorListener = (error: IpcError) => void;
 
 const playbackErrorSummary: Record<PlaybackErrorCode, string> = {
   toolMissing: "mpv is not available on this machine.",
@@ -1035,6 +1126,21 @@ function sortLibraryTracks(items: LibraryTrack[], request: LibraryPageRequest): 
   return request.descending ? sorted.reverse() : sorted;
 }
 
+function browserPreviewMediaTools(): MediaToolsSnapshot {
+  return {
+    ytDlp: {
+      status: "missing",
+      version: null,
+      detail: "Downloads require the native SpotDIY desktop runtime.",
+    },
+    ffmpeg: {
+      status: "missing",
+      version: null,
+      detail: "Downloads require the native SpotDIY desktop runtime.",
+    },
+  };
+}
+
 function browserPreviewStatus(): AppStatus {
   if (isPlaybackE2EAdapterEnabled()) {
     return {
@@ -1076,7 +1182,7 @@ function browserPreviewStatus(): AppStatus {
             metadata: true,
             artwork: true,
             lyrics: false,
-            downloads: false,
+            downloads: true,
             popularity: true,
             releaseDate: false,
             lyricsMetadata: false,
@@ -1095,7 +1201,7 @@ function browserPreviewStatus(): AppStatus {
             metadata: true,
             artwork: true,
             lyrics: false,
-            downloads: false,
+            downloads: true,
             popularity: true,
             releaseDate: false,
             lyricsMetadata: false,
@@ -1122,6 +1228,7 @@ function browserPreviewStatus(): AppStatus {
           detail: "Spotify catalog search is disabled by default.",
         },
       ],
+      mediaTools: browserPreviewMediaTools(),
     };
   }
 
@@ -1164,7 +1271,7 @@ function browserPreviewStatus(): AppStatus {
           metadata: true,
           artwork: true,
           lyrics: false,
-          downloads: false,
+          downloads: true,
           popularity: true,
           releaseDate: false,
           lyricsMetadata: false,
@@ -1183,7 +1290,7 @@ function browserPreviewStatus(): AppStatus {
           metadata: true,
           artwork: true,
           lyrics: false,
-          downloads: false,
+          downloads: true,
           popularity: true,
           releaseDate: false,
           lyricsMetadata: false,
@@ -1210,6 +1317,7 @@ function browserPreviewStatus(): AppStatus {
         detail: "Spotify catalog search is disabled by default.",
       },
     ],
+    mediaTools: browserPreviewMediaTools(),
   };
 }
 
@@ -1843,6 +1951,178 @@ export async function setSetting(setting: SettingValue): Promise<SettingsSnapsho
       throw error;
     }
     throw new IpcError("SpotDIY could not persist that local setting.", error);
+  }
+}
+
+function browserPreviewDownloadSnapshot(): DownloadSnapshot {
+  return {
+    revision: 0,
+    tasks: [],
+    maxConcurrent: 2,
+    downloadsDirectory: null,
+    tools: browserPreviewMediaTools(),
+  };
+}
+
+export function parseDownloadSnapshot(value: unknown): DownloadSnapshot {
+  return downloadSnapshotSchema.parse(value) as DownloadSnapshot;
+}
+
+export async function getDownloadSnapshot(): Promise<DownloadSnapshot> {
+  if (!isTauriRuntime()) {
+    return browserPreviewDownloadSnapshot();
+  }
+  try {
+    return parseDownloadSnapshot(await invoke<unknown>("get_download_snapshot"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not read its download queue.", error);
+  }
+}
+
+export async function queueSearchResultDownload(
+  result: SearchResult,
+  mode: DownloadMode,
+): Promise<DownloadTask> {
+  try {
+    const parsedResult = searchResultSchema.parse(result) as SearchResult;
+    const parsedMode = downloadModeSchema.parse(mode) as DownloadMode;
+    if (!isTauriRuntime()) {
+      throw new IpcError("Downloads require the native SpotDIY desktop runtime.");
+    }
+    return downloadTaskSchema.parse(await invoke<unknown>("queue_search_result_download", {
+      result: parsedResult,
+      mode: parsedMode,
+    })) as DownloadTask;
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not queue that provider download.", error);
+  }
+}
+
+export async function queueSourceDownload(
+  trackId: TrackId,
+  sourceId: SourceId,
+  mode: DownloadMode,
+): Promise<DownloadTask> {
+  try {
+    const parsedTrackId = trackIdSchema.parse(trackId);
+    const parsedSourceId = sourceIdSchema.parse(sourceId);
+    const parsedMode = downloadModeSchema.parse(mode) as DownloadMode;
+    if (!isTauriRuntime()) {
+      throw new IpcError("Downloads require the native SpotDIY desktop runtime.");
+    }
+    return downloadTaskSchema.parse(await invoke<unknown>("queue_source_download", {
+      trackId: parsedTrackId,
+      sourceId: parsedSourceId,
+      mode: parsedMode,
+    })) as DownloadTask;
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not queue that library source download.", error);
+  }
+}
+
+export async function cancelDownload(taskId: DownloadTaskId): Promise<DownloadTask> {
+  try {
+    const parsedTaskId = downloadTaskIdSchema.parse(taskId);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Download controls require the native SpotDIY runtime.");
+    }
+    return downloadTaskSchema.parse(await invoke<unknown>("cancel_download", { taskId: parsedTaskId })) as DownloadTask;
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not cancel that download.", error);
+  }
+}
+
+export async function retryDownload(taskId: DownloadTaskId): Promise<DownloadTask> {
+  try {
+    const parsedTaskId = downloadTaskIdSchema.parse(taskId);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Download controls require the native SpotDIY runtime.");
+    }
+    return downloadTaskSchema.parse(await invoke<unknown>("retry_download", { taskId: parsedTaskId })) as DownloadTask;
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not retry that download.", error);
+  }
+}
+
+export async function setDownloadConcurrency(maxConcurrent: number): Promise<DownloadSnapshot> {
+  try {
+    const parsedMaxConcurrent = z.number().int().min(1).max(4).parse(maxConcurrent);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Download settings require the native SpotDIY runtime.");
+    }
+    return parseDownloadSnapshot(await invoke<unknown>("set_download_concurrency", {
+      maxConcurrent: parsedMaxConcurrent,
+    }));
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not update download concurrency.", error);
+  }
+}
+
+export async function openDownloadLocation(taskId: DownloadTaskId): Promise<void> {
+  try {
+    const parsedTaskId = downloadTaskIdSchema.parse(taskId);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Opening download folders requires the native SpotDIY runtime.");
+    }
+    await invoke("open_download_location", { taskId: parsedTaskId });
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not open that download folder.", error);
+  }
+}
+
+const downloadDirectorySelectionSchema = z.union([z.string().trim().min(1), z.null()]);
+
+export async function pickDownloadDirectory(): Promise<string | null> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Choosing a download folder requires the native SpotDIY runtime.");
+  }
+  try {
+    return downloadDirectorySelectionSchema.parse(
+      await open({ directory: true, multiple: false, title: "Choose download folder" }),
+    );
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not open the download folder picker.", error);
+  }
+}
+
+export async function subscribeToDownloadState(
+  listener: DownloadSnapshotListener,
+  onError?: DownloadSnapshotErrorListener,
+): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    return () => undefined;
+  }
+  try {
+    return await listen<unknown>(DOWNLOAD_STATE_EVENT, (event) => {
+      try {
+        listener(parseDownloadSnapshot(event.payload));
+      } catch (error) {
+        onError?.(new IpcError("SpotDIY received an invalid download state event.", error));
+      }
+    });
+  } catch (error) {
+    throw new IpcError("SpotDIY could not subscribe to download updates.", error);
   }
 }
 

@@ -1,10 +1,10 @@
 import { useState } from "react";
 
-import { openProviderResult, revealLocalFile } from "../../services/ipc";
+import { isTauriRuntime, openProviderResult, queueSearchResultDownload, revealLocalFile } from "../../services/ipc";
 import { usePlayback } from "../../hooks/usePlayback";
 import { ProviderBadge } from "../common/ProviderBadge";
 import { SpotIcon } from "../icons/SpotIcon";
-import type { SearchResult } from "../../types/domain";
+import type { DownloadMode, SearchResult } from "../../types/domain";
 
 interface SearchResultCardProps {
   result: SearchResult;
@@ -29,7 +29,11 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
   const playback = usePlayback();
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [downloadMode, setDownloadMode] = useState<DownloadMode>("audio");
   const localPlayable = result.provider === "local" && result.localTrackId !== null;
+  const canDownload = result.entityKind === "track"
+    && (result.provider === "youtube" || result.provider === "soundcloud")
+    && result.canonicalUrl !== null;
   const duration = durationLabel(result.durationMs);
 
   async function runAction(action: () => Promise<unknown>) {
@@ -69,7 +73,10 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
             {result.localSourceId ? <button className="text-link search-result-reveal" disabled={busy} onClick={() => runAction(() => revealLocalFile(result.localSourceId!))} type="button">Show file</button> : null}
           </>
         ) : result.canonicalUrl ? (
-          <button className="button button-small" disabled={busy} onClick={() => runAction(() => openProviderResult(result.provider, result.canonicalUrl!))} type="button">{result.provider === "spotify" ? "Open on Spotify" : "Open source"}</button>
+          <>
+            <button className="button button-small" disabled={busy} onClick={() => runAction(() => openProviderResult(result.provider, result.canonicalUrl!))} type="button">{result.provider === "spotify" ? "Open on Spotify" : "Open source"}</button>
+            {canDownload ? <div className="search-result-download"><select aria-label={`Download mode for ${result.title}`} disabled={busy || !isTauriRuntime()} onChange={(event) => setDownloadMode(event.target.value as DownloadMode)} title={isTauriRuntime() ? "Choose the managed download format" : "Downloads require the native SpotDIY app"} value={downloadMode}><option value="audio">Audio</option><option value="video">Video</option></select><button className="button button-small" disabled={busy || !isTauriRuntime()} onClick={() => runAction(() => queueSearchResultDownload(result, downloadMode))} title={isTauriRuntime() ? "Queue this provider download" : "Downloads require the native SpotDIY app"} type="button"><SpotIcon name="download" size={13} /> Download</button></div> : null}
+          </>
         ) : null}
       </div>
     </article>

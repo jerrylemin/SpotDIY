@@ -19,6 +19,7 @@ pub mod search {
 pub mod sources;
 
 use db::{standard_database_path, Database};
+use downloads::{DownloadMode, DownloadService, DownloadSnapshot, DownloadTask, DownloadTaskId};
 use fusion::{FusionEvaluation, FusionOverride, FusionOverrideDecision, SourceFusionService};
 use ipc::{app_status_with_runtime, source_capabilities, AppStatus, ProviderCapabilities};
 use library::{LibraryService, ProgressSink, LIBRARY_PROGRESS_EVENT};
@@ -49,6 +50,7 @@ struct AppState {
     database: Database,
     library: LibraryService,
     media_tools: MediaToolManager,
+    downloads: DownloadService,
     playback: PlaybackService,
     search: search::SearchService,
     spotify_auth: sources::spotify::SpotifyAuthService,
@@ -224,6 +226,87 @@ fn set_setting(
 ) -> Result<SettingsSnapshot, String> {
     SettingsRepository::new(&state.database)
         .set_setting(setting)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_download_snapshot(state: State<'_, AppState>) -> Result<DownloadSnapshot, String> {
+    state
+        .downloads
+        .snapshot()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn queue_search_result_download(
+    result: SearchResult,
+    mode: DownloadMode,
+    state: State<'_, AppState>,
+) -> Result<DownloadTask, String> {
+    state
+        .downloads
+        .queue_search_result_download(result, mode)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn queue_source_download(
+    track_id: TrackId,
+    source_id: crate::domain::SourceId,
+    mode: DownloadMode,
+    state: State<'_, AppState>,
+) -> Result<DownloadTask, String> {
+    state
+        .downloads
+        .queue_source_download(track_id, source_id, mode)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn cancel_download(
+    task_id: DownloadTaskId,
+    state: State<'_, AppState>,
+) -> Result<DownloadTask, String> {
+    state
+        .downloads
+        .cancel_download(task_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn retry_download(
+    task_id: DownloadTaskId,
+    state: State<'_, AppState>,
+) -> Result<DownloadTask, String> {
+    state
+        .downloads
+        .retry_download(task_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_download_concurrency(
+    max_concurrent: u8,
+    state: State<'_, AppState>,
+) -> Result<DownloadSnapshot, String> {
+    state
+        .downloads
+        .set_download_concurrency(max_concurrent)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn open_download_location(
+    task_id: DownloadTaskId,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let path = state
+        .downloads
+        .trusted_destination_path(task_id)
+        .map_err(|error| error.to_string())?;
+    app.opener()
+        .reveal_item_in_dir(path)
         .map_err(|error| error.to_string())
 }
 
@@ -497,6 +580,13 @@ fn progress_sink(app: &AppHandle) -> ProgressSink {
     })
 }
 
+fn download_snapshot_sink(app: &AppHandle) -> downloads::DownloadSnapshotSink {
+    let app = app.clone();
+    Arc::new(move |snapshot| {
+        let _ = app.emit(downloads::DOWNLOAD_STATE_EVENT, snapshot);
+    })
+}
+
 fn search_event_sink(app: &AppHandle) -> SearchEventSink {
     let app = app.clone();
     Arc::new(move |event| match event {
@@ -529,6 +619,17 @@ pub fn run() {
             let library = LibraryService::new(database.clone(), artwork_root)?;
             let sink = Some(progress_sink(app.handle()));
             let media_tools = MediaToolManager::new();
+            let download_cache_root = local_data_root
+                .join(db::APPLICATION_DATA_DIRECTORY)
+                .join("cache")
+                .join("downloads");
+            let downloads = DownloadService::with_task_root(
+                database.clone(),
+                media_tools.clone(),
+                download_cache_root,
+                Some(download_snapshot_sink(app.handle())),
+            )?;
+            downloads.start()?;
             let spotify_auth = sources::spotify::SpotifyAuthService::production();
             let adapters: Vec<Arc<dyn SourceAdapter>> = vec![
                 Arc::new(LocalSourceAdapter::new(database.clone())),
@@ -552,6 +653,7 @@ pub fn run() {
                 database,
                 library: library.clone(),
                 media_tools,
+                downloads,
                 playback,
                 search,
                 spotify_auth,
@@ -579,6 +681,13 @@ pub fn run() {
             get_source_resolution,
             get_settings_snapshot,
             set_setting,
+            get_download_snapshot,
+            queue_search_result_download,
+            queue_source_download,
+            cancel_download,
+            retry_download,
+            set_download_concurrency,
+            open_download_location,
             get_library_folders,
             add_library_folders,
             remove_library_folder,
@@ -611,6 +720,7 @@ pub fn run() {
             if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     let _ = state.search.cancel_search();
+                    let _ = state.downloads.shutdown();
                     let _ = state.playback.shutdown();
                 }
             }

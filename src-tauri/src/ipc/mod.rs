@@ -2,6 +2,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::db::Database;
+use crate::downloads::{media_tools_snapshot, MediaToolsSnapshot};
 use crate::media_tools::{MediaToolManager, YtDlpToolStatus};
 use crate::search::types::ProviderRuntimeStatus;
 use crate::settings::{SettingsError, SettingsRepository};
@@ -40,6 +41,7 @@ pub struct AppStatus {
     pub tracks_indexed: u64,
     pub music_folders: Vec<String>,
     pub providers: Vec<ProviderStatus>,
+    pub media_tools: MediaToolsSnapshot,
 }
 
 #[derive(Debug, Error)]
@@ -114,6 +116,7 @@ pub fn app_status(version: &'static str, database: &Database) -> Result<AppStatu
         tracks_indexed,
         music_folders: music_folders.clone(),
         providers: provider_statuses(&music_folders, None, None),
+        media_tools: MediaToolsSnapshot::default(),
     })
 }
 
@@ -154,6 +157,7 @@ pub fn app_status_with_runtime(
             Some(media_tools.yt_dlp_status()),
             Some(spotify.setup_status()),
         ),
+        media_tools: media_tools_snapshot(media_tools),
     })
 }
 

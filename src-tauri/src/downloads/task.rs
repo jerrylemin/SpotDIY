@@ -793,7 +793,7 @@ fn parse_download_row(row: RawDownloadRow) -> Result<DownloadTask, DownloadRepos
         })?;
     let output_path = row.output_path.map(PathBuf::from);
     let output_missing = state == DownloadState::Completed
-        && output_path.as_ref().map_or(true, |path| {
+        && output_path.as_ref().is_none_or(|path| {
             fs::symlink_metadata(path)
                 .map(|metadata| metadata.file_type().is_symlink() || !metadata.is_file())
                 .unwrap_or(true)

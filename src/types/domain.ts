@@ -150,6 +150,81 @@ export interface AppStatus {
   tracksIndexed: number;
   musicFolders: string[];
   providers: ProviderStatus[];
+  mediaTools: MediaToolsSnapshot;
+}
+
+export type DownloadTaskId = string & { readonly __brand: "DownloadTaskId" };
+export type DownloadMode = "audio" | "video";
+export type DownloadState = "queued" | "resolving" | "downloading" | "postprocessing" | "completed" | "failed" | "cancelled";
+export type SourceQualityProvenance = "providerEncoded" | "unknown";
+export type DownloadErrorCode =
+  | "invalidRequest"
+  | "unsupportedProvider"
+  | "invalidProviderUrl"
+  | "downloadDirectoryNotConfigured"
+  | "downloadDirectoryInvalid"
+  | "sourceNotFound"
+  | "sourceTrackMismatch"
+  | "toolMissing"
+  | "toolBroken"
+  | "processFailed"
+  | "outputInvalid"
+  | "finalizationFailed"
+  | "cancelled"
+  | "persistenceFailed"
+  | "shuttingDown"
+  | "unknown";
+
+export interface DownloadToolStatus {
+  status: ProviderRuntimeStatus;
+  version: string | null;
+  detail: string | null;
+}
+
+export interface MediaToolsSnapshot {
+  ytDlp: DownloadToolStatus;
+  ffmpeg: DownloadToolStatus;
+}
+
+export interface DownloadTask {
+  id: DownloadTaskId;
+  providerKind: ProviderKind;
+  providerItemId: string;
+  canonicalUrl: string;
+  targetTrackId: TrackId | null;
+  targetSourceId: SourceId | null;
+  title: string;
+  artists: string[];
+  artworkUrl: string | null;
+  mode: DownloadMode;
+  state: DownloadState;
+  destinationDirectory: string;
+  outputPath: string | null;
+  outputExtension: string | null;
+  outputCodec: string | null;
+  sourceQualityProvenance: SourceQualityProvenance;
+  transcoded: boolean;
+  expectedBytes: number | null;
+  downloadedBytes: number;
+  progressPermille: number;
+  speedBytesPerSecond: number | null;
+  etaSeconds: number | null;
+  retryCount: number;
+  errorCode: DownloadErrorCode | null;
+  errorDetail: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  outputMissing: boolean;
+}
+
+export interface DownloadSnapshot {
+  revision: number;
+  tasks: DownloadTask[];
+  maxConcurrent: number;
+  downloadsDirectory: string | null;
+  tools: MediaToolsSnapshot;
 }
 
 export type SearchId = string & { readonly __brand: "SearchId" };
