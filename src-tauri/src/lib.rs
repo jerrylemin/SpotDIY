@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod bookmarks;
 pub mod credentials;
 pub mod db;
@@ -22,9 +23,11 @@ pub mod search {
     pub use types::*;
 }
 pub mod sources;
+pub mod storage;
 
+use backup::{BackupService, ImportCommitResult, ImportPreview};
 use bookmarks::{AbLoopPreset, Bookmark, BookmarkErrorDto, BookmarkService};
-use db::{standard_database_path, Database};
+use db::Database;
 use downloads::{DownloadMode, DownloadService, DownloadSnapshot, DownloadTask, DownloadTaskId};
 use fusion::{FusionEvaluation, FusionOverride, FusionOverrideDecision, SourceFusionService};
 use inspector::{TrackInspector, TrackInspectorService};
@@ -43,9 +46,11 @@ use settings::{
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use storage::{StorageLayout, StorageMode, StorageModeSwitchResult, StorageStatus};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
+use uuid::Uuid;
 
 use crate::db::repository::TrackRepository;
 use crate::domain::{ProviderKind, TrackId};
@@ -64,6 +69,7 @@ pub const SPOTIFY_AUTH_STATE_EVENT: &str = "spotify://auth-state";
 
 struct AppState {
     database: Database,
+    backup: BackupService,
     library: LibraryService,
     media_tools: MediaToolManager,
     downloads: DownloadService,
@@ -87,6 +93,143 @@ fn get_app_status(state: State<'_, AppState>) -> Result<AppStatus, String> {
         &state.spotify_auth,
     )
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_storage_status(state: State<'_, AppState>) -> Result<StorageStatus, String> {
+    state
+        .backup
+        .storage_status()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn export_spotdiy_backup(
+    options: backup::SpotDiyExportOptions,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let Some(file) = app
+        .dialog()
+        .file()
+        .set_title("Export SpotDIY backup")
+        .set_file_name("SpotDIY-backup.spotdiy")
+        .add_filter("SpotDIY backup", &["spotdiy"])
+        .blocking_save_file()
+    else {
+        return Err("backup export cancelled".to_owned());
+    };
+    let destination = file.into_path().map_err(|error| error.to_string())?;
+    if destination.exists() {
+        return Err(format!(
+            "backup destination already exists: {}",
+            destination.display()
+        ));
+    }
+    let file_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "backup destination is not a valid filename".to_owned())?;
+    let temporary_id = Uuid::new_v4();
+    let temporary = destination.with_file_name(format!(".{file_name}.tmp-{temporary_id}"));
+    if let Err(error) = state.backup.export(options, &temporary) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error.to_string());
+    }
+    if destination.exists() {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(format!(
+            "backup destination already exists: {}",
+            destination.display()
+        ));
+    }
+    std::fs::rename(&temporary, &destination).map_err(|error| {
+        let _ = std::fs::remove_file(&temporary);
+        format!(
+            "could not finalize backup {}: {error}",
+            destination.display()
+        )
+    })
+}
+
+#[tauri::command]
+fn pick_and_prepare_spotdiy_import(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ImportPreview, String> {
+    let Some(file) = app
+        .dialog()
+        .file()
+        .add_filter("SpotDIY backup", &["spotdiy"])
+        .blocking_pick_file()
+    else {
+        return Err("backup import cancelled".to_owned());
+    };
+    let path = file.into_path().map_err(|error| error.to_string())?;
+    state
+        .backup
+        .stage_import(&path)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_pending_import_preview(state: State<'_, AppState>) -> Result<Option<ImportPreview>, String> {
+    state
+        .backup
+        .pending_preview()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn commit_spotdiy_import(
+    import_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ImportCommitResult, String> {
+    let preview = state
+        .backup
+        .pending_preview()
+        .map_err(|error| error.to_string())?
+        .filter(|preview| preview.import_id == import_id)
+        .ok_or_else(|| format!("import {import_id} was not found"))?;
+    let destination = if state.backup.layout().mode == StorageMode::Standard
+        && preview.included_audio_count > 0
+    {
+        let Some(folder) = app
+            .dialog()
+            .file()
+            .set_title("Restore included music to:")
+            .blocking_pick_folder()
+        else {
+            return Err("import remains staged; restore folder selection cancelled".to_owned());
+        };
+        Some(folder.into_path().map_err(|error| error.to_string())?)
+    } else {
+        None
+    };
+    state
+        .backup
+        .commit_import(&import_id, destination)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn cancel_spotdiy_import(import_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .backup
+        .cancel_import(&import_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn prepare_storage_mode_switch(
+    target_mode: StorageMode,
+    state: State<'_, AppState>,
+) -> Result<StorageModeSwitchResult, String> {
+    state
+        .backup
+        .prepare_storage_mode_switch(target_mode)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -255,6 +398,12 @@ fn set_setting(
     setting: SettingValue,
     state: State<'_, AppState>,
 ) -> Result<SettingsSnapshot, String> {
+    if matches!(&setting, SettingValue::StorageMode(_)) {
+        return Err(
+            "storage mode changes must use prepare_storage_mode_switch so the database and marker stay coordinated"
+                .to_owned(),
+        );
+    }
     SettingsRepository::new(&state.database)
         .set_setting(setting)
         .map_err(|error| error.to_string())
@@ -1351,18 +1500,31 @@ pub fn run() {
                 } else {
                     app.path().local_data_dir()?
                 };
-            let database = Database::open(standard_database_path(&local_data_root))?;
-            let artwork_root = local_data_root
-                .join(db::APPLICATION_DATA_DIRECTORY)
-                .join("cache")
-                .join("artwork");
+            let executable_dir = std::env::current_exe()?
+                .parent()
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "the running executable has no parent directory",
+                    )
+                })?
+                .to_path_buf();
+            let layout = StorageLayout::resolve(&executable_dir, &local_data_root)?;
+            layout.ensure_runtime_directories()?;
+            let startup_restore = BackupService::startup_restore(&layout)?;
+            let database = Database::open(&layout.database_path)?;
+            let settings = SettingsRepository::new(&database);
+            if settings.get_snapshot()?.storage_mode != layout.mode {
+                settings.set_setting(SettingValue::StorageMode(layout.mode))?;
+            }
+            let backup =
+                BackupService::new(database.clone(), layout.clone(), env!("CARGO_PKG_VERSION"))?;
+            backup.record_startup_restore(&startup_restore)?;
+            let artwork_root = layout.artwork_cache_root.clone();
             let library = LibraryService::new(database.clone(), artwork_root)?;
             let sink = Some(progress_sink(app.handle()));
             let media_tools = MediaToolManager::new();
-            let download_cache_root = local_data_root
-                .join(db::APPLICATION_DATA_DIRECTORY)
-                .join("cache")
-                .join("downloads");
+            let download_cache_root = layout.downloads_cache_root.clone();
             let downloads = DownloadService::with_task_root(
                 database.clone(),
                 media_tools.clone(),
@@ -1425,6 +1587,7 @@ pub fn run() {
             windows.initialize();
             app.manage(AppState {
                 database,
+                backup,
                 library: library.clone(),
                 media_tools,
                 downloads,
@@ -1457,6 +1620,13 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             get_app_status,
+            get_storage_status,
+            export_spotdiy_backup,
+            pick_and_prepare_spotdiy_import,
+            get_pending_import_preview,
+            commit_spotdiy_import,
+            cancel_spotdiy_import,
+            prepare_storage_mode_switch,
             get_source_capabilities,
             start_search,
             cancel_search,
