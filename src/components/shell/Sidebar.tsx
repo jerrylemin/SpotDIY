@@ -11,6 +11,7 @@ const navItems: NavItem[] = [
   { id: "lyrics", label: "Lyrics & notes", shortLabel: "Lyrics", icon: "lyrics" },
   { id: "playlists", label: "Playlists", shortLabel: "Playlists", icon: "playlist" },
   { id: "downloads", label: "Downloads", shortLabel: "Downloads", icon: "download" },
+  { id: "analytics", label: "Analytics", shortLabel: "Analytics", icon: "analytics" },
 ];
 
 export function Sidebar() {

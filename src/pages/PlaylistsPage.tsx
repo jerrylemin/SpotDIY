@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { EmptyState } from "../components/common/EmptyState";
 import { ContextActionMenu } from "../components/common/ContextActionMenu";
 import { SpotIcon } from "../components/icons/SpotIcon";
+import { SmartPlaylistPanel } from "../components/smart/SmartPlaylistPanel";
 import { usePlayback } from "../hooks/usePlayback";
 import { useUiStore } from "../stores/ui-store";
 import {
@@ -241,6 +242,7 @@ export function PlaylistsPage() {
     return (
       <div className="page-stack">
         <section className="page-intro"><div><span className="eyebrow">PLAYLISTS</span><h1>Shape the <em>moment.</em></h1><p>Keep playlists simple, branchable, and close to how you actually listen.</p></div><button className="button button-primary" disabled type="button"><SpotIcon name="playlist" size={16} /> New playlist</button></section>
+        <SmartPlaylistPanel />
         <EmptyState icon="playlist" eyebrow="NATIVE WORKSPACE" title="Playlists live with your library" description="Open the native SpotDIY app to create durable playlists, manage the Inbox, and make one-shot branches." />
       </div>
     );
@@ -252,6 +254,8 @@ export function PlaylistsPage() {
         <div><span className="eyebrow">PLAYLISTS</span><h1>Shape the <em>moment.</em></h1><p>Durable collections with a lightweight Inbox and one-shot branches for decisions you can review.</p></div>
         <button className="button button-primary" disabled={actionPending} onClick={create} type="button"><SpotIcon name="playlist" size={16} /> New playlist</button>
       </section>
+
+      <SmartPlaylistPanel />
 
       {error ? <div className="library-alert library-alert-error" role="alert"><SpotIcon name="alert" size={16} /><span>{error}</span></div> : null}
       {loading ? <div className="library-pending-state" role="status"><SpotIcon name="spark" size={18} /> Loading playlists…</div> : playlists.length === 0 ? <EmptyState icon="playlist" eyebrow="NO PLAYLISTS YET" title="Your next context belongs here" description="Create a playlist from the native app, then add local tracks from the library." action={<button className="button button-primary" onClick={create} type="button">Create playlist</button>} /> : (

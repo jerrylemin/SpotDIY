@@ -1480,3 +1480,101 @@ kbd { border: 1px solid var(--color-border-strong); border-bottom-color: var(--c
     width: calc(100vw - 24px);
   }
 }
+
+.analytics-page { gap: 24px; }
+.analytics-mode-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.analytics-mode-card { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 14px; padding: 13px 15px; border: 1px solid rgba(215,255,96,.18); border-radius: 9px; background: rgba(215,255,96,.035); }
+.analytics-mode-card strong { color: var(--text); font-size: 11px; }
+.analytics-mode-card p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.analytics-overview-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.analytics-stat-card, .analytics-panel, .smart-playlists-panel { padding: 19px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.025); }
+.analytics-stat-card { display: flex; min-height: 132px; flex-direction: column; gap: 8px; }
+.analytics-stat-card strong { color: var(--lime); font-size: 31px; font-weight: 540; letter-spacing: -.055em; }
+.analytics-stat-card > span:last-child { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.analytics-dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(270px, .8fr); gap: 12px; align-items: start; }
+.analytics-panel { display: flex; min-width: 0; flex-direction: column; gap: 16px; }
+.analytics-panel-wide { grid-row: span 2; }
+.analytics-panel h3 { margin: 5px 0 0; font-size: 15px; font-weight: 550; }
+.analytics-heatmap { display: grid; grid-template-columns: 34px repeat(24, minmax(8px, 1fr)); gap: 5px 3px; overflow: auto; padding-bottom: 3px; }
+.analytics-heatmap-corner { min-width: 34px; }
+.analytics-heatmap-hour { color: var(--muted); font-size: 8px; text-align: center; }
+.analytics-heatmap-row { display: contents; }
+.analytics-heatmap-day { color: var(--muted); font-size: 9px; line-height: 12px; }
+.analytics-heatmap-cell { display: block; min-width: 9px; height: 13px; border-radius: 3px; background: var(--lime); box-shadow: inset 0 0 0 1px rgba(215,255,96,.07); }
+.analytics-ranking-list, .analytics-history-list, .analytics-session-list { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.analytics-ranking-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 49px; border-bottom: 1px solid var(--line); }
+.analytics-ranking-row > div, .analytics-history-main { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.analytics-ranking-row strong, .analytics-history-main strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.analytics-ranking-row span, .analytics-ranking-row small, .analytics-history-main span { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.analytics-ranking-row small { color: var(--muted-strong); }
+.analytics-rank { color: var(--lime) !important; font-size: 9px !important; font-variant-numeric: tabular-nums; }
+.analytics-timeline { display: flex; flex-direction: column; gap: 2px; }
+.analytics-timeline-row { display: grid; grid-template-columns: 72px minmax(80px, 1fr) auto minmax(120px, .7fr); align-items: center; gap: 10px; min-height: 38px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.analytics-timeline-row strong { color: var(--text); font-size: 10px; }
+.analytics-timeline-row small { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.analytics-timeline-bar { display: block; height: 7px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.07); }
+.analytics-timeline-bar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--violet), var(--lime)); }
+.analytics-session-row { display: flex; align-items: center; gap: 12px; min-height: 62px; border-bottom: 1px solid var(--line); }
+.analytics-session-row-selected { border-bottom-color: rgba(215,255,96,.4); }
+.analytics-session-select { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 5px; border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; }
+.analytics-session-select strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.analytics-session-select span { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.analytics-row-actions { display: flex; flex: 0 0 auto; gap: 6px; }
+.analytics-history-row { display: grid; grid-template-columns: minmax(0, 1.4fr) auto 55px minmax(135px, .8fr); align-items: center; gap: 10px; min-height: 58px; border-bottom: 1px solid var(--line); }
+.analytics-history-row > time { color: var(--muted); font-size: 9px; text-align: right; }
+.analytics-history-time { color: var(--muted-strong); font-size: 9px; text-align: right; }
+.analytics-outcome { padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+.analytics-outcome-completed { border-color: rgba(215,255,96,.25); color: var(--lime); }
+.analytics-outcome-skipped, .analytics-outcome-interrupted { border-color: rgba(255,181,112,.28); color: var(--orange); }
+.analytics-outcome-stopped { border-color: rgba(142,123,255,.3); color: #b0a5ff; }
+.analytics-time-machine-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
+.analytics-time-machine-controls input, .smart-playlist-editor input, .smart-playlist-editor select { min-width: 0; height: 31px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 5px; outline: 0; background: var(--panel); color: var(--text); font-size: 10px; }
+.analytics-time-machine-controls input:focus, .smart-playlist-editor input:focus, .smart-playlist-editor select:focus { border-color: rgba(215,255,96,.55); }
+
+.smart-playlists-panel { display: flex; flex-direction: column; gap: 14px; }
+.smart-panel-intro { max-width: 720px; margin: -4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.smart-playlists-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 18px; align-items: start; }
+.smart-playlist-list { display: flex; min-height: 120px; flex-direction: column; gap: 4px; padding-right: 12px; border-right: 1px solid var(--line); }
+.smart-playlist-list-item { display: flex; align-items: center; gap: 8px; min-height: 35px; padding: 0 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; text-align: left; }
+.smart-playlist-list-item:hover, .smart-playlist-list-item-active { border-color: var(--line); background: rgba(215,255,96,.06); color: var(--text); }
+.smart-playlist-list-item-active svg { color: var(--lime); }
+.smart-playlist-editor { display: flex; min-width: 0; flex-direction: column; gap: 16px; }
+.smart-playlist-editor-heading { display: grid; grid-template-columns: minmax(150px, 1.7fr) repeat(3, minmax(100px, .7fr)); gap: 8px; }
+.smart-playlist-editor label { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.smart-playlist-editor label input, .smart-playlist-editor label select { width: 100%; margin-top: 0; color: var(--text); font-size: 10px; font-weight: 400; letter-spacing: normal; text-transform: none; }
+.smart-rule-builder { display: flex; flex-direction: column; gap: 8px; padding: 13px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.018); }
+.smart-rule-builder-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.smart-rule-builder-heading > div { display: flex; flex-direction: column; gap: 4px; }
+.smart-rule-builder-heading strong { font-size: 11px; }
+.smart-rule-logic { display: flex !important; flex: 0 0 auto; flex-direction: row !important; align-items: center; gap: 6px !important; letter-spacing: .04em !important; }
+.smart-rule-logic select { width: auto !important; height: 27px !important; }
+.smart-rule-row { display: grid; grid-template-columns: minmax(110px, .8fr) minmax(100px, .7fr) minmax(150px, 1fr) 32px; align-items: center; gap: 7px; padding-top: 8px; border-top: 1px solid var(--line); }
+.smart-rule-row input, .smart-rule-row select { width: 100%; }
+.smart-rule-range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 5px; }
+.smart-rule-range > span { color: var(--muted); font-size: 9px; }
+.smart-rule-no-value { color: var(--muted); font-size: 9px; font-style: italic; }
+.smart-playlist-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.smart-preview { display: flex; flex-direction: column; gap: 8px; padding-top: 13px; border-top: 1px solid var(--line); }
+.smart-preview-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 42px; border-bottom: 1px solid var(--line); }
+.smart-preview-row > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.smart-preview-row strong, .smart-preview-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.smart-preview-row strong { font-size: 10px; }
+.smart-preview-row span, .smart-preview-row small { color: var(--muted); font-size: 9px; }
+
+@media (max-width: 900px) {
+  .analytics-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .analytics-dashboard-grid { grid-template-columns: 1fr; }
+  .analytics-panel-wide { grid-row: auto; }
+  .smart-playlists-layout { grid-template-columns: 1fr; }
+  .smart-playlist-list { padding-right: 0; padding-bottom: 10px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .smart-playlist-editor-heading { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 620px) {
+  .analytics-overview-grid { grid-template-columns: 1fr 1fr; }
+  .analytics-history-row { grid-template-columns: minmax(0, 1fr) auto; padding: 8px 0; }
+  .analytics-history-row > time, .analytics-history-time { text-align: left; }
+  .analytics-outcome { justify-self: start; }
+  .smart-rule-row { grid-template-columns: 1fr 1fr 32px; }
+  .smart-rule-row > :nth-child(3) { grid-column: 1 / -1; }
+}

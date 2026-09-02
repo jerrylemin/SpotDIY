@@ -85,6 +85,29 @@ import type {
   OverlaySnapshot,
   WindowsIntegrationSettings,
   WindowsIntegrationSnapshot,
+  AnalyticsOverview,
+  HistoryEntry,
+  HistoryOutcome,
+  ListeningHeatmapCell,
+  ListeningModeChange,
+  ListeningModeReason,
+  ListeningModeState,
+  ListeningSession,
+  ListeningSessionId,
+  Paged,
+  PlayHistoryId,
+  ReopenQueueResult,
+  SmartPlaylist,
+  SmartPlaylistId,
+  SmartPlaylistInput,
+  SmartPlaylistPreview,
+  SmartRule,
+  SmartShuffleOptions,
+  SmartShufflePool,
+  SmartTrack,
+  TasteTimelineMonth,
+  TopArtist,
+  TopTrack,
 } from "../types/domain";
 import { spotThemeDefinitionSchema } from "../features/theme/theme-schema";
 
@@ -314,7 +337,7 @@ const importPreviewSchema = z.object({
   importId: z.string().uuid(),
   archiveVersion: z.literal(1),
   appVersion: z.string().min(1),
-  databaseSchemaVersion: z.number().int().min(0).max(8),
+  databaseSchemaVersion: z.number().int().min(0).max(9),
   sourceStorageMode: storageModeSchema,
   entryCount: z.number().int().nonnegative(),
   includedAudioCount: z.number().int().nonnegative(),
@@ -1015,6 +1038,188 @@ const playbackSeekSchema = z.number().int().nonnegative();
 const playbackVolumeSchema = z.number().int().min(0).max(100);
 const manualLyricsModeSchema = z.enum(["plain", "lrc"]);
 
+const listeningSessionIdSchema = z.string().min(1).transform((value) => value as ListeningSessionId);
+const playHistoryIdSchema = z.string().min(1).transform((value) => value as PlayHistoryId);
+const smartPlaylistIdSchema = z.string().min(1).transform((value) => value as SmartPlaylistId);
+const historyOutcomeSchema = z.enum(["completed", "skipped", "stopped", "interrupted"]);
+const historyEntrySchema = z.object({
+  id: playHistoryIdSchema,
+  sessionId: listeningSessionIdSchema.nullable(),
+  trackId: trackIdSchema.nullable(),
+  sourceId: sourceIdSchema.nullable(),
+  titleSnapshot: z.string(),
+  artists: z.array(z.string()),
+  albumSnapshot: z.string().nullable(),
+  providerKind: providerKindSchema.nullable(),
+  startedAt: z.string().min(1),
+  endedAt: z.string().min(1),
+  localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  localHour: z.number().int().min(0).max(23),
+  localWeekday: z.number().int().min(0).max(6),
+  listenedMs: z.number().int().nonnegative(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  outcome: historyOutcomeSchema,
+  qualifiedPlay: z.boolean(),
+  createdAt: z.string().min(1),
+}).strict();
+const listeningSessionSchema = z.object({
+  id: listeningSessionIdSchema,
+  startedAt: z.string().min(1),
+  endedAt: z.string().min(1),
+  label: z.string().nullable(),
+  eventCount: z.number().int().nonnegative(),
+  listenedMs: z.number().int().nonnegative(),
+}).strict();
+const analyticsOverviewSchema = z.object({
+  listenedMs: z.number().int().nonnegative(),
+  qualifiedPlays: z.number().int().nonnegative(),
+  skips: z.number().int().nonnegative(),
+  uniqueTracks: z.number().int().nonnegative(),
+  uniqueArtists: z.number().int().nonnegative(),
+  sessionCount: z.number().int().nonnegative(),
+}).strict();
+const listeningHeatmapCellSchema = z.object({
+  weekday: z.number().int().min(0).max(6),
+  hour: z.number().int().min(0).max(23),
+  listenedMs: z.number().int().nonnegative(),
+}).strict();
+const topTrackSchema = z.object({
+  trackId: trackIdSchema.nullable(),
+  title: z.string(),
+  artists: z.array(z.string()),
+  listenedMs: z.number().int().nonnegative(),
+  qualifiedPlays: z.number().int().nonnegative(),
+  playCount: z.number().int().nonnegative(),
+}).strict();
+const topArtistSchema = z.object({
+  name: z.string(),
+  listenedMs: z.number().int().nonnegative(),
+  qualifiedPlays: z.number().int().nonnegative(),
+  playCount: z.number().int().nonnegative(),
+}).strict();
+const tasteTimelineMonthSchema = z.object({
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  listenedMs: z.number().int().nonnegative(),
+  qualifiedPlays: z.number().int().nonnegative(),
+  topTracks: z.array(z.string()),
+  topArtists: z.array(z.string()),
+}).strict();
+const reopenQueueEntrySchema = z.object({
+  trackId: trackIdSchema,
+  requestedSourceId: sourceIdSchema.nullable(),
+}).strict();
+const reopenQueueResultSchema = z.object({
+  entries: z.array(reopenQueueEntrySchema).max(1000),
+  droppedCount: z.number().int().nonnegative(),
+}).strict();
+const listeningSessionPageSchema = z.object({
+  items: z.array(listeningSessionSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().nonnegative(),
+  pageSize: z.number().int().positive(),
+}).strict();
+
+const smartSortModeSchema = z.enum(["title", "artist", "dateAdded", "lastPlayed", "playCount", "rating", "duration", "audioQuality"]);
+const smartSortDirectionSchema = z.enum(["asc", "desc"]);
+const smartFieldSchema = z.enum(["artist", "album", "genre", "year", "dateAdded", "lastPlayed", "playCount", "skipCount", "rating", "liked", "downloaded", "provider", "audioQuality", "duration", "tag"]);
+const smartOperationSchema = z.enum(["contains", "equals", "before", "after", "between", "never", "greaterThanOrEqual", "lessThanOrEqual", "absent", "true", "false", "has", "lacks", "is"]);
+const smartScalarSchema = z.union([z.string(), z.number().int()]);
+const smartValueSchema = z.union([
+  z.string(),
+  z.number().int(),
+  z.boolean(),
+  z.object({ from: smartScalarSchema, to: smartScalarSchema }).strict(),
+]);
+const smartRuleSchema: z.ZodType<SmartRule> = z.lazy(() => z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("group"),
+    operator: z.enum(["and", "or"]),
+    children: z.array(smartRuleSchema),
+  }).strict(),
+  z.object({
+    type: z.literal("predicate"),
+    field: smartFieldSchema,
+    operation: smartOperationSchema,
+    value: smartValueSchema.nullable(),
+  }).strict(),
+]));
+const smartPlaylistSchema = z.object({
+  id: smartPlaylistIdSchema,
+  name: z.string().min(1).max(120),
+  rule: smartRuleSchema,
+  sortMode: smartSortModeSchema,
+  sortDirection: smartSortDirectionSchema,
+  limitCount: z.number().int().min(1).max(5000).nullable(),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+}).strict();
+const smartPlaylistInputSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  rule: smartRuleSchema,
+  sortMode: smartSortModeSchema,
+  sortDirection: smartSortDirectionSchema,
+  limitCount: z.number().int().min(1).max(5000).nullable(),
+}).strict();
+const audioQualitySchema = z.enum(["lossless", "lossy", "unknown"]);
+const smartTrackSchema = z.object({
+  trackId: trackIdSchema,
+  title: z.string(),
+  artists: z.array(z.string()),
+  album: z.string().nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  dateAdded: z.string().min(1),
+  lastPlayed: z.string().min(1).nullable(),
+  playCount: z.number().int().nonnegative(),
+  rating: z.number().int().min(1).max(5).nullable(),
+  audioQuality: audioQualitySchema,
+}).strict();
+const smartPlaylistPreviewSchema = z.object({
+  items: z.array(smartTrackSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().nonnegative(),
+  pageSize: z.number().int().positive().max(100),
+}).strict();
+const smartShufflePoolSchema = z.union([
+  z.literal("library"),
+  z.literal("liked"),
+  z.object({ smartPlaylist: smartPlaylistIdSchema }).strict(),
+]);
+const smartShuffleOptionsSchema = z.object({
+  familiarity: z.number().int().min(0).max(100),
+  variety: z.number().int().min(0).max(100),
+  freshness: z.number().int().min(0).max(100),
+  count: z.number().int().min(1).max(1000),
+  recentTrackIds: z.array(trackIdSchema).max(20).optional(),
+}).strict();
+const listeningModeStateSchema = z.object({
+  privateSession: z.boolean(),
+  temporary: z.boolean(),
+}).strict();
+const listeningModeReasonSchema = z.enum(["privateEnabled", "privateDisabled", "temporaryEntered", "temporaryExited", "privateLockedByTemporary"]);
+const listeningModeChangeSchema = z.object({
+  state: listeningModeStateSchema,
+  reason: listeningModeReasonSchema,
+}).strict();
+
+function parseSmartRule(value: unknown): SmartRule {
+  const parsed = smartRuleSchema.parse(value) as SmartRule;
+  let nodes = 0;
+  const visit = (rule: SmartRule, depth: number): void => {
+    nodes += 1;
+    if (depth > 4 || nodes > 64) {
+      throw new Error("Smart playlist rules must be at most four levels deep and 64 nodes.");
+    }
+    if (rule.type === "group") {
+      if (rule.children.length === 0) {
+        throw new Error("Smart playlist groups must contain at least one rule.");
+      }
+      rule.children.forEach((child) => visit(child, depth + 1));
+    }
+  };
+  visit(parsed, 0);
+  return parsed;
+}
+
 export class IpcError extends Error {
   public constructor(message: string, public readonly cause?: unknown) {
     super(message);
@@ -1219,6 +1424,12 @@ const e2eAdapterState: PlaybackE2EAdapterState = {
   activeQueueIds: [],
   nextQueueEntryId: 1,
 };
+
+let browserListeningModeState: ListeningModeState = {
+  privateSession: false,
+  temporary: false,
+};
+let browserTemporaryPrivateBefore = false;
 
 function e2ePlaybackScenario(): "default" | "toolMissing" | "recovering" | "failed" {
   if (typeof window === "undefined") {
@@ -3709,6 +3920,23 @@ async function invokeBookmarks<T>(
   }
 }
 
+async function invokeLocal<T>(
+  command: string,
+  args: Record<string, unknown> | undefined,
+  parse: (value: unknown) => T,
+  message: string,
+): Promise<T> {
+  try {
+    const response = args ? await invoke<unknown>(command, args) : await invoke<unknown>(command);
+    return parse(response);
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError(message, error);
+  }
+}
+
 function e2ePlaybackSnapshot(): PlaybackSnapshot {
   ensureE2EPlaybackState();
   return e2eAdapterState.snapshot;
@@ -4380,6 +4608,358 @@ export async function subscribeToPlaybackState(
   } catch (error) {
     throw new IpcError("SpotDIY could not subscribe to playback updates.", error);
   }
+}
+
+export function parseAnalyticsOverview(value: unknown): AnalyticsOverview {
+  return analyticsOverviewSchema.parse(value) as AnalyticsOverview;
+}
+
+export function parseListeningHeatmap(value: unknown): ListeningHeatmapCell[] {
+  return z.array(listeningHeatmapCellSchema).length(168).parse(value) as ListeningHeatmapCell[];
+}
+
+export function parseHistoryEntry(value: unknown): HistoryEntry {
+  return historyEntrySchema.parse(value) as HistoryEntry;
+}
+
+export function parseHistoryOutcome(value: unknown): HistoryOutcome {
+  return historyOutcomeSchema.parse(value) as HistoryOutcome;
+}
+
+export function parseListeningSession(value: unknown): ListeningSession {
+  return listeningSessionSchema.parse(value) as ListeningSession;
+}
+
+export function parseSmartPlaylist(value: unknown): SmartPlaylist {
+  const parsed = smartPlaylistSchema.parse(value) as SmartPlaylist;
+  parseSmartRule(parsed.rule);
+  return parsed;
+}
+
+export function parseSmartTrack(value: unknown): SmartTrack {
+  return smartTrackSchema.parse(value) as SmartTrack;
+}
+
+function browserAnalyticsOverview(): AnalyticsOverview {
+  return {
+    listenedMs: 0,
+    qualifiedPlays: 0,
+    skips: 0,
+    uniqueTracks: 0,
+    uniqueArtists: 0,
+    sessionCount: 0,
+  };
+}
+
+function browserListeningHeatmap(): ListeningHeatmapCell[] {
+  return Array.from({ length: 168 }, (_, index) => ({
+    weekday: Math.floor(index / 24),
+    hour: index % 24,
+    listenedMs: 0,
+  }));
+}
+
+function browserModeChange(reason: ListeningModeReason): ListeningModeChange {
+  return { state: { ...browserListeningModeState }, reason };
+}
+
+const localDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+export async function getAnalyticsOverview(): Promise<AnalyticsOverview> {
+  if (!isTauriRuntime()) {
+    return browserAnalyticsOverview();
+  }
+  return invokeLocal("get_analytics_overview", undefined, parseAnalyticsOverview, "SpotDIY could not read local listening analytics.");
+}
+
+export async function getListeningHeatmap(): Promise<ListeningHeatmapCell[]> {
+  if (!isTauriRuntime()) {
+    return browserListeningHeatmap();
+  }
+  return invokeLocal("get_listening_heatmap", undefined, parseListeningHeatmap, "SpotDIY could not read the listening heatmap.");
+}
+
+export async function getTopTracks(limit = 10): Promise<TopTrack[]> {
+  const parsedLimit = z.number().int().min(1).max(100).parse(limit);
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokeLocal(
+    "get_top_tracks",
+    { limit: parsedLimit },
+    (value) => z.array(topTrackSchema).max(100).parse(value) as TopTrack[],
+    "SpotDIY could not read top tracks.",
+  );
+}
+
+export async function getTopArtists(limit = 10): Promise<TopArtist[]> {
+  const parsedLimit = z.number().int().min(1).max(100).parse(limit);
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokeLocal(
+    "get_top_artists",
+    { limit: parsedLimit },
+    (value) => z.array(topArtistSchema).max(100).parse(value) as TopArtist[],
+    "SpotDIY could not read top artists.",
+  );
+}
+
+export async function getTasteTimeline(): Promise<TasteTimelineMonth[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokeLocal(
+    "get_taste_timeline",
+    undefined,
+    (value) => z.array(tasteTimelineMonthSchema).max(36).parse(value) as TasteTimelineMonth[],
+    "SpotDIY could not read the taste timeline.",
+  );
+}
+
+export async function listListeningSessions(page = 0, pageSize = 20): Promise<Paged<ListeningSession>> {
+  const parsedPage = z.number().int().min(0).parse(page);
+  const parsedPageSize = z.number().int().min(1).max(100).parse(pageSize);
+  if (!isTauriRuntime()) {
+    return { items: [], total: 0, page: parsedPage, pageSize: parsedPageSize };
+  }
+  return invokeLocal(
+    "list_listening_sessions",
+    { page: parsedPage, pageSize: parsedPageSize },
+    (value) => listeningSessionPageSchema.parse(value) as Paged<ListeningSession>,
+    "SpotDIY could not read listening sessions.",
+  );
+}
+
+export async function getListeningSession(sessionId: ListeningSessionId): Promise<ListeningSession | null> {
+  const parsedId = listeningSessionIdSchema.parse(sessionId);
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  return invokeLocal(
+    "get_listening_session",
+    { sessionId: parsedId },
+    (value) => value === null ? null : parseListeningSession(value),
+    "SpotDIY could not read that listening session.",
+  );
+}
+
+export async function getListeningSessionHistory(sessionId: ListeningSessionId): Promise<HistoryEntry[]> {
+  const parsedId = listeningSessionIdSchema.parse(sessionId);
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokeLocal(
+    "get_listening_session_history",
+    { sessionId: parsedId },
+    (value) => z.array(historyEntrySchema).parse(value) as HistoryEntry[],
+    "SpotDIY could not read that session's history.",
+  );
+}
+
+export async function setListeningSessionLabel(sessionId: ListeningSessionId, label: string | null): Promise<ListeningSession> {
+  const parsedId = listeningSessionIdSchema.parse(sessionId);
+  const parsedLabel = label === null ? null : z.string().trim().max(80).parse(label) || null;
+  if (!isTauriRuntime()) {
+    throw new IpcError("Session labels require the native SpotDIY runtime.");
+  }
+  return invokeLocal(
+    "set_listening_session_label",
+    { sessionId: parsedId, label: parsedLabel },
+    parseListeningSession,
+    "SpotDIY could not update that session label.",
+  );
+}
+
+export async function getTimeMachineDay(localDate: string): Promise<HistoryEntry[]> {
+  const parsedDate = localDateSchema.parse(localDate);
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokeLocal(
+    "get_time_machine_day",
+    { localDate: parsedDate },
+    (value) => z.array(historyEntrySchema).max(1000).parse(value) as HistoryEntry[],
+    "SpotDIY could not read that day of listening history.",
+  );
+}
+
+export async function reopenListeningSessionAsQueue(sessionId: ListeningSessionId): Promise<ReopenQueueResult> {
+  const parsedId = listeningSessionIdSchema.parse(sessionId);
+  if (!isTauriRuntime()) {
+    return { entries: [], droppedCount: 0 };
+  }
+  return invokeLocal(
+    "reopen_listening_session_as_queue",
+    { sessionId: parsedId },
+    (value) => reopenQueueResultSchema.parse(value) as ReopenQueueResult,
+    "SpotDIY could not reopen that listening session.",
+  );
+}
+
+export async function reopenTimeMachineDayAsQueue(localDate: string): Promise<ReopenQueueResult> {
+  const parsedDate = localDateSchema.parse(localDate);
+  if (!isTauriRuntime()) {
+    return { entries: [], droppedCount: 0 };
+  }
+  return invokeLocal(
+    "reopen_time_machine_day_as_queue",
+    { localDate: parsedDate },
+    (value) => reopenQueueResultSchema.parse(value) as ReopenQueueResult,
+    "SpotDIY could not reopen that day of listening history.",
+  );
+}
+
+export async function listSmartPlaylists(): Promise<SmartPlaylist[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invokeLocal(
+    "list_smart_playlists",
+    undefined,
+    (value) => z.array(smartPlaylistSchema).max(1000).parse(value).map((playlist) => parseSmartPlaylist(playlist)) as SmartPlaylist[],
+    "SpotDIY could not read smart playlists.",
+  );
+}
+
+export async function getSmartPlaylist(playlistId: SmartPlaylistId): Promise<SmartPlaylist | null> {
+  const parsedId = smartPlaylistIdSchema.parse(playlistId);
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  return invokeLocal(
+    "get_smart_playlist",
+    { playlistId: parsedId },
+    (value) => value === null ? null : parseSmartPlaylist(value),
+    "SpotDIY could not read that smart playlist.",
+  );
+}
+
+function parseSmartPlaylistInput(input: SmartPlaylistInput): SmartPlaylistInput {
+  const parsed = smartPlaylistInputSchema.parse({ ...input, rule: parseSmartRule(input.rule) });
+  return parsed as SmartPlaylistInput;
+}
+
+export async function createSmartPlaylist(input: SmartPlaylistInput): Promise<SmartPlaylist> {
+  const parsedInput = parseSmartPlaylistInput(input);
+  if (!isTauriRuntime()) {
+    throw new IpcError("Smart playlists require the native SpotDIY runtime.");
+  }
+  return invokeLocal(
+    "create_smart_playlist",
+    { input: parsedInput },
+    parseSmartPlaylist,
+    "SpotDIY could not create that smart playlist.",
+  );
+}
+
+export async function updateSmartPlaylist(playlistId: SmartPlaylistId, input: SmartPlaylistInput): Promise<SmartPlaylist> {
+  const parsedId = smartPlaylistIdSchema.parse(playlistId);
+  const parsedInput = parseSmartPlaylistInput(input);
+  if (!isTauriRuntime()) {
+    throw new IpcError("Smart playlists require the native SpotDIY runtime.");
+  }
+  return invokeLocal(
+    "update_smart_playlist",
+    { playlistId: parsedId, input: parsedInput },
+    parseSmartPlaylist,
+    "SpotDIY could not update that smart playlist.",
+  );
+}
+
+export async function deleteSmartPlaylist(playlistId: SmartPlaylistId): Promise<void> {
+  const parsedId = smartPlaylistIdSchema.parse(playlistId);
+  if (!isTauriRuntime()) {
+    throw new IpcError("Smart playlists require the native SpotDIY runtime.");
+  }
+  await invokeLocal("delete_smart_playlist", { playlistId: parsedId }, () => undefined, "SpotDIY could not delete that smart playlist.");
+}
+
+export async function previewSmartPlaylist(playlistId: SmartPlaylistId, page = 0, pageSize = 20): Promise<SmartPlaylistPreview> {
+  const parsedId = smartPlaylistIdSchema.parse(playlistId);
+  const parsedPage = z.number().int().min(0).parse(page);
+  const parsedPageSize = z.number().int().min(1).max(100).parse(pageSize);
+  if (!isTauriRuntime()) {
+    return { items: [], total: 0, page: parsedPage, pageSize: parsedPageSize };
+  }
+  return invokeLocal(
+    "preview_smart_playlist",
+    { playlistId: parsedId, page: parsedPage, pageSize: parsedPageSize },
+    (value) => smartPlaylistPreviewSchema.parse(value) as SmartPlaylistPreview,
+    "SpotDIY could not preview that smart playlist.",
+  );
+}
+
+export async function openSmartMix(pool: SmartShufflePool, options: SmartShuffleOptions, seed?: number): Promise<PlaybackSnapshot> {
+  const parsedPool = smartShufflePoolSchema.parse(pool) as SmartShufflePool;
+  const parsedOptions = smartShuffleOptionsSchema.parse({ ...options, recentTrackIds: options.recentTrackIds ?? [] }) as SmartShuffleOptions;
+  const parsedSeed = seed === undefined ? null : z.number().int().nonnegative().parse(seed);
+  if (!isTauriRuntime()) {
+    throw new IpcError("Smart mixes require the native SpotDIY runtime.");
+  }
+  return invokePlayback(
+    "open_smart_mix",
+    { pool: parsedPool, options: parsedOptions, seed: parsedSeed },
+    parsePlaybackSnapshot,
+    "SpotDIY could not open that smart mix.",
+  );
+}
+
+export async function getListeningModeState(): Promise<ListeningModeState> {
+  if (!isTauriRuntime()) {
+    return { ...browserListeningModeState };
+  }
+  return invokeLocal("get_listening_mode_state", undefined, (value) => listeningModeStateSchema.parse(value) as ListeningModeState, "SpotDIY could not read listening mode.");
+}
+
+export async function setPrivateSession(enabled: boolean): Promise<ListeningModeChange> {
+  const parsedEnabled = z.boolean().parse(enabled);
+  if (!isTauriRuntime()) {
+    if (!parsedEnabled && browserListeningModeState.temporary) {
+      throw new IpcError("Temporary listening keeps Private Session enabled.");
+    }
+    browserListeningModeState = { ...browserListeningModeState, privateSession: parsedEnabled };
+    return browserModeChange(parsedEnabled ? "privateEnabled" : "privateDisabled");
+  }
+  return invokePlayback(
+    "set_private_session",
+    { enabled: parsedEnabled },
+    (value) => listeningModeChangeSchema.parse(value) as ListeningModeChange,
+    "SpotDIY could not update Private Session.",
+  );
+}
+
+export async function enterTemporaryMode(): Promise<ListeningModeChange> {
+  if (!isTauriRuntime()) {
+    if (browserListeningModeState.temporary) {
+      throw new IpcError("Temporary listening is already active.");
+    }
+    browserTemporaryPrivateBefore = browserListeningModeState.privateSession;
+    browserListeningModeState = { privateSession: true, temporary: true };
+    return browserModeChange("temporaryEntered");
+  }
+  return invokePlayback(
+    "enter_temporary_mode",
+    undefined,
+    (value) => listeningModeChangeSchema.parse(value) as ListeningModeChange,
+    "SpotDIY could not enter Temporary Listening.",
+  );
+}
+
+export async function exitTemporaryMode(): Promise<ListeningModeChange> {
+  if (!isTauriRuntime()) {
+    if (!browserListeningModeState.temporary) {
+      throw new IpcError("Temporary listening is not active.");
+    }
+    browserListeningModeState = { privateSession: browserTemporaryPrivateBefore, temporary: false };
+    return browserModeChange("temporaryExited");
+  }
+  return invokePlayback(
+    "exit_temporary_mode",
+    undefined,
+    (value) => listeningModeChangeSchema.parse(value) as ListeningModeChange,
+    "SpotDIY could not exit Temporary Listening.",
+  );
 }
 
 export function providerLabel(kind: ProviderKind): string {

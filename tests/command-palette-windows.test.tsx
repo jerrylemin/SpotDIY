@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const usePlaybackMock = vi.hoisted(() => vi.fn());
 const useWindowsIntegrationMock = vi.hoisted(() => vi.fn());
@@ -39,7 +40,11 @@ describe("Windows command-palette actions", () => {
       showMain: vi.fn(),
     });
     useUiStore.getState().setCommandPaletteOpen(true);
-    render(<CommandPalette />);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <CommandPalette />
+      </QueryClientProvider>,
+    );
 
     expect(screen.getByText("Toggle Mini Overlay")).toBeVisible();
     expect(screen.getByText("Toggle Edge Overlay")).toBeVisible();
