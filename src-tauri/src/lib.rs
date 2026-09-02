@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod backup;
 pub mod bookmarks;
 pub mod credentials;
@@ -13,7 +14,9 @@ pub mod media_tools;
 pub mod playback;
 pub mod playlists;
 pub mod queue;
+pub mod sessions;
 pub mod settings;
+pub mod smart;
 pub mod windows;
 pub mod search {
     pub mod sort;
@@ -25,6 +28,10 @@ pub mod search {
 pub mod sources;
 pub mod storage;
 
+use analytics::{
+    AnalyticsOverview, AnalyticsService, ListeningHeatmapCell, ListeningSession, Page,
+    ReopenQueueResult, TasteTimelineMonth, TopArtist, TopTrack,
+};
 use backup::{BackupService, ImportCommitResult, ImportPreview};
 use bookmarks::{AbLoopPreset, Bookmark, BookmarkErrorDto, BookmarkService};
 use db::Database;
@@ -40,9 +47,14 @@ use playback::{
     TrackPlaybackRequest, PLAYBACK_STATE_EVENT, QUEUE_STATE_EVENT,
 };
 use playlists::{PlaylistErrorDto, PlaylistService};
+use sessions::{ListeningModeChange, ListeningModeService, ListeningModeState};
 use settings::{
     GlobalShortcutBinding, SettingValue, SettingsRepository, SettingsSnapshot,
     WindowsIntegrationSettings,
+};
+use smart::{
+    SmartPlaylist, SmartPlaylistInput, SmartPlaylistPreview, SmartPlaylistService,
+    SmartShuffleOptions, SmartShufflePool,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -69,6 +81,9 @@ pub const SPOTIFY_AUTH_STATE_EVENT: &str = "spotify://auth-state";
 
 struct AppState {
     database: Database,
+    analytics: AnalyticsService,
+    smart_playlists: SmartPlaylistService,
+    modes: ListeningModeService,
     backup: BackupService,
     library: LibraryService,
     media_tools: MediaToolManager,
@@ -1462,6 +1477,254 @@ fn delete_queue_snapshot(
         .map_err(|error| error.dto())
 }
 
+#[tauri::command]
+fn get_analytics_overview(state: State<'_, AppState>) -> Result<AnalyticsOverview, String> {
+    state
+        .analytics
+        .overview()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_listening_heatmap(state: State<'_, AppState>) -> Result<Vec<ListeningHeatmapCell>, String> {
+    state.analytics.heatmap().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_top_tracks(limit: Option<u32>, state: State<'_, AppState>) -> Result<Vec<TopTrack>, String> {
+    state
+        .analytics
+        .top_tracks(limit.unwrap_or(10))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_top_artists(
+    limit: Option<u32>,
+    state: State<'_, AppState>,
+) -> Result<Vec<TopArtist>, String> {
+    state
+        .analytics
+        .top_artists(limit.unwrap_or(10))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_taste_timeline(state: State<'_, AppState>) -> Result<Vec<TasteTimelineMonth>, String> {
+    state
+        .analytics
+        .taste_timeline()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_listening_sessions(
+    page: u32,
+    page_size: u32,
+    state: State<'_, AppState>,
+) -> Result<Page<ListeningSession>, String> {
+    state
+        .analytics
+        .list_sessions(page, page_size)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_listening_session(
+    session_id: crate::domain::ListeningSessionId,
+    state: State<'_, AppState>,
+) -> Result<Option<ListeningSession>, String> {
+    state
+        .analytics
+        .get_session(session_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_listening_session_history(
+    session_id: crate::domain::ListeningSessionId,
+    state: State<'_, AppState>,
+) -> Result<Vec<analytics::HistoryEntry>, String> {
+    state
+        .analytics
+        .get_session_history(session_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_listening_session_label(
+    session_id: crate::domain::ListeningSessionId,
+    label: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<ListeningSession, String> {
+    state
+        .analytics
+        .set_session_label(session_id, label)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_time_machine_day(
+    local_date: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<analytics::HistoryEntry>, String> {
+    state
+        .analytics
+        .time_machine_day(&local_date)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn reopen_listening_session_as_queue(
+    session_id: crate::domain::ListeningSessionId,
+    state: State<'_, AppState>,
+) -> Result<ReopenQueueResult, String> {
+    let result = state
+        .analytics
+        .reopen_session(session_id)
+        .map_err(|error| error.to_string())?;
+    if !result.entries.is_empty() {
+        state
+            .playback
+            .reopen_history_as_queue(result.entries.clone())
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+fn reopen_time_machine_day_as_queue(
+    local_date: String,
+    state: State<'_, AppState>,
+) -> Result<ReopenQueueResult, String> {
+    let result = state
+        .analytics
+        .reopen_day(&local_date)
+        .map_err(|error| error.to_string())?;
+    if !result.entries.is_empty() {
+        state
+            .playback
+            .reopen_history_as_queue(result.entries.clone())
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+fn list_smart_playlists(state: State<'_, AppState>) -> Result<Vec<SmartPlaylist>, String> {
+    state
+        .smart_playlists
+        .list()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_smart_playlist(
+    playlist_id: crate::domain::SmartPlaylistId,
+    state: State<'_, AppState>,
+) -> Result<Option<SmartPlaylist>, String> {
+    state
+        .smart_playlists
+        .get(playlist_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn create_smart_playlist(
+    input: SmartPlaylistInput,
+    state: State<'_, AppState>,
+) -> Result<SmartPlaylist, String> {
+    state
+        .smart_playlists
+        .create(input)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn update_smart_playlist(
+    playlist_id: crate::domain::SmartPlaylistId,
+    input: SmartPlaylistInput,
+    state: State<'_, AppState>,
+) -> Result<SmartPlaylist, String> {
+    state
+        .smart_playlists
+        .update(playlist_id, input)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn delete_smart_playlist(
+    playlist_id: crate::domain::SmartPlaylistId,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .smart_playlists
+        .delete(playlist_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn preview_smart_playlist(
+    playlist_id: crate::domain::SmartPlaylistId,
+    page: u32,
+    page_size: u32,
+    state: State<'_, AppState>,
+) -> Result<SmartPlaylistPreview, String> {
+    state
+        .smart_playlists
+        .preview(playlist_id, page, page_size)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn open_smart_mix(
+    pool: SmartShufflePool,
+    options: SmartShuffleOptions,
+    seed: Option<u64>,
+    state: State<'_, AppState>,
+) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state
+        .playback
+        .open_smart_mix(pool, options, seed)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn get_listening_mode_state(state: State<'_, AppState>) -> ListeningModeState {
+    state.modes.state()
+}
+
+#[tauri::command]
+fn set_private_session(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<ListeningModeChange, PlaybackErrorDto> {
+    state
+        .playback
+        .set_private_session(enabled)
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn enter_temporary_mode(
+    state: State<'_, AppState>,
+) -> Result<ListeningModeChange, PlaybackErrorDto> {
+    state
+        .playback
+        .enter_temporary_mode()
+        .map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn exit_temporary_mode(
+    state: State<'_, AppState>,
+) -> Result<ListeningModeChange, PlaybackErrorDto> {
+    state
+        .playback
+        .exit_temporary_mode()
+        .map_err(|error| error.dto())
+}
+
 fn progress_sink(app: &AppHandle) -> ProgressSink {
     let app = app.clone();
     Arc::new(move |progress| {
@@ -1543,6 +1806,9 @@ pub fn run() {
             let fusion = SourceFusionService::new(database.clone());
             let source_resolver = SourceResolver::new(library.clone());
             let playlists = PlaylistService::new(library.database().clone());
+            let analytics = AnalyticsService::new(database.clone());
+            let smart_playlists = SmartPlaylistService::new(database.clone());
+            let modes = ListeningModeService::new();
             let inspector = TrackInspectorService::new(database.clone(), playlists.clone());
             let windows_slot: Arc<Mutex<Option<WindowsIntegrationService>>> =
                 Arc::new(Mutex::new(None));
@@ -1566,11 +1832,12 @@ pub fn run() {
                     let _ = app_handle.emit(QUEUE_STATE_EVENT, workspace);
                 })
             };
-            let playback = PlaybackService::new_with_queue_sink(
+            let playback = PlaybackService::new_with_queue_sink_and_modes(
                 library.clone(),
                 media_tools.clone(),
                 playback_sink,
                 queue_sink,
+                modes.clone(),
             );
             let lyrics = LyricsService::new(database.clone(), library.clone())?;
             let bookmarks = BookmarkService::new(database.clone());
@@ -1587,6 +1854,9 @@ pub fn run() {
             windows.initialize();
             app.manage(AppState {
                 database,
+                analytics,
+                smart_playlists,
+                modes,
                 backup,
                 library: library.clone(),
                 media_tools,
@@ -1741,6 +2011,29 @@ pub fn run() {
             list_queue_snapshots,
             restore_queue_snapshot,
             delete_queue_snapshot,
+            get_analytics_overview,
+            get_listening_heatmap,
+            get_top_tracks,
+            get_top_artists,
+            get_taste_timeline,
+            list_listening_sessions,
+            get_listening_session,
+            get_listening_session_history,
+            set_listening_session_label,
+            get_time_machine_day,
+            reopen_listening_session_as_queue,
+            reopen_time_machine_day_as_queue,
+            list_smart_playlists,
+            get_smart_playlist,
+            create_smart_playlist,
+            update_smart_playlist,
+            delete_smart_playlist,
+            preview_smart_playlist,
+            open_smart_mix,
+            get_listening_mode_state,
+            set_private_session,
+            enter_temporary_mode,
+            exit_temporary_mode,
         ])
         .build(tauri::generate_context!())
         .expect("error while building SpotDIY")
