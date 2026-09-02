@@ -175,7 +175,7 @@ impl BackupService {
             last_error: None,
         };
         if let Err(error) = import::write_pending_descriptor(&self.layout, &descriptor) {
-            let _ = fs::remove_dir_all(&descriptor.staged_root);
+            let _ = import::cleanup_staged_root_for_failure(&self.layout, &descriptor.staged_root);
             return Err(error.into());
         }
         Ok(ImportCommitResult {
@@ -193,12 +193,7 @@ impl BackupService {
             .remove(import_id)
         {
             let root = staged.root.clone();
-            fs::remove_dir_all(&root).map_err(|error| {
-                BackupError::Import(import::ImportError::CreateStaging {
-                    path: root,
-                    source: error,
-                })
-            })?;
+            import::cleanup_staged_root(&self.layout, &root)?;
             return Ok(());
         }
         if let Some(descriptor) = import::read_pending_descriptor(&self.layout)? {
@@ -207,7 +202,7 @@ impl BackupService {
             }
             import::validate_staged_paths(&self.layout, &descriptor)?;
             import::cleanup_created_paths_for_cancel(&self.layout, &descriptor.created_paths);
-            let _ = fs::remove_dir_all(&descriptor.staged_root);
+            import::cleanup_staged_root(&self.layout, &descriptor.staged_root)?;
             import::remove_pending_descriptor(&self.layout)?;
             return Ok(());
         }
