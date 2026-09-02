@@ -1,4 +1,4 @@
-/* global window */
+/* global console, process, window */
 
 import { chromium } from "@playwright/test";
 
