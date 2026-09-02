@@ -4,7 +4,8 @@ param(
     [switch]$Plan08Persistence,
     [switch]$Plan09Lyrics,
     [switch]$Plan11Shell,
-    [switch]$Plan12Windows
+    [switch]$Plan12Windows,
+    [switch]$Plan14SmartAnalytics
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,14 +15,14 @@ if ($env:SPOTDIY_PACKAGED_SMOKE -ne "1") {
     exit 0
 }
 
-if (@($Plan08Persistence, $Plan09Lyrics, $Plan11Shell, $Plan12Windows).Where({ $_ }).Count -gt 1) {
+if (@($Plan08Persistence, $Plan09Lyrics, $Plan11Shell, $Plan12Windows, $Plan14SmartAnalytics).Where({ $_ }).Count -gt 1) {
     throw "choose one packaged smoke mode"
 }
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
-$smokeLabel = if ($Plan12Windows) { "Plan12" } elseif ($Plan11Shell) { "Plan11" } elseif ($Plan09Lyrics) { "Plan09" } elseif ($Plan08Persistence) { "Plan08" } else { "Plan04" }
-$flowMode = if ($Plan12Windows) { "plan12" } elseif ($Plan11Shell) { "plan11" } elseif ($Plan09Lyrics) { "plan09" } elseif ($Plan08Persistence) { "plan08" } else { "flow" }
-$restartMode = if ($Plan12Windows) { "plan12-restart" } elseif ($Plan11Shell) { "plan11-restart" } elseif ($Plan09Lyrics) { "plan09-restart" } elseif ($Plan08Persistence) { "plan08-restart" } else { "restart" }
+$smokeLabel = if ($Plan14SmartAnalytics) { "Plan14" } elseif ($Plan12Windows) { "Plan12" } elseif ($Plan11Shell) { "Plan11" } elseif ($Plan09Lyrics) { "Plan09" } elseif ($Plan08Persistence) { "Plan08" } else { "Plan04" }
+$flowMode = if ($Plan14SmartAnalytics) { "plan14" } elseif ($Plan12Windows) { "plan12" } elseif ($Plan11Shell) { "plan11" } elseif ($Plan09Lyrics) { "plan09" } elseif ($Plan08Persistence) { "plan08" } else { "flow" }
+$restartMode = if ($Plan14SmartAnalytics) { "plan14-restart" } elseif ($Plan12Windows) { "plan12-restart" } elseif ($Plan11Shell) { "plan11-restart" } elseif ($Plan09Lyrics) { "plan09-restart" } elseif ($Plan08Persistence) { "plan08-restart" } else { "restart" }
 $targetRoot = $env:CARGO_TARGET_DIR
 if ([string]::IsNullOrWhiteSpace($targetRoot)) {
     throw "CARGO_TARGET_DIR must point outside the repository before packaged verification"
@@ -72,9 +73,8 @@ function Stop-ExactOwnedMpv([int[]]$processIds) {
     }
 }
 
-function New-SilentWav([string]$path, [int]$frequency) {
+function New-SilentWav([string]$path, [int]$frequency, [int]$seconds = 30) {
     $sampleRate = 44100
-    $seconds = 30
     $channels = 1
     $bitsPerSample = 16
     $sampleCount = $sampleRate * $seconds
@@ -176,6 +176,51 @@ function Assert-Schema8Database {
     }
 }
 
+function Initialize-LegacySchema8Database {
+    Initialize-LegacySchema6Database
+    $sqliteCommand = Get-Command sqlite3.exe -ErrorAction SilentlyContinue
+    if ($null -eq $sqliteCommand) {
+        $sqliteCommand = Get-Command sqlite3 -ErrorAction SilentlyContinue
+    }
+    if ($null -eq $sqliteCommand) {
+        throw "sqlite3 is required to seed the packaged Plan 14 schema-8 fixture"
+    }
+
+    $databasePath = Join-Path $profileRoot "SpotDIY\spotdiy.sqlite3"
+    foreach ($migrationPath in @(
+        (Join-Path $repositoryRoot "src-tauri\migrations\0007_appearance_settings.sql"),
+        (Join-Path $repositoryRoot "src-tauri\migrations\0008_windows_integration_settings.sql")
+    )) {
+        $output = Get-Content -LiteralPath $migrationPath -Raw | & $sqliteCommand.Source $databasePath 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "could not seed packaged schema-8 fixture from $migrationPath`n$output"
+        }
+    }
+    $output = "PRAGMA user_version = 8;" | & $sqliteCommand.Source $databasePath 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "could not finish packaged schema-8 fixture setup`n$output"
+    }
+}
+
+function Assert-Schema9Database {
+    $sqliteCommand = Get-Command sqlite3.exe -ErrorAction SilentlyContinue
+    if ($null -eq $sqliteCommand) {
+        $sqliteCommand = Get-Command sqlite3 -ErrorAction SilentlyContinue
+    }
+    if ($null -eq $sqliteCommand) {
+        throw "sqlite3 is required to verify the packaged Plan 14 schema-9 database"
+    }
+
+    $databasePath = Join-Path $profileRoot "SpotDIY\spotdiy.sqlite3"
+    if (-not (Test-Path -LiteralPath $databasePath -PathType Leaf)) {
+        throw "the packaged Plan 14 database was not created: $databasePath"
+    }
+    $schemaVersion = (& $sqliteCommand.Source $databasePath "PRAGMA user_version;" 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $schemaVersion -ne "9") {
+        throw "the packaged database schema is not version 9: $schemaVersion"
+    }
+}
+
 function Start-PackagedApp([int]$debugPort) {
     $stdoutLog = Join-Path $profileRoot ("spotdiy-$debugPort.stdout.log")
     $stderrLog = Join-Path $profileRoot ("spotdiy-$debugPort.stderr.log")
@@ -248,8 +293,9 @@ function Wait-ForCdp([int]$debugPort, [int]$timeoutMs) {
 
 try {
     New-Item -ItemType Directory -Path $fixtureFolder -Force | Out-Null
-    New-SilentWav (Join-Path $fixtureFolder "01-night-drive.wav") 440
-    New-SilentWav (Join-Path $fixtureFolder "02-static-bloom.wav") 660
+    $fixtureSeconds = if ($Plan14SmartAnalytics) { 5 } else { 30 }
+    New-SilentWav (Join-Path $fixtureFolder "01-night-drive.wav") 440 $fixtureSeconds
+    New-SilentWav (Join-Path $fixtureFolder "02-static-bloom.wav") 660 $fixtureSeconds
     if ($Plan09Lyrics) {
         [System.IO.File]::WriteAllText(
             (Join-Path $fixtureFolder "01-night-drive.lrc"),
@@ -257,7 +303,9 @@ try {
             [System.Text.UTF8Encoding]::new($false)
         )
     }
-    if ($Plan11Shell) {
+    if ($Plan14SmartAnalytics) {
+        Initialize-LegacySchema8Database
+    } elseif ($Plan11Shell) {
         Initialize-LegacySchema6Database
     }
 
@@ -285,7 +333,9 @@ try {
     Close-PackagedApp "first packaged app" $firstApp
     Wait-ForProcessExit $firstApp ($TimeoutSeconds * 1000)
     Start-Sleep -Milliseconds 500
-    if ($Plan12Windows) {
+    if ($Plan14SmartAnalytics) {
+        Assert-Schema9Database
+    } elseif ($Plan12Windows) {
         Assert-Schema8Database
     }
     $remaining = @(Get-MpvProcesses | Where-Object { $ownedMpvIds -contains [int]$_.ProcessId })
@@ -308,7 +358,9 @@ try {
 
     Close-PackagedApp "second packaged app" $secondApp
     Wait-ForProcessExit $secondApp ($TimeoutSeconds * 1000)
-    if ($Plan12Windows) {
+    if ($Plan14SmartAnalytics) {
+        Write-Output "PASS: packaged Plan 14 schema migration, local history, sessions, private/temporary boundaries, smart playlist preview/mix, restart persistence, and owned-process cleanup"
+    } elseif ($Plan12Windows) {
         Write-Output "PASS: packaged Plan 12 schema 8, tray, SMTC status, shortcuts, overlays, click-through recovery, output profiles, restart persistence, and owned-process cleanup"
     } elseif ($Plan11Shell) {
         Write-Output "PASS: packaged Plan 11 schema migration, appearance persistence, shell modes, inspector, queue, lyrics, restart, and owned-process persistence"
