@@ -18,8 +18,10 @@ const LYRICS_BOOKMARKS_MIGRATION_SQL: &str =
     include_str!("../../migrations/0006_lyrics_bookmarks.sql");
 const APPEARANCE_SETTINGS_MIGRATION_SQL: &str =
     include_str!("../../migrations/0007_appearance_settings.sql");
+const WINDOWS_INTEGRATION_SETTINGS_MIGRATION_SQL: &str =
+    include_str!("../../migrations/0008_windows_integration_settings.sql");
 
-pub const LATEST_SCHEMA_VERSION: u32 = 7;
+pub const LATEST_SCHEMA_VERSION: u32 = 8;
 pub const DATABASE_FILE_NAME: &str = "spotdiy.sqlite3";
 pub const APPLICATION_DATA_DIRECTORY: &str = "SpotDIY";
 
@@ -79,6 +81,12 @@ const MIGRATIONS: &[Migration] = &[
         version: 7,
         name: "0007_appearance_settings",
         sql: APPEARANCE_SETTINGS_MIGRATION_SQL,
+        destructive: true,
+    },
+    Migration {
+        version: 8,
+        name: "0008_windows_integration_settings",
+        sql: WINDOWS_INTEGRATION_SETTINGS_MIGRATION_SQL,
         destructive: true,
     },
 ];
@@ -680,7 +688,10 @@ mod tests {
         );
 
         run_migrations(&mut connection, None, MIGRATIONS).unwrap();
-        assert_eq!(current_schema_version(&connection).unwrap(), 7);
+        assert_eq!(
+            current_schema_version(&connection).unwrap(),
+            LATEST_SCHEMA_VERSION
+        );
         let old_values: Vec<(String, String, String)> = {
             let mut statement = connection
                 .prepare(
@@ -766,7 +777,7 @@ mod tests {
         assert_eq!(active.layout_profile, LayoutProfile::Dense);
         assert_eq!(active.theme, Theme::Custom);
         assert!(active.custom_theme.is_some());
-        assert_eq!(database.schema_version().unwrap(), 7);
+        assert_eq!(database.schema_version().unwrap(), LATEST_SCHEMA_VERSION);
         let foreign_key_rows: i64 = database
             .with_connection(|connection| {
                 connection.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
@@ -794,7 +805,10 @@ mod tests {
             .unwrap();
 
         run_migrations(&mut connection, None, MIGRATIONS).unwrap();
-        assert_eq!(current_schema_version(&connection).unwrap(), 7);
+        assert_eq!(
+            current_schema_version(&connection).unwrap(),
+            LATEST_SCHEMA_VERSION
+        );
         let (layout, custom_theme): (String, String) = connection
             .query_row(
                 "SELECT
@@ -825,6 +839,91 @@ mod tests {
             })
             .unwrap();
         assert_eq!(foreign_key_rows, 0);
+    }
+
+    #[test]
+    fn schema_seven_settings_rows_are_copied_unchanged_by_schema_eight() {
+        let (_path, mut connection) =
+            open_legacy_schema_six_fixture("migration-seven-to-eight-settings");
+        replace_settings_with_plan10_shape(&connection);
+        let theme_json = serde_json::to_string(&fixture_theme()).unwrap();
+        connection
+            .execute(
+                "INSERT INTO settings_metadata
+                    (setting_key, value_json, value_type, schema_version, updated_at)
+                 VALUES ('layout_profile', '  \"dense\"  ', 'layout_profile', 1, '2026-02-01T00:00:00Z'),
+                        ('custom_theme', ?1, 'custom_theme', 1, '2026-02-01T00:00:00Z')",
+                params![theme_json],
+            )
+            .unwrap();
+        run_migrations(&mut connection, None, &MIGRATIONS[6..7]).unwrap();
+        assert_eq!(current_schema_version(&connection).unwrap(), 7);
+
+        let before: Vec<(String, String, String, i64, String)> = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT setting_key, value_json, value_type, schema_version, updated_at
+                     FROM settings_metadata ORDER BY setting_key",
+                )
+                .unwrap();
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(connection
+            .execute(
+                "INSERT INTO settings_metadata
+                    (setting_key, value_json, value_type, schema_version, updated_at)
+                 VALUES ('windows_integration', '{}', 'windows_integration', 1, '2026-02-01T00:00:00Z')",
+                [],
+            )
+            .is_err());
+
+        run_migrations(&mut connection, None, &MIGRATIONS[7..]).unwrap();
+        assert_eq!(current_schema_version(&connection).unwrap(), 8);
+        let after: Vec<(String, String, String, i64, String)> = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT setting_key, value_json, value_type, schema_version, updated_at
+                     FROM settings_metadata WHERE setting_key IN
+                       ('theme', 'downloads_directory', 'source_preference_order', 'first_run',
+                        'storage_mode', 'layout_profile', 'custom_theme')
+                     ORDER BY setting_key",
+                )
+                .unwrap();
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(after, before);
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                },)
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -1081,7 +1180,7 @@ mod tests {
         let schema_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema_version, 7);
+        assert_eq!(schema_version, LATEST_SCHEMA_VERSION as i64);
         let track_count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM tracks WHERE id = ?1",
@@ -1277,7 +1376,7 @@ mod tests {
         let schema_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema_version, 7);
+        assert_eq!(schema_version, LATEST_SCHEMA_VERSION as i64);
         for (table, expected) in [
             ("playlists", 3_i64),
             ("playlist_branch_base_items", 1),

@@ -8,6 +8,7 @@ use thiserror::Error;
 
 use crate::db::{Database, DatabaseError};
 use crate::domain::ProviderKind;
+use crate::playback::{normalize_output_profiles, OutputProfile};
 
 const SETTINGS_SCHEMA_VERSION: i64 = 1;
 const CUSTOM_THEME_SCHEMA_VERSION: u32 = 1;
@@ -96,6 +97,40 @@ pub struct SettingsSnapshot {
     pub source_preference_order: Vec<ProviderKind>,
     pub first_run: bool,
     pub storage_mode: StorageMode,
+    pub windows_integration: WindowsIntegrationSettings,
+    pub global_shortcuts: Vec<GlobalShortcutBinding>,
+    pub output_profiles: Vec<OutputProfile>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct WindowsIntegrationSettings {
+    pub smtc_enabled: bool,
+    pub global_shortcuts_enabled: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GlobalShortcutAction {
+    PlayPause,
+    Next,
+    Previous,
+    VolumeUp,
+    VolumeDown,
+    ShowHideMain,
+    ToggleMiniOverlay,
+    ToggleLyricsOverlay,
+    ToggleGamingOverlay,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct GlobalShortcutBinding {
+    pub action: GlobalShortcutAction,
+    pub accelerator: String,
+    pub enabled: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -106,6 +141,9 @@ pub enum SettingValue {
     CustomTheme(Box<Option<SpotThemeDefinition>>),
     DownloadsDirectory(Option<PathBuf>),
     SourcePreferenceOrder(Vec<ProviderKind>),
+    WindowsIntegration(WindowsIntegrationSettings),
+    GlobalShortcuts(Vec<GlobalShortcutBinding>),
+    OutputProfiles(Vec<OutputProfile>),
 }
 
 impl SettingValue {
@@ -386,6 +424,63 @@ impl<'database> SettingsRepository<'database> {
             }
         }
 
+        if let Some((value_json, value_type, schema_version)) =
+            read_setting(&connection, "windows_integration")?
+        {
+            ensure_record(
+                "windows_integration",
+                &value_type,
+                "windows_integration",
+                schema_version,
+            )?;
+            snapshot.windows_integration = serde_json::from_str(&value_json).map_err(|source| {
+                SettingsError::Deserialization {
+                    key: "windows_integration",
+                    source,
+                }
+            })?;
+        }
+
+        if let Some((value_json, value_type, schema_version)) =
+            read_setting(&connection, "global_shortcuts")?
+        {
+            ensure_record(
+                "global_shortcuts",
+                &value_type,
+                "global_shortcuts",
+                schema_version,
+            )?;
+            snapshot.global_shortcuts = serde_json::from_str(&value_json).map_err(|source| {
+                SettingsError::Deserialization {
+                    key: "global_shortcuts",
+                    source,
+                }
+            })?;
+            validate_global_shortcuts(&snapshot.global_shortcuts)?;
+        }
+
+        if let Some((value_json, value_type, schema_version)) =
+            read_setting(&connection, "output_profiles")?
+        {
+            ensure_record(
+                "output_profiles",
+                &value_type,
+                "output_profiles",
+                schema_version,
+            )?;
+            snapshot.output_profiles = serde_json::from_str(&value_json).map_err(|source| {
+                SettingsError::Deserialization {
+                    key: "output_profiles",
+                    source,
+                }
+            })?;
+            snapshot.output_profiles = normalize_output_profiles(&snapshot.output_profiles)
+                .map_err(|error| SettingsError::InvalidValue {
+                    key: "output_profiles",
+                    reason: error.detail,
+                })?;
+        }
+
         if snapshot.storage_mode == StorageMode::Portable {
             return Err(SettingsError::UnsupportedStorageMode);
         }
@@ -495,8 +590,70 @@ impl Default for SettingsSnapshot {
             ],
             first_run: true,
             storage_mode: StorageMode::Standard,
+            windows_integration: WindowsIntegrationSettings::default(),
+            global_shortcuts: default_global_shortcuts(),
+            output_profiles: Vec::new(),
         }
     }
+}
+
+impl Default for WindowsIntegrationSettings {
+    fn default() -> Self {
+        Self {
+            smtc_enabled: true,
+            global_shortcuts_enabled: false,
+        }
+    }
+}
+
+pub fn default_global_shortcuts() -> Vec<GlobalShortcutBinding> {
+    vec![
+        GlobalShortcutBinding {
+            action: GlobalShortcutAction::PlayPause,
+            accelerator: "Ctrl+Alt+Space".to_owned(),
+            enabled: true,
+        },
+        GlobalShortcutBinding {
+            action: GlobalShortcutAction::Next,
+            accelerator: "Ctrl+Alt+Right".to_owned(),
+            enabled: true,
+        },
+        GlobalShortcutBinding {
+            action: GlobalShortcutAction::Previous,
+            accelerator: "Ctrl+Alt+Left".to_owned(),
+            enabled: true,
+        },
+        GlobalShortcutBinding {
+            action: GlobalShortcutAction::VolumeUp,
+            accelerator: "Ctrl+Alt+Up".to_owned(),
+            enabled: true,
+        },
+        GlobalShortcutBinding {
+            action: GlobalShortcutAction::VolumeDown,
+            accelerator: "Ctrl+Alt+Down".to_owned(),
+            enabled: true,
+        },
+        GlobalShortcutBinding {
+            action: GlobalShortcutAction::ShowHideMain,
+            accelerator: "Ctrl+Alt+S".to_owned(),
+            enabled: true,
+        },
+        GlobalShortcutBinding {
+            action: GlobalShortcutAction::ToggleMiniOverlay,
+            accelerator: "Ctrl+Alt+M".to_owned(),
+            enabled: true,
+        },
+        GlobalShortcutBinding {
+            action: GlobalShortcutAction::ToggleLyricsOverlay,
+            accelerator: "Ctrl+Alt+L".to_owned(),
+            enabled: true,
+        },
+        GlobalShortcutBinding {
+            action: GlobalShortcutAction::ToggleGamingOverlay,
+            accelerator: "Ctrl+Alt+G".to_owned(),
+            enabled: true,
+        },
+    ]
 }
 
 fn encode_setting(
@@ -557,6 +714,42 @@ fn encode_setting(
                 })?,
             ))
         }
+        SettingValue::WindowsIntegration(value) => Ok((
+            "windows_integration",
+            "windows_integration",
+            serde_json::to_string(value).map_err(|source| SettingsError::Serialization {
+                key: "windows_integration",
+                source,
+            })?,
+        )),
+        SettingValue::GlobalShortcuts(value) => {
+            validate_global_shortcuts(value)?;
+            Ok((
+                "global_shortcuts",
+                "global_shortcuts",
+                serde_json::to_string(value).map_err(|source| SettingsError::Serialization {
+                    key: "global_shortcuts",
+                    source,
+                })?,
+            ))
+        }
+        SettingValue::OutputProfiles(value) => {
+            let normalized =
+                normalize_output_profiles(value).map_err(|error| SettingsError::InvalidValue {
+                    key: "output_profiles",
+                    reason: error.detail,
+                })?;
+            Ok((
+                "output_profiles",
+                "output_profiles",
+                serde_json::to_string(&normalized).map_err(|source| {
+                    SettingsError::Serialization {
+                        key: "output_profiles",
+                        source,
+                    }
+                })?,
+            ))
+        }
     }
 }
 
@@ -607,6 +800,129 @@ fn validate_source_preference_order(order: &[ProviderKind]) -> Result<(), Settin
     Ok(())
 }
 
+pub fn validate_global_shortcuts(bindings: &[GlobalShortcutBinding]) -> Result<(), SettingsError> {
+    if bindings.len() > 16 {
+        return Err(SettingsError::InvalidValue {
+            key: "global_shortcuts",
+            reason: "at most 16 global shortcut bindings are supported".to_owned(),
+        });
+    }
+
+    let mut actions = HashSet::new();
+    let mut enabled_accelerators = HashSet::new();
+    for binding in bindings {
+        if !actions.insert(binding.action) {
+            return Err(SettingsError::InvalidValue {
+                key: "global_shortcuts",
+                reason: "each global shortcut action may appear only once".to_owned(),
+            });
+        }
+        if !is_valid_accelerator(&binding.accelerator) {
+            return Err(SettingsError::InvalidValue {
+                key: "global_shortcuts",
+                reason: format!("invalid accelerator syntax: {}", binding.accelerator),
+            });
+        }
+        if binding.enabled
+            && !enabled_accelerators.insert(accelerator_identity(&binding.accelerator))
+        {
+            return Err(SettingsError::InvalidValue {
+                key: "global_shortcuts",
+                reason: "enabled global shortcut accelerators must be unique".to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn accelerator_identity(accelerator: &str) -> String {
+    let mut parts = accelerator
+        .split('+')
+        .map(|part| match part.trim().to_ascii_lowercase().as_str() {
+            "ctrl" => "ctrl".to_owned(),
+            "alt" => "alt".to_owned(),
+            "shift" => "shift".to_owned(),
+            "super" | "cmd" => "super".to_owned(),
+            other => other.to_owned(),
+        })
+        .collect::<Vec<_>>();
+    let key = parts.pop().unwrap_or_default();
+    parts.sort_unstable();
+    parts.push(key);
+    parts.join("+")
+}
+
+pub fn is_valid_accelerator(accelerator: &str) -> bool {
+    let parts = accelerator.split('+').map(str::trim).collect::<Vec<_>>();
+    if parts.len() < 2 || parts.iter().any(|part| part.is_empty()) {
+        return false;
+    }
+    let mut modifiers = HashSet::new();
+    for modifier in &parts[..parts.len() - 1] {
+        let normalized = modifier.to_ascii_lowercase();
+        if !matches!(
+            normalized.as_str(),
+            "ctrl" | "alt" | "shift" | "super" | "cmd"
+        ) || !modifiers.insert(normalized)
+        {
+            return false;
+        }
+    }
+    let key = parts[parts.len() - 1];
+    if key.chars().count() == 1 {
+        return key.chars().next().is_some_and(|character| {
+            character.is_ascii_alphanumeric()
+                || matches!(
+                    character,
+                    '`' | '-' | '=' | '[' | ']' | '\\' | ';' | '\'' | ',' | '.' | '/'
+                )
+        });
+    }
+    let normalized = key.to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "space"
+            | "left"
+            | "right"
+            | "up"
+            | "down"
+            | "home"
+            | "end"
+            | "pageup"
+            | "pagedown"
+            | "tab"
+            | "enter"
+            | "escape"
+            | "backspace"
+            | "delete"
+            | "insert"
+            | "f1"
+            | "f2"
+            | "f3"
+            | "f4"
+            | "f5"
+            | "f6"
+            | "f7"
+            | "f8"
+            | "f9"
+            | "f10"
+            | "f11"
+            | "f12"
+            | "f13"
+            | "f14"
+            | "f15"
+            | "f16"
+            | "f17"
+            | "f18"
+            | "f19"
+            | "f20"
+            | "f21"
+            | "f22"
+            | "f23"
+            | "f24"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -653,6 +969,108 @@ mod tests {
         assert_eq!(snapshot.layout_profile, LayoutProfile::Comfortable);
         assert_eq!(snapshot.custom_theme, None);
         assert_eq!(snapshot.source_preference_order.len(), 4);
+        assert!(snapshot.windows_integration.smtc_enabled);
+        assert!(!snapshot.windows_integration.global_shortcuts_enabled);
+        assert_eq!(snapshot.global_shortcuts, default_global_shortcuts());
+        assert!(snapshot.output_profiles.is_empty());
+    }
+
+    #[test]
+    fn windows_settings_shortcuts_and_output_profiles_round_trip() {
+        let path = TempDatabasePath::new("settings-windows-integration");
+        let database = Database::open(path.path()).unwrap();
+        let repository = SettingsRepository::new(&database);
+        let windows = WindowsIntegrationSettings {
+            smtc_enabled: false,
+            global_shortcuts_enabled: true,
+        };
+        let mut shortcuts = default_global_shortcuts();
+        shortcuts[0].accelerator = "Ctrl+Shift+P".to_owned();
+        let profiles = vec![OutputProfile {
+            id: "desk".to_owned(),
+            name: "  Desk   headphones ".to_owned(),
+            audio_device_name: " auto ".to_owned(),
+            volume_percent: 64,
+            muted: true,
+        }];
+
+        repository
+            .set_setting(SettingValue::WindowsIntegration(windows))
+            .unwrap();
+        repository
+            .set_setting(SettingValue::GlobalShortcuts(shortcuts.clone()))
+            .unwrap();
+        let snapshot = repository
+            .set_setting(SettingValue::OutputProfiles(profiles))
+            .unwrap();
+
+        assert_eq!(snapshot.windows_integration, windows);
+        assert_eq!(snapshot.global_shortcuts, shortcuts);
+        assert_eq!(snapshot.output_profiles[0].name, "Desk headphones");
+        assert_eq!(snapshot.output_profiles[0].audio_device_name, "auto");
+        assert!(snapshot.output_profiles[0].muted);
+        assert_eq!(
+            database.schema_version().unwrap(),
+            crate::db::LATEST_SCHEMA_VERSION
+        );
+    }
+
+    #[test]
+    fn global_shortcut_validation_requires_modifiers_and_isolates_duplicates() {
+        assert!(is_valid_accelerator("Ctrl+Shift+P"));
+        assert!(!is_valid_accelerator("P"));
+        assert!(!is_valid_accelerator("Ctrl+Ctrl+P"));
+
+        let mut duplicate_action = default_global_shortcuts();
+        duplicate_action.push(duplicate_action[0].clone());
+        assert!(matches!(
+            validate_global_shortcuts(&duplicate_action),
+            Err(SettingsError::InvalidValue {
+                key: "global_shortcuts",
+                ..
+            })
+        ));
+
+        let mut duplicate_accelerator = default_global_shortcuts();
+        duplicate_accelerator[1].accelerator = "Alt + Ctrl + Space".to_owned();
+        assert!(validate_global_shortcuts(&duplicate_accelerator).is_err());
+        duplicate_accelerator[1].enabled = false;
+        assert!(validate_global_shortcuts(&duplicate_accelerator).is_ok());
+    }
+
+    #[test]
+    fn output_profile_validation_rejects_invalid_device_volume_and_duplicate_names() {
+        let profile = OutputProfile {
+            id: "one".to_owned(),
+            name: "Desk".to_owned(),
+            audio_device_name: "auto".to_owned(),
+            volume_percent: 50,
+            muted: false,
+        };
+        let path = TempDatabasePath::new("settings-output-validation");
+        let database = Database::open(path.path()).unwrap();
+        assert!(SettingsRepository::new(&database)
+            .set_setting(SettingValue::OutputProfiles(vec![
+                profile.clone(),
+                OutputProfile {
+                    id: "two".to_owned(),
+                    name: " desk ".to_owned(),
+                    ..profile.clone()
+                },
+            ]))
+            .is_err());
+        assert!(OutputProfile {
+            audio_device_name: "   ".to_owned(),
+            ..profile.clone()
+        }
+        .validate()
+        .is_err());
+        assert!(OutputProfile {
+            volume_percent: 101,
+            ..profile
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]
@@ -676,7 +1094,10 @@ mod tests {
         assert_eq!(snapshot.theme, Theme::Custom);
         assert_eq!(snapshot.custom_theme, Some(theme));
         assert_eq!(snapshot.layout_profile, LayoutProfile::Dense);
-        assert_eq!(database.schema_version().unwrap(), 7);
+        assert_eq!(
+            database.schema_version().unwrap(),
+            crate::db::LATEST_SCHEMA_VERSION
+        );
     }
 
     #[test]
