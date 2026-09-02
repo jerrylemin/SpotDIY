@@ -1445,13 +1445,19 @@ fn write_track_aggregate(
             )
             .optional()?;
         if let Some(existing_id) = existing_id {
+            if let Some(release_date) = file.metadata.release_date.as_deref() {
+                transaction.execute(
+                    "UPDATE albums SET release_date = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![release_date, now, existing_id],
+                )?;
+            }
             Some(existing_id)
         } else {
             let album_id = AlbumId::new().to_string();
             transaction.execute(
                 "INSERT INTO albums (id, title, release_date, created_at, updated_at)
-                 VALUES (?1, ?2, NULL, ?3, ?3)",
-                params![album_id, album_title, now],
+                 VALUES (?1, ?2, ?3, ?4, ?4)",
+                params![album_id, album_title, file.metadata.release_date, now],
             )?;
             Some(album_id)
         }
@@ -1512,6 +1518,26 @@ fn write_track_aggregate(
             "INSERT INTO track_artists (track_id, artist_id, artist_order, role)
              VALUES (?1, ?2, ?3, 'primary')",
             params![track_id.to_string(), artist_id, artist_order as i64],
+        )?;
+    }
+
+    transaction.execute(
+        "DELETE FROM track_genres WHERE track_id = ?1",
+        params![track_id.to_string()],
+    )?;
+    for genre in &file.metadata.genres {
+        let normalized_genre = genre.split_whitespace().collect::<Vec<_>>().join(" ");
+        if normalized_genre.is_empty() || normalized_genre.chars().count() > 80 {
+            continue;
+        }
+        transaction.execute(
+            "INSERT OR IGNORE INTO track_genres (track_id, genre, normalized_genre)
+             VALUES (?1, ?2, ?3)",
+            params![
+                track_id.to_string(),
+                normalized_genre,
+                normalized_genre.to_lowercase()
+            ],
         )?;
     }
 

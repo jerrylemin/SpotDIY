@@ -20,8 +20,10 @@ const APPEARANCE_SETTINGS_MIGRATION_SQL: &str =
     include_str!("../../migrations/0007_appearance_settings.sql");
 const WINDOWS_INTEGRATION_SETTINGS_MIGRATION_SQL: &str =
     include_str!("../../migrations/0008_windows_integration_settings.sql");
+const SMART_ANALYTICS_MIGRATION_SQL: &str =
+    include_str!("../../migrations/0009_smart_analytics.sql");
 
-pub const LATEST_SCHEMA_VERSION: u32 = 8;
+pub const LATEST_SCHEMA_VERSION: u32 = 9;
 pub const DATABASE_FILE_NAME: &str = "spotdiy.sqlite3";
 pub const APPLICATION_DATA_DIRECTORY: &str = "SpotDIY";
 
@@ -88,6 +90,12 @@ const MIGRATIONS: &[Migration] = &[
         name: "0008_windows_integration_settings",
         sql: WINDOWS_INTEGRATION_SETTINGS_MIGRATION_SQL,
         destructive: true,
+    },
+    Migration {
+        version: 9,
+        name: "0009_smart_analytics",
+        sql: SMART_ANALYTICS_MIGRATION_SQL,
+        destructive: false,
     },
 ];
 
@@ -651,6 +659,10 @@ mod tests {
             "lyrics",
             "bookmarks",
             "ab_loop_presets",
+            "track_genres",
+            "listening_sessions",
+            "play_history",
+            "smart_playlists",
         ] {
             let exists: i64 = database
                 .with_connection(|connection| {
@@ -901,7 +913,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_seven_settings_rows_are_copied_unchanged_by_schema_eight() {
+    fn schema_seven_settings_rows_are_copied_unchanged_through_schema_nine() {
         let (_path, mut connection) =
             open_legacy_schema_six_fixture("migration-seven-to-eight-settings");
         replace_settings_with_plan10_shape(&connection);
@@ -949,7 +961,7 @@ mod tests {
             .is_err());
 
         run_migrations(&mut connection, None, &MIGRATIONS[7..]).unwrap();
-        assert_eq!(current_schema_version(&connection).unwrap(), 8);
+        assert_eq!(current_schema_version(&connection).unwrap(), 9);
         let after: Vec<(String, String, String, i64, String)> = {
             let mut statement = connection
                 .prepare(
@@ -983,6 +995,50 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn schema_eight_database_migrates_to_nine_with_smart_analytics_tables() {
+        let (_path, mut connection) =
+            open_legacy_schema_six_fixture("migration-eight-to-nine-smart-analytics");
+        replace_settings_with_plan10_shape(&connection);
+
+        run_migrations(&mut connection, None, &MIGRATIONS[6..8]).unwrap();
+        assert_eq!(current_schema_version(&connection).unwrap(), 8);
+
+        for table in [
+            "track_genres",
+            "listening_sessions",
+            "play_history",
+            "smart_playlists",
+        ] {
+            let exists: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 0, "schema eight unexpectedly contains {table}");
+        }
+
+        run_migrations(&mut connection, None, &MIGRATIONS[8..]).unwrap();
+        assert_eq!(current_schema_version(&connection).unwrap(), 9);
+        for table in [
+            "track_genres",
+            "listening_sessions",
+            "play_history",
+            "smart_playlists",
+        ] {
+            let exists: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 1, "migration nine is missing {table}");
+        }
     }
 
     #[test]
