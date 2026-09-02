@@ -303,5 +303,5 @@ retains the existing Browserslist, Tailwind content, ineffective dynamic
 import, and large-chunk notices. Graphify's final code-only refresh reports
 4,723 nodes, 9,470 edges, and 277 communities. Build output remains external
 at `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` remains
-absent. Gmail delivery is not available because no Gmail connector is
-installed.
+absent. The requested Gmail completion message `Plan 13 finished` was sent to
+`jerryle.minh.3@gmail.com`.

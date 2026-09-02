@@ -48,5 +48,5 @@ Final checks pass: 393 Rust unit tests plus real-mpv, 81 Vitest, 69 Playwright,
 frontend typecheck/lint/test/build, Rust fmt/strict Clippy/all-target tests,
 Tauri release/NSIS build, regular/Plan 11/Plan 12 packaged smokes, and the
 isolated packaged Plan 13 Standard/Portable restart smoke. Lint/build retain
-only the documented pre-existing warnings. Gmail completion delivery was not
-possible because no Gmail connector is installed.
+only the documented pre-existing warnings. The requested Gmail completion
+message `Plan 13 finished` was sent to `jerryle.minh.3@gmail.com`.

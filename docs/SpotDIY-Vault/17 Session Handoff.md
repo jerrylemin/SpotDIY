@@ -194,8 +194,8 @@ Verified evidence: 393 Rust unit tests plus real-mpv integration, 81 Vitest,
 Plan 12 packaged smokes, and the Plan 13 packaged storage smoke. Graphify
 reports 4,723 nodes, 9,470 edges, and 277 communities. Build output is
 external at `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target`
-is absent. Gmail delivery is unavailable because the Gmail connector is not
-installed.
+is absent. The requested Gmail completion message `Plan 13 finished` was sent
+to `jerryle.minh.3@gmail.com`.
 
 ## Next atomic task
 
