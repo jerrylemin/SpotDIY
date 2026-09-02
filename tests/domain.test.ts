@@ -6,9 +6,12 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 
 import {
   IpcError,
+  exportSpotdiyBackup,
   getAppStatus,
+  getStorageStatus,
   getSettingsSnapshot,
   getWindowsIntegrationSnapshot,
+  prepareStorageModeSwitch,
   parseWindowsIntegrationSnapshot,
   resetGlobalShortcuts,
   providerLabel,
@@ -58,6 +61,48 @@ describe("settings IPC contract", () => {
       layoutProfile: "dense",
     });
     await expect(setSetting({ key: "theme", value: "light" })).resolves.toMatchObject({ theme: "light" });
+  });
+
+  it("keeps backup and storage paths inside the native IPC boundary", async () => {
+    await expect(getStorageStatus()).resolves.toMatchObject({
+      mode: "standard",
+      dataRoot: "Browser preview",
+      portableMarkerPresent: false,
+    });
+    await expect(exportSpotdiyBackup({
+      includeLocalAudio: false,
+      includeArtworkCache: false,
+      includeSidecarLyrics: false,
+    })).rejects.toBeInstanceOf(IpcError);
+
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
+    invokeMock.mockResolvedValueOnce({
+      mode: "portable",
+      dataRoot: "D:\\SpotDIY\\Data",
+      databasePath: "D:\\SpotDIY\\Database\\spotdiy.sqlite3",
+      cacheRoot: "D:\\SpotDIY\\Cache",
+      portableMarkerPresent: true,
+      restartRequired: false,
+      pendingImport: false,
+      lastRollbackPath: null,
+    });
+    await expect(getStorageStatus()).resolves.toMatchObject({ mode: "portable" });
+    invokeMock.mockResolvedValueOnce({
+      mode: "portable",
+      dataRoot: "D:\\SpotDIY\\Data",
+      databasePath: "D:\\SpotDIY\\Database\\spotdiy.sqlite3",
+      cacheRoot: "D:\\SpotDIY\\Cache",
+      restartRequired: true,
+    });
+    await expect(prepareStorageModeSwitch("portable")).resolves.toMatchObject({
+      mode: "portable",
+      restartRequired: true,
+    });
+    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    invokeMock.mockReset();
   });
 
   it("keeps Windows integration DTOs strict and browser overlay state typed", async () => {

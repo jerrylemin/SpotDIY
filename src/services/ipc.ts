@@ -75,6 +75,12 @@ import type {
   QueueWorkspace,
   GlobalShortcutBinding,
   OutputProfile,
+  ImportCommitResult,
+  ImportPreview,
+  SpotDiyExportOptions,
+  StorageMode,
+  StorageModeSwitchResult,
+  StorageStatus,
   OverlayKind,
   OverlaySnapshot,
   WindowsIntegrationSettings,
@@ -271,6 +277,62 @@ const settingsSnapshotSchema = z.object({
   windowsIntegration: windowsIntegrationSettingsSchema,
   globalShortcuts: z.array(globalShortcutBindingSchema),
   outputProfiles: z.array(outputProfileSchema),
+}).strict();
+const storageModeSchema = z.enum(["standard", "portable"]);
+const storageStatusSchema = z.object({
+  mode: storageModeSchema,
+  dataRoot: z.string(),
+  databasePath: z.string(),
+  cacheRoot: z.string(),
+  portableMarkerPresent: z.boolean(),
+  restartRequired: z.boolean(),
+  pendingImport: z.boolean(),
+  lastRollbackPath: z.string().nullable(),
+}).strict();
+const storageModeSwitchResultSchema = z.object({
+  mode: storageModeSchema,
+  dataRoot: z.string(),
+  databasePath: z.string(),
+  cacheRoot: z.string(),
+  restartRequired: z.boolean(),
+}).strict();
+const missingFileReferenceSchema = z.object({
+  kind: z.string(),
+  trackId: z.string().min(1).transform((value) => value as TrackId).nullable(),
+  sourceId: z.string().min(1).transform((value) => value as SourceId).nullable(),
+  path: z.string(),
+}).strict();
+const missingFileReportSchema = z.object({
+  totalLocalReferences: z.number().int().nonnegative(),
+  availableLocalReferences: z.number().int().nonnegative(),
+  missingLocalReferences: z.number().int().nonnegative(),
+  completedDownloadReferences: z.number().int().nonnegative(),
+  missingDownloadOutputs: z.number().int().nonnegative(),
+  firstMissing: z.array(missingFileReferenceSchema).max(500),
+}).strict();
+const importPreviewSchema = z.object({
+  importId: z.string().uuid(),
+  archiveVersion: z.literal(1),
+  appVersion: z.string().min(1),
+  databaseSchemaVersion: z.number().int().min(0).max(8),
+  sourceStorageMode: storageModeSchema,
+  entryCount: z.number().int().nonnegative(),
+  includedAudioCount: z.number().int().nonnegative(),
+  includedArtworkCount: z.number().int().nonnegative(),
+  includedSidecarLyricsCount: z.number().int().nonnegative(),
+  missing: missingFileReportSchema,
+  checksumValid: z.boolean(),
+  restoredAudioPlannedCount: z.number().int().nonnegative(),
+}).strict();
+const exportOptionsSchema = z.object({
+  includeLocalAudio: z.boolean(),
+  includeArtworkCache: z.boolean(),
+  includeSidecarLyrics: z.boolean(),
+}).strict();
+const importCommitResultSchema = z.object({
+  importId: z.string().uuid(),
+  restartRequired: z.boolean(),
+  preview: importPreviewSchema,
 }).strict();
 const settingValueSchema = z.discriminatedUnion("key", [
   z.object({ key: z.literal("theme"), value: themeSchema }),
@@ -1745,6 +1807,19 @@ function browserPreviewStatus(): AppStatus {
   };
 }
 
+function browserPreviewStorageStatus(): StorageStatus {
+  return {
+    mode: "standard",
+    dataRoot: "Browser preview",
+    databasePath: "Browser preview",
+    cacheRoot: "Browser preview",
+    portableMarkerPresent: false,
+    restartRequired: false,
+    pendingImport: false,
+    lastRollbackPath: null,
+  };
+}
+
 const browserDefaultGlobalShortcuts: GlobalShortcutBinding[] = [
   { action: "playPause", accelerator: "Ctrl+Alt+Space", enabled: true },
   { action: "next", accelerator: "Ctrl+Alt+Right", enabled: true },
@@ -2555,6 +2630,95 @@ export async function getSettingsSnapshot(): Promise<SettingsSnapshot> {
     return settingsSnapshotSchema.parse(response);
   } catch (error) {
     throw new IpcError("SpotDIY could not read its local settings.", error);
+  }
+}
+
+export async function getStorageStatus(): Promise<StorageStatus> {
+  if (!isTauriRuntime()) {
+    return browserPreviewStorageStatus();
+  }
+  try {
+    const response = await invoke<unknown>("get_storage_status");
+    return storageStatusSchema.parse(response) as StorageStatus;
+  } catch (error) {
+    throw new IpcError("SpotDIY could not read its storage status.", error);
+  }
+}
+
+export async function exportSpotdiyBackup(options: SpotDiyExportOptions): Promise<void> {
+  try {
+    const parsed = exportOptionsSchema.parse(options) as SpotDiyExportOptions;
+    if (!isTauriRuntime()) {
+      throw new IpcError("Backup export requires the native SpotDIY desktop runtime.");
+    }
+    await invoke("export_spotdiy_backup", { options: parsed });
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not export that backup.", error);
+  }
+}
+
+export async function pickAndPrepareSpotdiyImport(): Promise<ImportPreview> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Backup import requires the native SpotDIY desktop runtime.");
+  }
+  try {
+    const response = await invoke<unknown>("pick_and_prepare_spotdiy_import");
+    return importPreviewSchema.parse(response) as ImportPreview;
+  } catch (error) {
+    throw new IpcError("SpotDIY could not prepare that backup for import.", error);
+  }
+}
+
+export async function getPendingImportPreview(): Promise<ImportPreview | null> {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  try {
+    const response = await invoke<unknown>("get_pending_import_preview");
+    return response === null ? null : importPreviewSchema.parse(response) as ImportPreview;
+  } catch (error) {
+    throw new IpcError("SpotDIY could not read the pending backup preview.", error);
+  }
+}
+
+export async function commitSpotdiyImport(importId: string): Promise<ImportCommitResult> {
+  const parsedId = z.string().uuid().parse(importId);
+  if (!isTauriRuntime()) {
+    throw new IpcError("Backup import requires the native SpotDIY desktop runtime.");
+  }
+  try {
+    const response = await invoke<unknown>("commit_spotdiy_import", { importId: parsedId });
+    return importCommitResultSchema.parse(response) as ImportCommitResult;
+  } catch (error) {
+    throw new IpcError("SpotDIY could not commit that backup import.", error);
+  }
+}
+
+export async function cancelSpotdiyImport(importId: string): Promise<void> {
+  const parsedId = z.string().uuid().parse(importId);
+  if (!isTauriRuntime()) {
+    throw new IpcError("Backup import requires the native SpotDIY desktop runtime.");
+  }
+  try {
+    await invoke("cancel_spotdiy_import", { importId: parsedId });
+  } catch (error) {
+    throw new IpcError("SpotDIY could not cancel that backup import.", error);
+  }
+}
+
+export async function prepareStorageModeSwitch(targetMode: StorageMode): Promise<StorageModeSwitchResult> {
+  const parsedMode = storageModeSchema.parse(targetMode) as StorageMode;
+  if (!isTauriRuntime()) {
+    throw new IpcError("Storage mode changes require the native SpotDIY desktop runtime.");
+  }
+  try {
+    const response = await invoke<unknown>("prepare_storage_mode_switch", { targetMode: parsedMode });
+    return storageModeSwitchResultSchema.parse(response) as StorageModeSwitchResult;
+  } catch (error) {
+    throw new IpcError("SpotDIY could not prepare that storage mode change.", error);
   }
 }
 

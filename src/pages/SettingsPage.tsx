@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ProviderBadge } from "../components/common/ProviderBadge";
 import { Button } from "../components/common/Button";
+import { BackupSection } from "../components/backup/BackupSection";
 import { SegmentedControl } from "../components/common/SegmentedControl";
 import { StatusChip } from "../components/common/StatusChip";
 import { IconGallery } from "../components/icons/IconGallery";
@@ -302,7 +303,7 @@ export function SettingsPage() {
         </div>
       </section>
       <section className="settings-section"><div className="settings-section-heading"><span className="eyebrow">MEDIA TOOLS</span><p>Download execution uses validated local binaries. Paths stay in the native boundary; only health, version, and actionable detail are shown here.</p></div><div className="settings-tool-list">{(["ytDlp", "ffmpeg"] as const).map((key) => { const tool = appStatus.data?.mediaTools[key]; const label = key === "ytDlp" ? "yt-dlp" : "FFmpeg"; return <div className="settings-tool-row" key={key}><div><strong>{label}</strong><span>{tool?.version ?? "Version unavailable"}</span></div><span className={`source-connection-status ${tool?.status === "ready" ? "connected" : "not-connected"}`}>{runtimeToolLabel(tool?.status)}</span><p>{tool?.detail ?? "Tool health is not available yet."}</p></div>; })}</div></section>
-      <section className="settings-section"><div className="settings-section-heading"><span className="eyebrow">STORAGE</span><p>SpotDIY keeps application data local. Music remains in the folders you select.</p></div><div className="storage-grid"><div className="storage-card storage-card-active"><div><SpotIcon name="library" size={21} /><span className="storage-card-label">Standard mode</span></div><strong>Windows LocalAppData</strong><p>Recommended for a normal installation.</p><span className="storage-card-state">CURRENT MODE</span></div><div className="storage-card"><div><SpotIcon name="folder" size={21} /><span className="storage-card-label">Portable mode</span></div><strong>Folder-contained data</strong><p>Keep database, covers, lyrics, and cache beside SpotDIY.exe.</p><button className="text-link" disabled title="Portable mode is implemented in the storage slice" type="button">Configure mode <SpotIcon name="arrow" size={14} /></button></div></div></section>
+      <BackupSection />
       <section className="settings-footer"><Link className="text-link" to="/library">Open local library <SpotIcon name="arrow" size={14} /></Link><span><span className="status-dot status-dot-active" /> No telemetry by default</span></section>
     </div>
   );

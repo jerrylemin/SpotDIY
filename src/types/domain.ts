@@ -198,6 +198,70 @@ export interface SettingsSnapshot {
   outputProfiles: OutputProfile[];
 }
 
+export interface StorageStatus {
+  mode: StorageMode;
+  dataRoot: string;
+  databasePath: string;
+  cacheRoot: string;
+  portableMarkerPresent: boolean;
+  restartRequired: boolean;
+  pendingImport: boolean;
+  lastRollbackPath: string | null;
+}
+
+export interface StorageModeSwitchResult {
+  mode: StorageMode;
+  dataRoot: string;
+  databasePath: string;
+  cacheRoot: string;
+  restartRequired: boolean;
+}
+
+export type SpotDiyArchiveEntryKind = "database" | "localAudio" | "artwork" | "sidecarLyrics";
+
+export interface MissingFileReference {
+  kind: string;
+  trackId: TrackId | null;
+  sourceId: SourceId | null;
+  path: string;
+}
+
+export interface MissingFileReport {
+  totalLocalReferences: number;
+  availableLocalReferences: number;
+  missingLocalReferences: number;
+  completedDownloadReferences: number;
+  missingDownloadOutputs: number;
+  firstMissing: MissingFileReference[];
+}
+
+export interface ImportPreview {
+  importId: string;
+  archiveVersion: number;
+  appVersion: string;
+  databaseSchemaVersion: number;
+  sourceStorageMode: StorageMode;
+  entryCount: number;
+  includedAudioCount: number;
+  includedArtworkCount: number;
+  includedSidecarLyricsCount: number;
+  missing: MissingFileReport;
+  checksumValid: boolean;
+  restoredAudioPlannedCount: number;
+}
+
+export interface SpotDiyExportOptions {
+  includeLocalAudio: boolean;
+  includeArtworkCache: boolean;
+  includeSidecarLyrics: boolean;
+}
+
+export interface ImportCommitResult {
+  importId: string;
+  restartRequired: boolean;
+  preview: ImportPreview;
+}
+
 export interface WindowsIntegrationSettings {
   smtcEnabled: boolean;
   globalShortcutsEnabled: boolean;
