@@ -124,8 +124,10 @@ CodeGraph and Graphify were each refreshed once. Build output is external at
 `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
 
 Known limits: browser preview settings are session-scoped in memory. Online
-playback and Spotify downloads remain unavailable; Theme Studio, mobile UI,
-and Plan 12 Windows overlays remain future work.
+playback and Spotify downloads remain unavailable; Theme Studio and mobile UI
+remain future work. Native Windows integration is available only in the
+packaged desktop app, and exclusive fullscreen applications may cover the
+standard always-on-top Gaming overlay.
 
 ## Plan 11 handoff
 
@@ -139,7 +141,8 @@ The shell now uses real Home state and existing service snapshots for persisted
 and ephemeral inspectors, source/quality/provenance surfaces, capability-aware
 actions, command-palette navigation, Escape priority, and Standard/Mini/
 Expanded in-shell players. `PlaybackService` remains the sole playback and
-queue owner; no online playback or Plan 12 work was added.
+queue owner; Plan 12 adds the separate optional native Windows integration
+owner without adding online playback.
 
 Verified evidence: 347 Rust unit tests plus one real-mpv integration test, 73
 Vitest tests, 63 Playwright tests at 1280/1920/2560, frontend/native quality
@@ -150,4 +153,27 @@ and 247 communities. Build output is external at
 
 ## Next atomic task
 
-Plan 12 overlay and Windows integration work remains unstarted.
+## Plan 12 handoff
+
+Plan 12 is complete through implementation commits `95eb41b`, `b7daac6`,
+`d9b58c3`, `e4793b6`, and `3d39e1d`. Schema 8 persists Windows integration
+settings, nine global shortcut bindings, and normalized output profiles while
+preserving schema-7 settings rows. Native Rust owns lazy Mini/Edge/Lyrics/
+Gaming overlays, tray actions, shortcut registration/status, SMTC, click-
+through recovery, and output-profile apply/rollback; the frontend uses strict
+typed IPC and browser-preview adapters.
+
+Verified evidence: 365 Rust unit tests plus real-mpv integration, 78 Vitest
+tests, 69 Playwright tests at 1280/1920/2560, typecheck/lint/build, Rust
+fmt/Clippy, schema 7-to-8 migration coverage, Tauri packaging, regular and
+Plan 11 packaged smokes, and the dedicated Plan 12 packaged smoke. The live
+Windows run reported `SMTC READY`, registered the controlled shortcut, proved
+overlay reuse/topmost/click-through recovery, applied and restored an output
+profile without changing playback context, and left no owned mpv process.
+CodeGraph reports 166 files, 5,349 nodes, and 19,394 edges; Graphify reports
+4,467 nodes, 8,952 edges, and 262 communities. Build output is external at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
+
+## Next atomic task
+
+Plan 13 import/export and portable mode remains unstarted.

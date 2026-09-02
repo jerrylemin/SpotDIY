@@ -133,4 +133,20 @@ non-playback options with their availability detail. Online playback remains
 unimplemented, Spotify remains metadata-only, and Plan 11 does not resolve
 online media URLs or add native overlays/global media controls. Mode changes
 are presentation-only and do not autoplay, seek, switch sources, or mutate the
-persistent queue.
+persistent queue. Plan 12 adds the separate Windows integration boundary
+without changing this playback ownership.
+
+## Plan 12 output-profile boundary
+
+`PlaybackService` remains the sole serialized owner of transport and queue
+context. Output profiles are validated ordinary settings containing a normalized
+name, selected device (`auto` or a known device), volume, and mute state. Apply
+updates the selected audio device and output controls through the playback
+backend while preserving current track, queue, position, and phase. A device,
+volume, or mute failure rolls back the preceding output changes and reports
+whether rollback succeeded.
+
+Playback snapshots feed the Windows SMTC projection with bounded track metadata,
+artwork, duration, position, and typed transport state. SMTC commands return to
+the same `PlaybackService` transport methods; no media path, mpv protocol detail,
+or native handle crosses the frontend boundary.

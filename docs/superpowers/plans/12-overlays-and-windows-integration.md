@@ -31,3 +31,13 @@ Overlays remain optional and recoverable; unsupported Windows behavior is explai
 ## Commit boundary
 
 `feat: add Windows overlays and integration surfaces`
+
+## Delivery record
+
+Implemented 2026-09-02 through commits `95eb41b`, `b7daac6`, `d9b58c3`,
+`e4793b6`, and `3d39e1d`. The delivery includes schema 8 settings, lazy native
+overlays, tray/shortcut/SMTC integration, session-only click-through recovery,
+rollback-safe output profiles, strict capabilities, browser/native/package
+coverage, and restart persistence. Final packaged Windows verification reported
+`SMTC READY`; see `docs/execution/verification-log.md` for the complete gate
+record.

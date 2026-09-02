@@ -1,6 +1,6 @@
 # Windows integration
 
-Standard mode targets `%LOCALAPPDATA%\SpotDIY`; portable mode keeps its data beside the executable. Future overlay, global shortcut, tray, media controls, output profile, and always-on-top work must be capability- and OS-tested. Gaming click-through is conditional on reliable current Tauri/Win32 behavior.
+Standard mode targets `%LOCALAPPDATA%\SpotDIY`; portable mode keeps its data beside the executable. Plan 12 delivers the capability- and OS-tested overlay, global shortcut, tray, media control, output profile, and always-on-top boundary. Gaming click-through remains conditional on reliable current Tauri/Win32 behavior and is recoverable when unavailable.
 
 ## Plan 03 local files
 
@@ -42,3 +42,32 @@ Windows known-folder resolution can ignore a child `LOCALAPPDATA` override;
 normal production startup remains `%LOCALAPPDATA%\SpotDIY` and portable mode
 is still deferred. The harness identifies only mpv children launched with the
 SpotDIY pipe suffix and never terminates unrelated mpv processes.
+
+## Plan 12 Windows integration
+
+`WindowsIntegrationService` owns four lazy Tauri overlay windows: Mini,
+Edge, Lyrics, and Gaming. Their native labels are `overlay-mini`,
+`overlay-edge`, `overlay-lyrics`, and `overlay-gaming`; Rust owns exact sizes,
+safe placement, close/reopen reuse, and always-on-top configuration. The
+overlay capability is intentionally limited to event listen/unlisten and the
+window close/always-on-top operations required by the surfaces.
+
+The tray menu and nine typed global shortcuts dispatch to the same native
+actions used by the Settings and command-palette surfaces. Global shortcuts are
+disabled by default and expose registered, conflict, invalid, or failed status
+per binding. Gaming click-through is session-only and uses
+`Ctrl+Alt+Shift+G` as the rescue path; standard always-on-top behavior may still
+be covered by exclusive fullscreen applications.
+
+Windows SMTC is enabled by default, but the status is explicitly `ready`,
+`disabled`, `unsupported`, or `failed` with detail. Its WinRT bridge lives in
+the isolated `spotdiy-windows-smtc` helper crate, and media commands map back
+to `PlaybackService`. Output profiles persist only normalized device, volume,
+and mute values in schema 8; apply/rollback preserves playback context. Native
+window visibility, handles, tray state, SMTC runtime objects, and click-through
+are not persisted.
+
+The packaged Plan 12 smoke proves fresh schema-8 startup, native tray/status,
+live SMTC, controlled shortcut registration, overlay reuse/topmost, click-
+through recovery, output-profile apply/restore, restart persistence, and zero
+owned mpv processes. Browser preview remains native-free and truthful.

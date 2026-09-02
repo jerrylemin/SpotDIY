@@ -195,7 +195,7 @@ overlay Escape priority, and Standard/Mini/Expanded in-shell player modes.
 Existing service ownership remains authoritative: PlaybackService owns queue
 and transport, while SearchService, DownloadService, LyricsService, and
 PlaylistService retain their existing boundaries. Online playback, Spotify
-download, and Plan 12 Windows overlays remain out of scope.
+  download; Plan 12 now owns the optional native Windows integration boundary.
 
 Verification: 347 Rust unit tests plus one real-mpv integration test, 73
 Vitest tests, 63 Playwright tests across 1280/1920/2560, frontend/native
@@ -207,5 +207,32 @@ edges, and 247 communities. Build output is external at
 
 ## Next atomic task
 
-Plan 12 overlay and Windows integration work remains unstarted. No Plan 12
-implementation was included in this delivery.
+## Plan 12 completion
+
+Plan 12 is complete through implementation commits `95eb41b`, `b7daac6`,
+`d9b58c3`, `e4793b6`, and `3d39e1d`. Schema 8 persists Windows integration
+settings, nine global shortcut bindings, and normalized output profiles while
+preserving schema-7 rows. Native Rust owns lazy Mini/Edge/Lyrics/Gaming
+overlays, tray actions, shortcut status, SMTC, click-through recovery, and
+output-profile apply/rollback; the frontend uses strict typed IPC and a bounded
+browser-preview adapter.
+
+Verified evidence: 365 Rust unit tests plus real-mpv integration, 78 Vitest
+tests, 69 Playwright tests at 1280/1920/2560, typecheck/lint/build, Rust
+fmt/Clippy, schema 7-to-8 migration coverage, Tauri packaging, regular and
+Plan 11 packaged smokes, and the dedicated Plan 12 packaged smoke. The live
+Windows run reported `SMTC READY`, registered the controlled shortcut, proved
+overlay reuse/topmost/click-through recovery, applied and restored an output
+profile without changing playback context, and left no owned mpv process.
+CodeGraph reports 166 files, 5,349 nodes, and 19,394 edges; Graphify reports
+4,467 nodes, 8,952 edges, and 262 communities. Build output is external at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
+
+Known limits: browser preview cannot provide native windows or SMTC; Gaming
+Overlay is best for windowed/borderless games because exclusive fullscreen can
+cover desktop overlays; and unsupported Windows media-control environments
+remain explicit unavailable states.
+
+## Next atomic task
+
+Plan 13 import/export and portable mode remains unstarted.

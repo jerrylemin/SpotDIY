@@ -123,8 +123,9 @@ shipped schema-6 settings, a real-data Home dashboard, persisted and ephemeral
 Track Inspector surfaces, source switching, measured quality/provenance,
 capability-aware actions, command-palette and Escape coordination, and
 Standard/Mini/Expanded in-shell player modes. Existing service and queue
-ownership remains unchanged; online playback, Spotify download, native
-overlays, and Theme Studio remain outside the boundary.
+ownership remains unchanged; online playback, Spotify download, and Theme
+Studio remain outside the boundary. Plan 12 now owns the optional native
+Windows overlay and system-integration boundary.
 
 Verification passes with 347 Rust unit tests plus real-mpv integration smoke,
 73 Vitest tests, 63 Playwright tests across three viewport projects, frontend
@@ -134,4 +135,15 @@ and packaged Plan 11 migration/shell/restart smoke. See
 
 ## Next atomic task
 
-Plan 12 overlay and Windows integration work remains unstarted.
+## Plan 12 completion
+
+Plan 12 is complete through implementation commits `95eb41b`, `b7daac6`,
+`d9b58c3`, `e4793b6`, and `3d39e1d`. It delivers schema-8 Windows settings,
+lazy Mini/Edge/Lyrics/Gaming overlays, tray actions, typed global shortcuts,
+SMTC with an isolated WinRT bridge, session-only click-through recovery, and
+rollback-safe output profiles. Verification evidence is recorded in
+`docs/execution/verification-log.md` and `docs/SpotDIY-Vault/12 Testing.md`.
+
+## Next atomic task
+
+Plan 13 import/export and portable mode remains unstarted.

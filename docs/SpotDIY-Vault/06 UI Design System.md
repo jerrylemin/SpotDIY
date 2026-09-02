@@ -62,3 +62,19 @@ metadata-only/unsupported playback limits. Search, Library, Playlists, and
 Downloads reuse capability-aware action derivation, while Dark/Light/System/
 Custom themes, density profiles, reduced motion, and focus behavior remain
 under the Plan 10 semantic token contract.
+
+## Plan 12 Windows integration surfaces
+
+Settings now includes a Windows Integration section for the persisted SMTC
+preference, the global shortcut master switch and nine editable bindings, four
+native overlay toggles, session-only Gaming click-through, and output-profile
+creation/edit/apply/delete controls. Every native-only action is hidden or
+explained in browser preview; the preview adapter still exercises typed state
+transitions without claiming native capabilities.
+
+The overlay React surfaces are intentionally small and distinct: Mini is a
+compact track/control card, Edge is a narrow right-edge now-playing card,
+Lyrics is a synchronized cue surface, and Gaming is a minimal HUD. They share
+the `OverlayFrame` shell and semantic tokens, expose an explicit close control,
+and consume the same playback/lyrics snapshots as the main app. The native
+window labels and exact dimensions are owned by Rust, not inferred from CSS.

@@ -4,18 +4,42 @@
 |---|---|---|
 | Frontend type safety | `pnpm typecheck` | Pass. Strict playback/library/settings DTOs and command arguments are checked. |
 | Frontend lint | `pnpm lint` | Pass. |
-| Frontend behavior | `pnpm test` | Pass: 73 Vitest tests across 19 files, including inspector DTO parsing, capability-aware actions, shell state, settings/theme schemas, and existing playback/library/lyrics behavior. |
+| Frontend behavior | `pnpm test` | Pass: 78 Vitest tests across 21 files, including Windows integration DTO parsing, browser-preview state, shortcut/profile controls, inspector DTO parsing, capability-aware actions, shell state, and existing playback/library/lyrics behavior. |
 | Frontend build | `pnpm build` | Pass. Existing Browserslist/Tailwind content notices are non-fatal. |
 | Rust formatting | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | Pass. |
 | Rust quality | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | Pass. |
-| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | Pass: 347 unit tests plus one synthetic mpv integration test, including schema-6-to-7 fixtures, inspector privacy, settings/theme validation, playback, persistence, and existing service behavior. |
-| Browser playback | `pnpm exec playwright test` | Pass: 63 tests across 1280, 1920, and 2560 viewport projects; includes real-data Home, persisted/ephemeral inspectors, player modes, command palette, source-aware shell behavior, appearance, context-menu keyboard paths, responsive overflow, and existing playback coverage. |
+| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | Pass: 365 unit tests plus one synthetic mpv integration test, including schema-7-to-8 preservation, Windows settings/overlay/shortcut/SMTC/output behavior, inspector privacy, playback, persistence, and existing service behavior. |
+| Browser playback | `pnpm exec playwright test` | Pass: 69 tests across 1280, 1920, and 2560 viewport projects; includes browser-preview Windows settings/overlay state, real-data Home, persisted/ephemeral inspectors, player modes, command palette, source-aware shell behavior, appearance, context-menu keyboard paths, responsive overflow, and existing playback coverage. |
 | Real mpv | Windows `mpv_smoke` integration gate | Pass with local `v0.41.0-dev-g41f6a6450`; synthetic WAV transport, device, EOF, shutdown, and process-exit behavior verified. |
-| Packaged lifecycle | `scripts/packaged-playback-smoke.ps1` | Pass with release executable: Plan 09 playback/lyrics persistence plus Plan 11 schema migration, appearance, shell, inspector, queue, restart, no-autoplay, and owned-mpv cleanup. |
+| Packaged lifecycle | `scripts/packaged-playback-smoke.ps1` and `scripts/packaged-windows-integration-smoke.ps1` | Pass with release executable: regular playback/restart cleanup, Plan 11 migration/shell/restart, and Plan 12 schema-8 tray/SMTC/shortcut/overlay/click-through/output-profile/restart cleanup. |
 | Release | `pnpm tauri build` | Pass. Release executable and NSIS bundle built with external `C:\CargoTarget\SpotDIY`; no repository-local `src-tauri\target`. |
 | Provider contracts | Plan 05 native adapter/search tests and metadata smoke | Pass: 250 Rust tests include provider registry, local search, yt-dlp adapters, Spotify PKCE/error mapping, timeouts, cancellation, sorting, and cache bounds; opt-in YouTube/SoundCloud metadata smoke returned 25 entries each. |
-| Persistence boundary | Schema and restart smoke | Pass: migration 7 preserves schema-6 settings and adds only the appearance allowlist; queue and appearance persist across restart without autoplay. |
-| Visual follow-up | Playwright screenshots | Pass: Plan 11 covers Home/player/inspector shell paths, appearance, focus, reduced motion, context actions, icon rendering, responsive guards, and the 1080-pixel height fallback. |
+| Persistence boundary | Schema and restart smoke | Pass: migration 8 preserves schema-7 settings and adds only Windows integration settings; shortcut/profile records persist, while overlay visibility and click-through remain session-only. |
+| Visual follow-up | Playwright screenshots | Pass: Plan 12 extends the Plan 11 Home/player/inspector coverage with browser-preview Windows controls, overlay state, focus, reduced motion, context actions, icon rendering, responsive guards, and the 1080-pixel height fallback. |
+
+## Plan 12 verification
+
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass. Vitest
+  reports 78 tests across 21 files. Lint retains three pre-existing Fast
+  Refresh warnings; build notices for Browserslist, empty Tailwind content,
+  an ineffective dynamic import, and the large frontend chunk are non-fatal.
+- `pnpm exec playwright test` passes 69 tests across the 1280, 1920, and 2560
+  viewport projects. The Plan 12 contract passes all six cases across the
+  three projects for browser-preview settings, overlay state, shortcut/profile
+  controls, and native-only command palette gating.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`, strict
+  all-features Clippy, and `cargo test --manifest-path src-tauri/Cargo.toml
+  --all-targets` pass: 365 Rust unit tests plus one real-mpv integration test.
+  The named schema 7-to-8 preservation test passes independently.
+- `pnpm tauri build` passes with the release executable and NSIS bundle under
+  external `C:\CargoTarget\SpotDIY`. The regular packaged playback smoke, Plan
+  11 shell/migration smoke, and dedicated Plan 12 Windows smoke pass. The Plan
+  12 live run reports `SMTC READY`, registered shortcut status, overlay reuse
+  and topmost state, click-through recovery, output-profile apply/restore,
+  restart persistence, schema version 8, and zero owned mpv processes.
+- `git diff --check` passes. CodeGraph is current at 166 files, 5,349 nodes,
+  and 19,394 edges; Graphify is current at 4,467 nodes, 8,952 edges, and 262
+  communities. Repository-local `src-tauri\target` remains absent.
 
 ## Plan 05 verification
 

@@ -63,3 +63,21 @@ table, and a fresh database. All reach schema 7; old settings survive, the two
 appearance keys can be written, a custom theme can become active, and
 `foreign_key_check` remains clean. `LATEST_SCHEMA_VERSION` is 7 and there are
 no additional Plan 11 database changes.
+
+## Plan 12 migration 8 Windows settings
+
+Plan 12 adds `0008_windows_integration_settings.sql` as a destructive,
+WAL-safe migration. It rebuilds only `settings_metadata`, copies every schema-7
+row byte-for-byte, expands the ordinary settings allowlist for
+`windows_integration`, `global_shortcuts`, and `output_profiles`, then advances
+`user_version` to 8. No media, library, queue, lyrics, collection, or download
+table is changed.
+
+The typed settings contract persists SMTC/global-shortcut preferences, nine
+validated action/accelerator bindings, and normalized output profiles with
+device, volume, and mute values. Overlay visibility, native handles, tray
+state, SMTC runtime objects, and Gaming click-through are session-only. The
+schema 7-to-8 fixture compares all prior settings rows before and after the
+migration and keeps `foreign_key_check` at zero; the packaged Plan 12 smoke
+also verifies a fresh database reaches schema 8 and retains the durable values
+across restart.

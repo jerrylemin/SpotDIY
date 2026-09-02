@@ -13,7 +13,8 @@ State date: 2026-09-02
 - Plan 09 implementation commits: `1bc7108`, `e4d62d8`, `c25f954`, and `7b1a097`.
 - Plan 10 implementation commits: `cc28ba1`, `f2a5995`, `850bc82`, `8c62aed`, and `6eb231d`.
 - Plan 11 implementation commits: `e5129a0`, `f5562e1`, `0012a43`, `0026146`, `dba1f24`, `d631a2a`, `d2199d5`, `e072fec`, and `15031bf`.
-- Delivery status: Plan 11 implementation and final verification are complete; this document is part of the documentation closure boundary.
+- Plan 12 implementation commits: `95eb41b`, `b7daac6`, `d9b58c3`, `e4793b6`, and `3d39e1d`.
+- Delivery status: Plan 12 implementation and final verification are complete; this document is part of the documentation closure boundary.
 
 ## Runtime
 
@@ -26,6 +27,7 @@ State date: 2026-09-02
 - Lyrics: `LyricsService` owns local-first precedence, bounded LRC/embedded metadata reads, manual overrides, explicit LRCLIB lookup/cache, and typed lyrics DTOs. Local media reads are read-only through `LibraryService`.
 - Bookmarks and loops: `BookmarkService` owns durable bookmarks and A/B presets; `PlaybackService` owns active A/B transport state and clears it at a new-track boundary.
 - Backend: `MpvBackend` starts one external `mpv.exe` child over one fresh Windows named pipe and keeps JSON protocol/process details behind the backend boundary. Discovery is `SPOTDIY_MPV_PATH`, then PATH.
+- Windows integration: `WindowsIntegrationService` owns native overlay lifecycle, tray actions, global shortcut registration/status, SMTC state, gaming click-through recovery, and output-profile application while keeping the frontend on typed DTOs.
 - Tauri playback surface: `get_playback_snapshot`, `play_track`, `enqueue_track`, `play_track_next`, `toggle_play_pause`, `seek_playback`, `next_track`, `previous_track`, `set_playback_volume`, `set_playback_muted`, `set_repeat_mode`, `set_shuffle_enabled`, `get_audio_devices`, `set_audio_device`, `switch_playback_source`, `retry_playback_backend`, `clear_playback_queue`, playlist playback/queue commands, queue workspace mutations, and queue snapshot commands; state events use `playback://state` and `queue://state`.
 - Downloads: `DownloadService` owns schema-v4 task persistence, yt-dlp/FFmpeg execution, bounded progress, scheduling, cancellation, retry, restart recovery, destination-side finalization, and `downloads://state` snapshots. Tasks support YouTube and SoundCloud only; Spotify and Local are rejected.
 - Tauri download surface: `get_download_snapshot`, `queue_search_result_download`, `queue_source_download`, `cancel_download`, `retry_download`, `set_download_concurrency`, and `open_download_location`.
@@ -48,6 +50,8 @@ State date: 2026-09-02
 - Keep player modes as presentation-only Zustand state. Standard, Mini, and Expanded surfaces consume the same `usePlayback()` snapshot; `SourceSwitcher` delegates source changes to `PlaybackService`.
 - Derive search and track actions from provider capabilities and runtime availability. Online playback remains disabled, Spotify remains metadata-only, and local reveal remains source-ID based.
 - Keep provider playback/search, lyrics, overlays, media keys/SMTC, portable mode, analytics, EQ, normalization, crossfade, ReplayGain, and unrelated refactors outside the Plan 08 boundary.
+- Keep Plan 12 Windows integration optional and recoverable: unsupported SMTC and failed shortcut registrations are explicit status values, overlay windows are created lazily, and gaming click-through is session-only with a rescue shortcut.
+- Persist only ordinary Windows settings, shortcut bindings, and output profiles in schema 8; do not persist overlay visibility, click-through state, tray state, SMTC runtime handles, native window handles, or media paths.
 
 ## Plan 04 verification snapshot
 
@@ -210,8 +214,8 @@ repository-local `src-tauri\target` remains absent.
 ## Next slice after Plan 10
 
 Plan 11 main-player refinement and Track Inspector work are complete. Plan 12
-overlay and Windows integration work remains unstarted. Waveform generation is
-not claimed by Plan 09, Plan 10, or Plan 11.
+overlay and Windows integration work is now complete. Waveform generation is
+not claimed by Plan 09, Plan 10, Plan 11, or Plan 12.
 
 ## Plan 11 delivery snapshot
 
@@ -241,3 +245,33 @@ Graphify's final code-only refresh reports 4,131 nodes, 8,235 edges, and 247
 communities. CodeGraph was refreshed once for the shell/player/inspector
 dependency query. Build output remains external at `C:\CargoTarget\SpotDIY`;
 repository-local `src-tauri\target` remains absent.
+
+## Plan 12 delivery snapshot
+
+Plan 12 is complete through implementation commits `95eb41b`, `b7daac6`,
+`d9b58c3`, `e4793b6`, and `3d39e1d`. Migration 8 expands the typed ordinary
+settings allowlist for Windows integration, nine shortcut bindings, and output
+profiles while preserving all schema-7 settings rows and advancing the latest
+schema to 8.
+
+The native boundary adds lazy Mini, Edge, Lyrics, and Gaming overlay windows
+with exact labels/dimensions and always-on-top state, a tray menu, truthful
+global shortcut registration/conflict/failure statuses, Windows SMTC media
+commands and metadata projection, session-only Gaming click-through with a
+rescue path, and bounded output-device/profile apply with rollback. The SMTC
+WinRT bridge is isolated in `src-tauri/crates/spotdiy-windows-smtc`; the
+frontend uses typed IPC, browser-preview adapters, Settings controls, and
+command-palette actions without native-only leakage.
+
+Final evidence: 365 Rust unit tests plus one passing real-mpv integration test,
+78 Vitest tests, 69 Playwright tests across 1280/1920/2560, typecheck, lint,
+production build, Rust fmt, strict all-features Clippy, schema 7-to-8 migration
+coverage, Tauri release packaging, regular playback and Plan 11 packaged
+smokes, and the dedicated Plan 12 packaged smoke. The live packaged check
+reported `SMTC READY`, a registered controlled shortcut, overlay reuse and
+topmost state, click-through recovery, output-profile apply/restore, restart
+persistence, and zero owned mpv processes. Lint/build retain only documented
+non-fatal warnings. CodeGraph reports 166 files, 5,349 nodes, and 19,394
+edges; Graphify reports 4,467 nodes, 8,952 edges, and 262 communities. Build
+output remains external at `C:\CargoTarget\SpotDIY`; repository-local
+`src-tauri\target` remains absent.

@@ -372,3 +372,41 @@ below.
   refreshed once for the shell/player/inspector dependency query. No live
   provider/LRCLIB/download smoke was required. Repository-local
   `src-tauri\target` remains absent.
+
+## 2026-09-02 - Plan 12 final verification
+
+- `pnpm typecheck` - passed. `pnpm lint` - passed with the same three
+  pre-existing Fast Refresh warnings in `SpotIcon.tsx` and
+  `theme-controller.tsx`. `pnpm test` - passed: 78 tests across 21 files.
+- `pnpm exec playwright test` - passed: 69 tests across the 1280, 1920, and
+  2560 viewport projects. Plan 12's focused contract also passed all six
+  cases, covering browser-preview settings/overlay state and native-only
+  command-palette gating.
+- `pnpm build` - passed. Non-fatal notices remain for stale Browserslist data,
+  empty Tailwind content configuration, an ineffective dynamic import, and a
+  frontend chunk over 500 kB.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` and
+  `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+  --all-features -- -D warnings` - passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` - passed:
+  365 unit tests and one real-mpv synthetic WAV integration test. The named
+  `schema_seven_settings_rows_are_copied_unchanged_by_schema_eight` migration
+  test also passed independently.
+- `pnpm tauri build` - passed. Release executable and NSIS bundle are under
+  external `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is
+  absent.
+- Regular `scripts/packaged-playback-smoke.ps1` - passed for playback,
+  restart/no-autoplay, graceful shutdown, and owned-mpv cleanup. Packaged Plan
+  11 smoke - passed for schema-6-to-7 migration, appearance, shell, inspector,
+  queue, and restart persistence.
+- Dedicated `scripts/packaged-windows-integration-smoke.ps1` - passed. The live
+  Windows run reported `SMTC READY`, registered the controlled shortcut,
+  verified tray state, overlay reuse/topmost, Gaming click-through recovery,
+  output-profile apply/restore without playback-context mutation, schema 8,
+  restart persistence, and zero owned mpv processes. The independent SMTC
+  restart check also reported `SMTC READY after restart`.
+- `git diff --check` - passed before documentation closure. CodeGraph is
+  current at 166 files, 5,349 nodes, and 19,394 edges; Graphify is current at
+  4,467 nodes, 8,952 edges, and 262 communities. No runtime database, media,
+  credentials, tokens, raw provider payloads, or generated test artifacts are
+  retained in the repository.

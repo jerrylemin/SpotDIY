@@ -16,6 +16,7 @@ Rust services -- SQLite WAL / local filesystem / managed tools / providers
         +-- PlaybackService (serialized controller / persistent queue + snapshots)
                 |
                 +-- PlaybackBackend -> MpvBackend -> Windows named pipe -> one mpv.exe
+        +-- WindowsIntegrationService (overlays / tray / shortcuts / SMTC / output)
         +-- DownloadService (persistent task scheduler / owned children)
                 |
                 +-- TokioYtDlpProcessRunner -> yt-dlp -> task temp -> safe finalization
@@ -323,4 +324,31 @@ separate ephemeral inspector and cannot persist, fuse, or play online.
 capabilities. Search, library, playlist, and download surfaces reuse it or
 existing service hooks; disabled actions keep their reason visible. YouTube
 and SoundCloud downloads remain native/capability-gated, Spotify remains
-metadata-only, and no provider or backend behavior was added in Plan 11.
+metadata-only, and Plan 11 did not add provider or backend behavior. Plan 12
+adds the separate Windows integration boundary described below.
+
+## Plan 12 Windows integration boundary
+
+`WindowsIntegrationService` is the native owner for optional desktop surfaces
+and system controls. It lazily creates exactly four labeled Tauri webview
+windows (`overlay-mini`, `overlay-edge`, `overlay-lyrics`, and
+`overlay-gaming`) with exact dimensions, safe positioning, and always-on-top
+configuration. Reopening an active overlay reuses the existing window. The
+overlay capability grants only the event listen/unlisten and window close,
+always-on-top permissions needed by those surfaces; the main capability grants
+only the additional focus/show permissions needed by the tray and palette path.
+
+The same service owns the tray menu, nine typed global shortcut bindings, and
+per-binding registered/conflict/invalid/failed status. The master shortcut
+switch is disabled by default; failed registrations do not become claimed
+actions. Gaming click-through is session-only and can be recovered with the
+reserved `Ctrl+Alt+Shift+G` rescue binding.
+
+SMTC is enabled by default but reports `ready`, `disabled`, `unsupported`, or
+`failed` with detail. The WinRT bridge is isolated in the Windows-only
+`spotdiy-windows-smtc` helper crate; playback snapshots project only bounded
+metadata and typed transport commands. Output profiles are ordinary schema-8
+settings and apply through `PlaybackService` without changing track, queue,
+position, or playback phase; device/volume/mute failures roll back and report
+the recovery result. Overlay visibility, native handles, tray state, SMTC
+runtime objects, and click-through state are never persisted.

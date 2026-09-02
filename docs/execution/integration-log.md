@@ -210,3 +210,28 @@
 - Final Graphify code-only output is 4,131 nodes, 8,235 edges, and 247
   communities. CodeGraph was refreshed once for the shell/player/inspector
   dependency query; derived graph files remain ignored.
+
+## 2026-09-02 - Plan 12 Windows overlays and system integration
+
+- Integrated schema 8 ordinary settings for Windows integration, nine global
+  shortcut bindings, and normalized output profiles. Migration 8 rebuilds only
+  `settings_metadata`, copies schema-7 rows unchanged, and preserves the
+  foreign-key boundary.
+- Integrated `WindowsIntegrationService` with lazy Mini, Edge, Lyrics, and
+  Gaming overlay windows, exact native labels/dimensions, always-on-top state,
+  safe edge placement, tray actions, per-binding shortcut status, and typed
+  browser/native IPC. The overlay capability remains narrow.
+- Integrated Windows SMTC through the isolated
+  `spotdiy-windows-smtc` WinRT helper, with bounded metadata projection and
+  typed transport commands. Added session-only Gaming click-through with the
+  `Ctrl+Alt+Shift+G` rescue path and truthful failure states.
+- Integrated serialized output-device/profile apply and rollback through
+  `PlaybackService`; profile changes preserve track, queue, position, and phase.
+  Added Settings and command-palette controls plus four native overlay React
+  surfaces; browser preview remains native-free.
+- Added regular, Plan 11, and dedicated Plan 12 packaged smoke coverage. The
+  Plan 12 live run reported `SMTC READY`, a registered controlled shortcut,
+  overlay reuse/topmost, click-through recovery, output-profile apply/restore,
+  schema-8 restart persistence, and zero owned mpv processes.
+- Implementation commits are `95eb41b`, `b7daac6`, `d9b58c3`, `e4793b6`, and
+  `3d39e1d`; documentation closure follows this verified integration.

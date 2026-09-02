@@ -11,21 +11,22 @@ src/                         React/TanStack frontend
     search/                  Search controls, provider sections, result cards
     downloads/               Persistent task rows, progress, provenance, and actions
     lyrics/                  Synchronized lyrics, source precedence, and manual actions
-  hooks/                     TanStack Query, lyrics, and playback hooks
+  hooks/                     TanStack Query, lyrics, playback, and Windows hooks
     useLibrary.ts            Library status/page mutations and scan progress
     usePlayback.ts           Playback snapshot and transport mutations
     useSearch.ts             Debounced provider search lifecycle and stale-ID handling
     useDownloads.ts          Persistent download snapshots, events, and task mutations
     useQueue.ts              Queue workspace/event bridge and native queue mutations
     useLyrics.ts             Local-first lyrics queries, edits, provider actions, and sync state
-    useTrackInspector.ts     Read-only persisted Track Inspector query
+  useTrackInspector.ts     Read-only persisted Track Inspector query
+  useWindowsIntegration.ts Windows settings, native status, overlays, and profiles
   pages/                     Route-level screens
   services/                  Typed native IPC boundary
   stores/                    Zustand interaction state
-  styles/                    SpotDIY visual system
+  styles/                    SpotDIY visual system and native-overlay presentation
   types/                     Shared frontend domain vocabulary
 src-tauri/                   Tauri 2 Rust application
-  migrations/                Ordered SQLite schema migrations (through 0007)
+  migrations/                Ordered SQLite schema migrations (through 0008)
   src/domain/                Typed unified music domain model
   src/db/                    SQLite initialization and focused repositories
   src/fusion/                Deterministic normalization, matching, and overrides
@@ -37,12 +38,14 @@ src-tauri/                   Tauri 2 Rust application
   src/lyrics/                 Local-first lyrics service, parser, metadata, and LRCLIB boundary
   src/playlists/              Durable playlists, Inbox, branches, likes, ratings, tags, and collection state
   src/queue/                  Typed persistent queue model, repository, sections, and snapshots
-  src/playback/              Typed playback contracts, JSON IPC, mpv backend, queue, and controller
+  src/playback/              Typed playback contracts, JSON IPC, mpv backend, queue, controller, and output profiles
+  src/windows/               Native overlays, tray, shortcuts, SMTC, and click-through recovery
+  crates/spotdiy-windows-smtc/ Isolated Windows SMTC WinRT bridge
   src/search/                Concurrent provider search, cache, cancellation, and timeouts
   src/sources/               Local, YouTube, SoundCloud, Spotify adapters, and SourceResolver
   src/credentials/           Keyring-backed and memory-only credential seam
   src/settings/              Typed durable settings repository
-  capabilities/              Narrow dialog/opener permissions for the desktop window
+  capabilities/              Narrow desktop and overlay window permissions
   icons/                     Generated Windows/app icon assets
 tests/                       Frontend behavior and browser tests
 docs/superpowers/specs/      Approved design specification
@@ -118,3 +121,25 @@ capability/runtime policy used by search cards and shell menus. The packaged
 Plan 11 smoke covers migration 7, appearance persistence, live Home, inspector
 privacy, player modes, queue/Lyrics/palette navigation, restart persistence,
 and no-autoplay behavior.
+
+## Plan 12 Windows structure
+
+The native Windows boundary is organized as follows:
+
+```text
+src-tauri/src/windows/mod.rs
+        +--> overlays.rs       lazy native overlay windows and click-through
+        +--> shortcuts.rs      global shortcut registry and status reporting
+        +--> tray.rs            tray menu/action dispatch
+        `--> smtc.rs            typed media controls and isolated WinRT bridge
+
+src-tauri/src/playback/output.rs --> output-device/profile validation and apply
+src/components/overlay/*          --> native-window React surfaces
+src/components/settings/*         --> Windows Integration settings controls
+src/hooks/useWindowsIntegration.ts + overlay-store.ts --> typed UI state
+```
+
+`WindowsIntegrationService` is the single native owner. Overlay visibility and
+Gaming click-through are session state; settings, bindings, and output profiles
+are durable ordinary records. The frontend receives only validated snapshots,
+status details, typed overlay kinds, and profile values.

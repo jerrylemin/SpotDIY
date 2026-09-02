@@ -163,3 +163,26 @@ external-target Tauri release build. The explicit real-mpv smoke, packaged
 Plan 09 persistence smoke, and new packaged Plan 11 migration/shell/restart
 smoke all pass with clean owned-process shutdown. Live provider, LRCLIB, and
 download smoke remain optional and were not run.
+
+## Plan 12 verification
+
+Plan 12 passes 365 Rust unit tests plus one real-mpv integration test, 78
+Vitest tests across 21 files, and 69 Playwright tests across the 1280, 1920,
+and 2560 viewport projects. Frontend typecheck/lint/build, Rust fmt, strict
+all-features Clippy, `git diff --check`, the external-target Tauri release
+build, and the named schema 7-to-8 migration test all pass.
+
+Focused native coverage includes schema-8 settings-row preservation, strict
+shortcut syntax and duplicate identity, frozen overlay labels/dimensions and
+edge placement, tray action mapping, typed SMTC command mapping, output-profile
+validation and rollback, and truthful click-through errors. Frontend coverage
+includes browser-preview isolation, settings controls, overlay state, output
+profile editing, shortcut reset, and native-only command-palette gating.
+
+The regular packaged playback smoke, packaged Plan 11 migration/shell/restart
+smoke, and dedicated Plan 12 Windows smoke all pass with clean shutdown. Plan
+12's live run reports `SMTC READY`, a registered controlled shortcut, overlay
+reuse and topmost state, click-through recovery, output-profile apply/restore
+without playback-context mutation, schema version 8, and zero owned mpv
+processes. Browser preview remains native-free; live provider, LRCLIB, and
+download smoke remain optional.
