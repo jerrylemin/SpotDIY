@@ -244,3 +244,5 @@
   directory, media, credentials, tokens, or repository-local
   `src-tauri\target` is retained. `memory.zip` remains an untracked user file
   and was not touched.
+- `codegraph sync .` and `codegraph status .` - passed; the current index is
+  up to date at 176 files, 5,781 nodes, and 21,456 edges.

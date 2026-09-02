@@ -300,8 +300,9 @@ Clippy/all-target tests, Tauri release/NSIS packaging, regular/Plan 11/Plan 12
 packaged smokes, and the new isolated Plan 13 packaged Standard/Portable
 restart smoke. Lint retains three pre-existing Fast Refresh warnings; build
 retains the existing Browserslist, Tailwind content, ineffective dynamic
-import, and large-chunk notices. Graphify's final code-only refresh reports
-4,723 nodes, 9,470 edges, and 277 communities. Build output remains external
+import, and large-chunk notices. CodeGraph is current at 176 files, 5,781
+nodes, and 21,456 edges; Graphify's final code-only refresh reports 4,723
+nodes, 9,470 edges, and 277 communities. Build output remains external
 at `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` remains
 absent. The requested Gmail completion message `Plan 13 finished` was sent to
 `jerryle.minh.3@gmail.com`.

@@ -256,8 +256,9 @@ restart selection, exact portable directories, and retained databases.
 Verified evidence: 393 Rust unit tests plus real-mpv integration, 81 Vitest
 tests across 22 files, 69 Playwright tests, frontend/native quality gates,
 Tauri release/NSIS packaging, regular/Plan 11/Plan 12 packaged smokes, and the
-Plan 13 packaged storage smoke. Graphify reports 4,723 nodes, 9,470 edges,
-and 277 communities. Build output is external at
+Plan 13 packaged storage smoke. CodeGraph reports 176 files, 5,781 nodes, and
+21,456 edges; Graphify reports 4,723 nodes, 9,470 edges, and 277 communities.
+Build output is external at
 `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
 The requested Gmail completion message `Plan 13 finished` was sent to
 `jerryle.minh.3@gmail.com`.

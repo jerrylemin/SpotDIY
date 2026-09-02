@@ -262,3 +262,6 @@
 - Implementation commits are `7579312`, `d287f65`, `6c2b026`, `bdf04f0`, and
   `5e70fdf`;
   Plan 12 shortcut repair is `3ca57a4`.
+- `codegraph sync .` reported the index already current at 176 files, 5,781
+  nodes, and 21,456 edges; `graphify update .` reports 4,723 nodes, 9,470
+  edges, and 277 communities.

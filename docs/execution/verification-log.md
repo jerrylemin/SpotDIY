@@ -444,3 +444,5 @@ below.
   9,470 edges, and 277 communities. `git diff --check` - passed before
   documentation closure. `memory.zip` remains untracked and was not touched;
   no runtime data or secrets are retained in the repository.
+- `codegraph sync .` and `codegraph status .` - passed; the index is up to date
+  at 176 files, 5,781 nodes, and 21,456 edges.
