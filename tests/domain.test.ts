@@ -8,8 +8,13 @@ import {
   IpcError,
   getAppStatus,
   getSettingsSnapshot,
+  getWindowsIntegrationSnapshot,
+  parseWindowsIntegrationSnapshot,
+  resetGlobalShortcuts,
   providerLabel,
   setSetting,
+  toggleOverlay,
+  updateGlobalShortcut,
 } from "../src/services/ipc";
 
 describe("provider labels", () => {
@@ -31,6 +36,19 @@ describe("settings IPC contract", () => {
       sourcePreferenceOrder: ["local", "soundcloud", "youtube", "spotify"],
       firstRun: true,
       storageMode: "standard",
+      windowsIntegration: { smtcEnabled: true, globalShortcutsEnabled: false },
+      globalShortcuts: [
+        { action: "playPause", accelerator: "Ctrl+Alt+Space", enabled: true },
+        { action: "next", accelerator: "Ctrl+Alt+Right", enabled: true },
+        { action: "previous", accelerator: "Ctrl+Alt+Left", enabled: true },
+        { action: "volumeUp", accelerator: "Ctrl+Alt+Up", enabled: true },
+        { action: "volumeDown", accelerator: "Ctrl+Alt+Down", enabled: true },
+        { action: "showHideMain", accelerator: "Ctrl+Alt+S", enabled: true },
+        { action: "toggleMiniOverlay", accelerator: "Ctrl+Alt+M", enabled: true },
+        { action: "toggleLyricsOverlay", accelerator: "Ctrl+Alt+L", enabled: true },
+        { action: "toggleGamingOverlay", accelerator: "Ctrl+Alt+G", enabled: true },
+      ],
+      outputProfiles: [],
     });
   });
 
@@ -40,6 +58,27 @@ describe("settings IPC contract", () => {
       layoutProfile: "dense",
     });
     await expect(setSetting({ key: "theme", value: "light" })).resolves.toMatchObject({ theme: "light" });
+  });
+
+  it("keeps Windows integration DTOs strict and browser overlay state typed", async () => {
+    const snapshot = await getWindowsIntegrationSnapshot();
+    expect(snapshot.platformSupported).toBe(false);
+    expect(snapshot.overlays).toEqual([
+      { kind: "mini", status: "closed", detail: null },
+      { kind: "edge", status: "closed", detail: null },
+      { kind: "lyrics", status: "closed", detail: null },
+      { kind: "gaming", status: "closed", detail: null },
+    ]);
+    const opened = await toggleOverlay("mini");
+    expect(opened.overlays.find((overlay) => overlay.kind === "mini")?.status).toBe("open");
+    expect(() => parseWindowsIntegrationSnapshot({ ...snapshot, unexpected: true })).toThrow();
+  });
+
+  it("resets browser-preview shortcut edits to the frozen defaults", async () => {
+    await updateGlobalShortcut({ action: "playPause", accelerator: "Ctrl+Shift+P", enabled: true });
+    expect((await getWindowsIntegrationSnapshot()).shortcutStatuses.find((item) => item.action === "playPause")?.accelerator).toBe("Ctrl+Shift+P");
+    const reset = await resetGlobalShortcuts();
+    expect(reset.shortcutStatuses.find((item) => item.action === "playPause")?.accelerator).toBe("Ctrl+Alt+Space");
   });
 
   it("wraps malformed native status responses", async () => {

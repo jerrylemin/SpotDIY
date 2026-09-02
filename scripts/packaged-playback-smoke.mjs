@@ -9,7 +9,7 @@ const fixtureFolder = process.env.SPOTDIY_PACKAGED_FIXTURE;
 if (!cdpUrl) {
   throw new Error("SPOTDIY_PACKAGED_CDP_URL is required");
 }
-if ((mode === "flow" || mode === "plan08" || mode === "plan09" || mode === "plan11") && !fixtureFolder) {
+if ((mode === "flow" || mode === "plan08" || mode === "plan09" || mode === "plan11" || mode === "plan12") && !fixtureFolder) {
   throw new Error("SPOTDIY_PACKAGED_FIXTURE is required for the playback flow");
 }
 
@@ -122,6 +122,188 @@ try {
       return snapshot.currentTrackId && snapshot.phase === "playing" && snapshot.queueLength === 2 && snapshot.currentQueueEntryId && snapshot.currentTrackId !== firstSnapshot.currentTrackId ? snapshot : false;
     });
     console.log("packaged playback flow passed");
+  } else if (mode === "plan12") {
+    const settings = await invoke("get_settings_snapshot");
+    if (
+      settings.windowsIntegration?.smtcEnabled !== true ||
+      settings.windowsIntegration?.globalShortcutsEnabled !== false ||
+      !Array.isArray(settings.globalShortcuts) ||
+      settings.globalShortcuts.length !== 9 ||
+      !Array.isArray(settings.outputProfiles) ||
+      settings.outputProfiles.length !== 0
+    ) {
+      throw new Error(`Plan 12 defaults were not loaded from schema 8: ${JSON.stringify(settings)}`);
+    }
+
+    let integration = await invoke("get_windows_integration_snapshot");
+    if (!integration.platformSupported || integration.trayStatus !== "ready") {
+      throw new Error(`the packaged Windows integration did not initialize its tray: ${JSON.stringify(integration)}`);
+    }
+    if (integration.globalShortcutsEnabled || integration.shortcutStatuses.length !== 9) {
+      throw new Error(`global shortcuts were not disabled by default: ${JSON.stringify(integration)}`);
+    }
+    if (integration.smtcStatus === "ready") {
+      console.log("SMTC READY");
+    } else if (["failed", "unsupported"].includes(integration.smtcStatus) && integration.smtcDetail) {
+      console.log(`SMTC UNAVAILABLE -- ${integration.smtcDetail}`);
+    } else {
+      throw new Error(`SMTC did not report ready or a truthful unavailable state: ${JSON.stringify(integration)}`);
+    }
+
+    for (const status of integration.shortcutStatuses) {
+      await invoke("update_global_shortcut", {
+        binding: {
+          action: status.action,
+          accelerator: status.accelerator,
+          enabled: false,
+        },
+      });
+    }
+    await invoke("update_global_shortcut", {
+      binding: {
+        action: "toggleMiniOverlay",
+        accelerator: "Ctrl+Alt+Shift+F12",
+        enabled: true,
+      },
+    });
+    integration = await invoke("set_global_shortcuts_enabled", { enabled: true });
+    const testShortcut = integration.shortcutStatuses.find((status) => status.action === "toggleMiniOverlay");
+    if (!testShortcut || !["registered", "conflict", "failed"].includes(testShortcut.status)) {
+      throw new Error(`the controlled shortcut did not produce a native registration status: ${JSON.stringify(integration)}`);
+    }
+    console.log(`global shortcut status: ${testShortcut.status}`);
+
+    await invoke("add_library_folders", { paths: [fixtureFolder] });
+    await waitFor("the Plan 12 synthetic folder scan", async () => {
+      const status = await invoke("get_library_status");
+      return status.folders?.length === 1 && status.indexedTrackCount >= 2 && !status.isScanning ? status : false;
+    });
+    const libraryPage = await invoke("get_library_page", {
+      request: { page: 0, pageSize: 1, sort: "title", descending: false, folderId: null },
+    });
+    const firstTrack = libraryPage.items?.[0];
+    if (!firstTrack?.trackId || !firstTrack.sourceId) {
+      throw new Error(`the Plan 12 fixture did not expose a playable track: ${JSON.stringify(libraryPage)}`);
+    }
+    await invoke("play_track", { trackId: firstTrack.trackId, sourceId: firstTrack.sourceId });
+    await waitFor("the Plan 12 synthetic track to play", async () => {
+      const snapshot = await invoke("get_playback_snapshot");
+      return snapshot.phase === "playing" ? snapshot : false;
+    });
+    await invoke("toggle_play_pause");
+    await waitFor("the Plan 12 synthetic track to pause", async () => (await invoke("get_playback_snapshot")).phase === "paused");
+
+    async function findOverlayPage(kind) {
+      const pages = browser.contexts().flatMap((context) => context.pages());
+      for (const candidate of pages) {
+        if (await candidate.locator(`[data-overlay-kind="${kind}"]`).count()) {
+          return candidate;
+        }
+      }
+      return null;
+    }
+
+    async function waitForOverlay(kind, expectedLabel) {
+      return waitFor(`${kind} overlay window`, async () => {
+        const overlayPage = await findOverlayPage(kind);
+        if (!overlayPage) {
+          return false;
+        }
+        const facts = await overlayPage.evaluate(async () => {
+          const label = window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? null;
+          const alwaysOnTop = await window.__TAURI_INTERNALS__?.invoke("plugin:window|is_always_on_top", { label });
+          return { label, alwaysOnTop };
+        });
+        if (facts.label !== expectedLabel || facts.alwaysOnTop !== true) {
+          throw new Error(`overlay window facts were not applied: ${JSON.stringify(facts)}`);
+        }
+        return { page: overlayPage, facts };
+      });
+    }
+
+    async function openAndCheckOverlay(kind, expectedLabel) {
+      integration = await invoke("open_overlay", { kind });
+      const state = integration.overlays.find((overlay) => overlay.kind === kind);
+      if (state?.status !== "open") {
+        throw new Error(`the ${kind} overlay did not report open: ${JSON.stringify(integration)}`);
+      }
+      const first = await waitForOverlay(kind, expectedLabel);
+      const duplicate = await invoke("open_overlay", { kind });
+      const duplicateState = duplicate.overlays.find((overlay) => overlay.kind === kind);
+      if (duplicateState?.status !== "open" || (await findOverlayPage(kind)) !== first.page) {
+        throw new Error(`opening ${kind} twice did not reuse its native window`);
+      }
+      return first.page;
+    }
+
+    const miniPage = await openAndCheckOverlay("mini", "overlay-mini");
+    await invoke("close_overlay", { kind: "mini" });
+    await waitFor("Mini overlay close", async () => (await findOverlayPage("mini")) === null);
+    await openAndCheckOverlay("mini", "overlay-mini");
+    await invoke("close_overlay", { kind: "mini" });
+    await waitFor("Mini overlay reopen close", async () => (await findOverlayPage("mini")) === null);
+
+    await openAndCheckOverlay("edge", "overlay-edge");
+    await openAndCheckOverlay("lyrics", "overlay-lyrics");
+    const gamingPage = await openAndCheckOverlay("gaming", "overlay-gaming");
+    if (!miniPage || !gamingPage) {
+      throw new Error("the packaged overlay pages were not exposed to WebView2");
+    }
+
+    integration = await invoke("set_gaming_click_through", { enabled: true });
+    if (!integration.gamingClickThrough) {
+      throw new Error(`Gaming click-through did not enable after rescue registration: ${JSON.stringify(integration)}`);
+    }
+    integration = await invoke("set_gaming_click_through", { enabled: false });
+    if (integration.gamingClickThrough) {
+      throw new Error(`Gaming click-through did not disable through the native recovery path: ${JSON.stringify(integration)}`);
+    }
+
+    const beforePlayback = await invoke("get_playback_snapshot");
+    if (beforePlayback.phase !== "paused" || !beforePlayback.currentTrackId) {
+      throw new Error(`unexpected playback state before Plan 12 output validation: ${JSON.stringify(beforePlayback)}`);
+    }
+    const outputState = await invoke("create_output_profile", { name: "  Plan   12 Auto  " });
+    let profile = outputState.outputProfiles.find((candidate) => candidate.name === "Plan 12 Auto");
+    if (!profile) {
+      throw new Error(`the Plan 12 output profile was not persisted: ${JSON.stringify(outputState)}`);
+    }
+    if (profile.audioDeviceName.toLowerCase() !== "auto") {
+      profile = { ...profile, audioDeviceName: "auto" };
+      const normalized = await invoke("update_output_profile", { profile });
+      profile = normalized.outputProfiles.find((candidate) => candidate.id === profile.id) ?? profile;
+    }
+    const targetVolume = beforePlayback.volumePercent === 0 ? 1 : beforePlayback.volumePercent - 1;
+    const targetProfile = { ...profile, volumePercent: targetVolume, muted: !beforePlayback.muted };
+    const updated = await invoke("update_output_profile", { profile: targetProfile });
+    const savedProfile = updated.outputProfiles.find((candidate) => candidate.id === profile.id);
+    if (!savedProfile || savedProfile.audioDeviceName !== "auto" || savedProfile.volumePercent !== targetVolume || savedProfile.muted !== !beforePlayback.muted) {
+      throw new Error(`the Plan 12 output profile edit was not persisted: ${JSON.stringify(updated)}`);
+    }
+    const applied = await invoke("apply_output_profile", { id: profile.id });
+    if (applied.selectedAudioDevice !== "auto" || applied.volumePercent !== targetVolume || applied.muted !== !beforePlayback.muted || applied.currentTrackId !== beforePlayback.currentTrackId || applied.queueLength !== beforePlayback.queueLength) {
+      throw new Error(`the Plan 12 output profile apply changed unexpected playback state: ${JSON.stringify({ beforePlayback, applied })}`);
+    }
+    const restoredProfile = {
+      ...savedProfile,
+      audioDeviceName: beforePlayback.selectedAudioDevice,
+      volumePercent: beforePlayback.volumePercent,
+      muted: beforePlayback.muted,
+    };
+    await invoke("update_output_profile", { profile: restoredProfile });
+    const restored = await invoke("apply_output_profile", { id: profile.id });
+    if (restored.selectedAudioDevice !== beforePlayback.selectedAudioDevice || restored.volumePercent !== beforePlayback.volumePercent || restored.muted !== beforePlayback.muted || restored.currentTrackId !== beforePlayback.currentTrackId || restored.queueLength !== beforePlayback.queueLength) {
+      throw new Error(`the Plan 12 output profile restore did not recover the prior output state: ${JSON.stringify({ beforePlayback, restored })}`);
+    }
+
+    for (const kind of ["edge", "lyrics", "gaming"]) {
+      await invoke("close_overlay", { kind });
+    }
+    integration = await invoke("get_windows_integration_snapshot");
+    if (integration.overlays.some((overlay) => overlay.status !== "closed") || integration.gamingClickThrough) {
+      throw new Error(`overlays were not fully closed before restart: ${JSON.stringify(integration)}`);
+    }
+    console.log("packaged Plan 12 native integration flow passed");
   } else if (mode === "plan11") {
     const legacySettings = await invoke("get_settings_snapshot");
     if (legacySettings.theme !== "light" || legacySettings.firstRun !== false || legacySettings.storageMode !== "standard" || legacySettings.layoutProfile !== "comfortable") {
@@ -353,6 +535,29 @@ try {
       throw new Error(`the Plan 09 queue state was not retained before restart: ${JSON.stringify({ snapshot: { currentTrackId: snapshot.currentTrackId, queueLength: snapshot.queueLength, positionMs: snapshot.positionMs }, currentQueueTrackId: queue.current?.trackId, laterCount: queue.later?.length })}`);
     }
     console.log("packaged Plan 09 lyrics, bookmark, A/B loop, preset, and queue flow passed");
+  } else if (mode === "plan12-restart") {
+    const settings = await invoke("get_settings_snapshot");
+    if (settings.windowsIntegration?.smtcEnabled !== true || settings.windowsIntegration?.globalShortcutsEnabled !== true) {
+      throw new Error(`Plan 12 Windows settings did not persist across restart: ${JSON.stringify(settings)}`);
+    }
+    const integration = await invoke("get_windows_integration_snapshot");
+    const profile = integration.outputProfiles.find((candidate) => candidate.name === "Plan 12 Auto");
+    const shortcut = integration.shortcutStatuses.find((status) => status.action === "toggleMiniOverlay");
+    if (!profile || profile.audioDeviceName !== "auto" || !shortcut || shortcut.accelerator !== "Ctrl+Alt+Shift+F12") {
+      throw new Error(`Plan 12 output profile or controlled shortcut did not persist across restart: ${JSON.stringify(integration)}`);
+    }
+    if (integration.overlays.some((overlay) => overlay.status !== "closed") || integration.gamingClickThrough) {
+      throw new Error(`Plan 12 session-only overlay state persisted across restart: ${JSON.stringify(integration)}`);
+    }
+    if (integration.smtcStatus === "ready") {
+      console.log("SMTC READY after restart");
+    } else if (["failed", "unsupported"].includes(integration.smtcStatus) && integration.smtcDetail) {
+      console.log(`SMTC UNAVAILABLE after restart — ${integration.smtcDetail}`);
+    } else {
+      throw new Error(`SMTC restart state was not truthful: ${JSON.stringify(integration)}`);
+    }
+    await invoke("delete_output_profile", { id: profile.id });
+    console.log("packaged Plan 12 restart persistence and session-state boundary passed");
   } else if (mode === "restart") {
     const status = await invoke("get_library_status");
     if (status.folders?.length !== 1 || status.indexedTrackCount < 2) {

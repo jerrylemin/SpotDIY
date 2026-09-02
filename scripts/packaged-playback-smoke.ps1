@@ -3,7 +3,8 @@ param(
     [int]$TimeoutSeconds = 45,
     [switch]$Plan08Persistence,
     [switch]$Plan09Lyrics,
-    [switch]$Plan11Shell
+    [switch]$Plan11Shell,
+    [switch]$Plan12Windows
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,14 +14,14 @@ if ($env:SPOTDIY_PACKAGED_SMOKE -ne "1") {
     exit 0
 }
 
-if (($Plan08Persistence -and $Plan09Lyrics) -or ($Plan08Persistence -and $Plan11Shell) -or ($Plan09Lyrics -and $Plan11Shell)) {
+if (@($Plan08Persistence, $Plan09Lyrics, $Plan11Shell, $Plan12Windows).Where({ $_ }).Count -gt 1) {
     throw "choose one packaged smoke mode"
 }
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
-$smokeLabel = if ($Plan11Shell) { "Plan11" } elseif ($Plan09Lyrics) { "Plan09" } elseif ($Plan08Persistence) { "Plan08" } else { "Plan04" }
-$flowMode = if ($Plan11Shell) { "plan11" } elseif ($Plan09Lyrics) { "plan09" } elseif ($Plan08Persistence) { "plan08" } else { "flow" }
-$restartMode = if ($Plan11Shell) { "plan11-restart" } elseif ($Plan09Lyrics) { "plan09-restart" } elseif ($Plan08Persistence) { "plan08-restart" } else { "restart" }
+$smokeLabel = if ($Plan12Windows) { "Plan12" } elseif ($Plan11Shell) { "Plan11" } elseif ($Plan09Lyrics) { "Plan09" } elseif ($Plan08Persistence) { "Plan08" } else { "Plan04" }
+$flowMode = if ($Plan12Windows) { "plan12" } elseif ($Plan11Shell) { "plan11" } elseif ($Plan09Lyrics) { "plan09" } elseif ($Plan08Persistence) { "plan08" } else { "flow" }
+$restartMode = if ($Plan12Windows) { "plan12-restart" } elseif ($Plan11Shell) { "plan11-restart" } elseif ($Plan09Lyrics) { "plan09-restart" } elseif ($Plan08Persistence) { "plan08-restart" } else { "restart" }
 $targetRoot = $env:CARGO_TARGET_DIR
 if ([string]::IsNullOrWhiteSpace($targetRoot)) {
     throw "CARGO_TARGET_DIR must point outside the repository before packaged verification"
@@ -156,6 +157,25 @@ PRAGMA user_version = 6;
     }
 }
 
+function Assert-Schema8Database {
+    $sqliteCommand = Get-Command sqlite3.exe -ErrorAction SilentlyContinue
+    if ($null -eq $sqliteCommand) {
+        $sqliteCommand = Get-Command sqlite3 -ErrorAction SilentlyContinue
+    }
+    if ($null -eq $sqliteCommand) {
+        throw "sqlite3 is required to verify the packaged Plan 12 schema-8 database"
+    }
+
+    $databasePath = Join-Path $profileRoot "SpotDIY\spotdiy.sqlite3"
+    if (-not (Test-Path -LiteralPath $databasePath -PathType Leaf)) {
+        throw "the packaged Plan 12 database was not created: $databasePath"
+    }
+    $schemaVersion = (& $sqliteCommand.Source $databasePath "PRAGMA user_version;" 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $schemaVersion -ne "8") {
+        throw "the packaged database schema is not version 8: $schemaVersion"
+    }
+}
+
 function Start-PackagedApp([int]$debugPort) {
     $stdoutLog = Join-Path $profileRoot ("spotdiy-$debugPort.stdout.log")
     $stderrLog = Join-Path $profileRoot ("spotdiy-$debugPort.stderr.log")
@@ -265,6 +285,9 @@ try {
     Close-PackagedApp "first packaged app" $firstApp
     Wait-ForProcessExit $firstApp ($TimeoutSeconds * 1000)
     Start-Sleep -Milliseconds 500
+    if ($Plan12Windows) {
+        Assert-Schema8Database
+    }
     $remaining = @(Get-MpvProcesses | Where-Object { $ownedMpvIds -contains [int]$_.ProcessId })
     if ($remaining.Count -ne 0) {
         throw "SpotDIY-owned mpv process remained after graceful shutdown: $($ownedMpvIds -join ', ')"
@@ -285,7 +308,9 @@ try {
 
     Close-PackagedApp "second packaged app" $secondApp
     Wait-ForProcessExit $secondApp ($TimeoutSeconds * 1000)
-    if ($Plan11Shell) {
+    if ($Plan12Windows) {
+        Write-Output "PASS: packaged Plan 12 schema 8, tray, SMTC status, shortcuts, overlays, click-through recovery, output profiles, restart persistence, and owned-process cleanup"
+    } elseif ($Plan11Shell) {
         Write-Output "PASS: packaged Plan 11 schema migration, appearance persistence, shell modes, inspector, queue, lyrics, restart, and owned-process persistence"
     } elseif ($Plan09Lyrics) {
         Write-Output "PASS: packaged Plan 09 lyrics, bookmarks, A/B loop, presets, queue, restart, and owned-process persistence"
