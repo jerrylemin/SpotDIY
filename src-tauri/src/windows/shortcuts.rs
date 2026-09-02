@@ -104,7 +104,7 @@ impl ShortcutController {
         app: &AppHandle,
         binding: &GlobalShortcutBinding,
         master_enabled: bool,
-    ) -> ShortcutStatus {
+    ) -> Result<ShortcutStatus, String> {
         let mut status = ShortcutStatus {
             action: binding.action,
             accelerator: binding.accelerator.clone(),
@@ -115,25 +115,37 @@ impl ShortcutController {
         if !master_enabled || !binding.enabled {
             if let Some(old) = self.registered.remove(&binding.action) {
                 self.actions_by_id.remove(&old.shortcut.id());
-                let _ = app.global_shortcut().unregister(old.shortcut);
+                if let Err(error) = app.global_shortcut().unregister(old.shortcut) {
+                    self.retain_registered(binding.action, old);
+                    status.status = ShortcutRegistrationStatus::Failed;
+                    status.detail =
+                        Some(format!("could not release the previous binding: {error}"));
+                    self.statuses.insert(binding.action, status.clone());
+                    return Err(status
+                        .detail
+                        .clone()
+                        .unwrap_or_else(|| "could not release the previous binding".to_owned()));
+                }
             }
             self.statuses.insert(binding.action, status.clone());
-            return status;
+            return Ok(status);
         }
         if !is_valid_accelerator(&binding.accelerator) {
             status.status = ShortcutRegistrationStatus::Invalid;
             status.detail =
                 Some("the accelerator must contain a valid key and modifier".to_owned());
             self.statuses.insert(binding.action, status.clone());
-            return status;
+            return Err(status
+                .detail
+                .clone()
+                .unwrap_or_else(|| "invalid accelerator".to_owned()));
         }
 
         let old = self.registered.remove(&binding.action);
         if let Some(old) = old.as_ref() {
             self.actions_by_id.remove(&old.shortcut.id());
             if let Err(error) = app.global_shortcut().unregister(old.shortcut) {
-                self.actions_by_id.insert(old.shortcut.id(), binding.action);
-                self.registered.insert(
+                self.retain_registered(
                     binding.action,
                     RegisteredShortcut {
                         shortcut: old.shortcut,
@@ -143,7 +155,10 @@ impl ShortcutController {
                 status.status = ShortcutRegistrationStatus::Failed;
                 status.detail = Some(format!("could not release the previous binding: {error}"));
                 self.statuses.insert(binding.action, status.clone());
-                return status;
+                return Err(status
+                    .detail
+                    .clone()
+                    .unwrap_or_else(|| "could not release the previous binding".to_owned()));
             }
         }
 
@@ -159,43 +174,151 @@ impl ShortcutController {
                         },
                     );
                     status.status = ShortcutRegistrationStatus::Registered;
+                    self.statuses.insert(binding.action, status.clone());
+                    Ok(status)
                 }
                 Err(error) => {
                     status.status = classify_registration_error(&error.to_string());
-                    status.detail = Some(error.to_string());
+                    let detail = error.to_string();
+                    status.detail = Some(detail.clone());
                     if let Some(old) = old {
                         match app.global_shortcut().register(old.shortcut) {
                             Ok(()) => {
                                 self.actions_by_id.insert(old.shortcut.id(), binding.action);
                                 self.registered.insert(binding.action, old);
-                                status.detail = Some(format!(
-                                    "{}; previous binding was restored",
-                                    status.detail.take().unwrap_or_default()
-                                ));
+                                status = ShortcutStatus {
+                                    action: binding.action,
+                                    accelerator: self
+                                        .registered
+                                        .get(&binding.action)
+                                        .map(|registered| registered.accelerator.clone())
+                                        .unwrap_or_else(|| binding.accelerator.clone()),
+                                    enabled: true,
+                                    status: ShortcutRegistrationStatus::Registered,
+                                    detail: Some(format!(
+                                        "{detail}; previous binding was restored"
+                                    )),
+                                };
                             }
                             Err(restore_error) => {
                                 status.detail = Some(format!(
-                                    "{}; previous binding could not be restored: {restore_error}",
-                                    status.detail.take().unwrap_or_default()
+                                    "{detail}; previous binding could not be restored: {restore_error}"
                                 ));
                             }
                         }
                     }
+                    let detail = status
+                        .detail
+                        .clone()
+                        .unwrap_or_else(|| "could not register the shortcut".to_owned());
+                    self.statuses.insert(binding.action, status);
+                    Err(detail)
                 }
             },
             Err(error) => {
                 status.status = ShortcutRegistrationStatus::Invalid;
-                status.detail = Some(error.to_string());
+                let detail = error.to_string();
+                status.detail = Some(detail.clone());
                 if let Some(old) = old {
-                    if app.global_shortcut().register(old.shortcut).is_ok() {
-                        self.actions_by_id.insert(old.shortcut.id(), binding.action);
-                        self.registered.insert(binding.action, old);
+                    match app.global_shortcut().register(old.shortcut) {
+                        Ok(()) => {
+                            self.actions_by_id.insert(old.shortcut.id(), binding.action);
+                            self.registered.insert(binding.action, old);
+                            status = ShortcutStatus {
+                                action: binding.action,
+                                accelerator: self
+                                    .registered
+                                    .get(&binding.action)
+                                    .map(|registered| registered.accelerator.clone())
+                                    .unwrap_or_else(|| binding.accelerator.clone()),
+                                enabled: true,
+                                status: ShortcutRegistrationStatus::Registered,
+                                detail: Some(format!("{detail}; previous binding was restored")),
+                            };
+                        }
+                        Err(restore_error) => {
+                            status.detail = Some(format!(
+                                "{detail}; previous binding could not be restored: {restore_error}"
+                            ));
+                        }
                     }
                 }
+                let detail = status
+                    .detail
+                    .clone()
+                    .unwrap_or_else(|| "invalid shortcut".to_owned());
+                self.statuses.insert(binding.action, status);
+                Err(detail)
             }
         }
-        self.statuses.insert(binding.action, status.clone());
-        status
+    }
+
+    pub fn restore_binding(
+        &mut self,
+        app: &AppHandle,
+        action: GlobalShortcutAction,
+        binding: Option<&GlobalShortcutBinding>,
+        master_enabled: bool,
+    ) -> Result<(), String> {
+        if let Some(current) = self.registered.remove(&action) {
+            self.actions_by_id.remove(&current.shortcut.id());
+            if let Err(error) = app.global_shortcut().unregister(current.shortcut) {
+                self.retain_registered(action, current);
+                return Err(format!(
+                    "could not release the replacement binding: {error}"
+                ));
+            }
+        }
+
+        let Some(binding) = binding else {
+            self.statuses.remove(&action);
+            return Ok(());
+        };
+        if !master_enabled || !binding.enabled {
+            self.statuses.insert(
+                action,
+                ShortcutStatus {
+                    action,
+                    accelerator: binding.accelerator.clone(),
+                    enabled: binding.enabled,
+                    status: ShortcutRegistrationStatus::Disabled,
+                    detail: None,
+                },
+            );
+            return Ok(());
+        }
+        if !is_valid_accelerator(&binding.accelerator) {
+            return Err("the persisted shortcut is no longer valid".to_owned());
+        }
+        let shortcut = Shortcut::from_str(&binding.accelerator)
+            .map_err(|error| format!("could not restore the previous binding: {error}"))?;
+        app.global_shortcut()
+            .register(shortcut)
+            .map_err(|error| format!("could not restore the previous binding: {error}"))?;
+        self.actions_by_id.insert(shortcut.id(), action);
+        self.registered.insert(
+            action,
+            RegisteredShortcut {
+                shortcut,
+                accelerator: binding.accelerator.clone(),
+            },
+        );
+        self.statuses.insert(
+            action,
+            ShortcutStatus {
+                action,
+                accelerator: binding.accelerator.clone(),
+                enabled: true,
+                status: ShortcutRegistrationStatus::Registered,
+                detail: None,
+            },
+        );
+        Ok(())
+    }
+
+    fn retain_registered(&mut self, action: GlobalShortcutAction, registered: RegisteredShortcut) {
+        self.actions_by_id.insert(registered.shortcut.id(), action);
+        self.registered.insert(action, registered);
     }
 
     pub fn action_for_id(&self, id: u32) -> Option<GlobalShortcutAction> {

@@ -422,7 +422,18 @@ impl WindowsIntegrationService {
         &self,
         binding: GlobalShortcutBinding,
     ) -> Result<WindowsIntegrationSnapshot, String> {
-        let mut bindings = self.state_lock().bindings.clone();
+        let (mut bindings, old_binding, master_enabled) = {
+            let state = self.state_lock();
+            (
+                state.bindings.clone(),
+                state
+                    .bindings
+                    .iter()
+                    .find(|item| item.action == binding.action)
+                    .cloned(),
+                state.settings.global_shortcuts_enabled,
+            )
+        };
         if let Some(existing) = bindings
             .iter_mut()
             .find(|item| item.action == binding.action)
@@ -432,17 +443,35 @@ impl WindowsIntegrationService {
             bindings.push(binding.clone());
         }
         validate_global_shortcuts(&bindings).map_err(|error| error.to_string())?;
-        let persisted = SettingsRepository::new(&self.inner.database)
-            .set_setting(SettingValue::GlobalShortcuts(bindings))
-            .map_err(|error| error.to_string())?;
-        {
+        let action = binding.action;
+        let app = self.inner.app.clone();
+        let native_transition = || {
             let mut state = self.state_lock();
-            state.bindings = persisted.global_shortcuts.clone();
-            let master_enabled = state.settings.global_shortcuts_enabled;
-            let _ = state
+            state
                 .shortcuts
-                .update_binding(&self.inner.app, &binding, master_enabled);
-        }
+                .update_binding(&app, &binding, master_enabled)
+                .map(|_| ())
+        };
+        let native_rollback = || {
+            let mut state = self.state_lock();
+            state
+                .shortcuts
+                .restore_binding(&app, action, old_binding.as_ref(), master_enabled)
+        };
+        let database = self.inner.database.clone();
+        let persisted = persist_shortcut_change(
+            master_enabled,
+            native_transition,
+            native_rollback,
+            move |next_bindings| {
+                SettingsRepository::new(&database)
+                    .set_setting(SettingValue::GlobalShortcuts(next_bindings))
+                    .map(|snapshot| snapshot.global_shortcuts)
+                    .map_err(|error| error.to_string())
+            },
+            bindings,
+        )?;
+        self.state_lock().bindings = persisted;
         self.publish_state();
         Ok(self.snapshot())
     }
@@ -757,9 +786,45 @@ fn gaming_error(
     }
 }
 
+fn persist_shortcut_change<Transition, Rollback, Persist>(
+    master_enabled: bool,
+    native_transition: Transition,
+    native_rollback: Rollback,
+    persist: Persist,
+    bindings: Vec<GlobalShortcutBinding>,
+) -> Result<Vec<GlobalShortcutBinding>, String>
+where
+    Transition: FnOnce() -> Result<(), String>,
+    Rollback: FnOnce() -> Result<(), String>,
+    Persist: FnOnce(Vec<GlobalShortcutBinding>) -> Result<Vec<GlobalShortcutBinding>, String>,
+{
+    if master_enabled {
+        native_transition()?;
+    }
+
+    match persist(bindings) {
+        Ok(persisted) => Ok(persisted),
+        Err(persistence_error) if master_enabled => match native_rollback() {
+            Ok(()) => Err(format!("shortcut persistence failed: {persistence_error}")),
+            Err(rollback_error) => Err(format!(
+                "shortcut persistence failed: {persistence_error}; native rollback failed: {rollback_error}"
+            )),
+        },
+        Err(persistence_error) => Err(format!("shortcut persistence failed: {persistence_error}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn binding(accelerator: &str) -> GlobalShortcutBinding {
+        GlobalShortcutBinding {
+            action: GlobalShortcutAction::PlayPause,
+            accelerator: accelerator.to_owned(),
+            enabled: true,
+        }
+    }
 
     #[test]
     fn shortcut_actions_map_to_the_declared_native_actions() {
@@ -783,5 +848,112 @@ mod tests {
             serde_json::to_value(error).unwrap()["code"],
             "rescueUnavailable"
         );
+    }
+
+    #[test]
+    fn shortcut_conflict_keeps_old_persisted_and_runtime_binding() {
+        let runtime = std::sync::Arc::new(std::sync::Mutex::new("A".to_owned()));
+        let persisted = std::sync::Arc::new(std::sync::Mutex::new(vec![binding("A")]));
+        let transition_runtime = runtime.clone();
+        let persist_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let persist_called_for_persist = persist_called.clone();
+        let persisted_for_persist = persisted.clone();
+
+        let result = persist_shortcut_change(
+            true,
+            move || {
+                assert_eq!(*transition_runtime.lock().unwrap(), "A");
+                Err("B conflicts".to_owned())
+            },
+            || Ok(()),
+            move |next| {
+                persist_called_for_persist.store(true, std::sync::atomic::Ordering::Release);
+                *persisted_for_persist.lock().unwrap() = next.clone();
+                Ok(next)
+            },
+            vec![binding("B")],
+        );
+
+        assert!(result.is_err());
+        assert_eq!(*runtime.lock().unwrap(), "A");
+        assert_eq!(persisted.lock().unwrap()[0].accelerator, "A");
+        assert!(!persist_called.load(std::sync::atomic::Ordering::Acquire));
+    }
+
+    #[test]
+    fn successful_shortcut_replacement_persists_new_binding() {
+        let runtime = std::sync::Arc::new(std::sync::Mutex::new("A".to_owned()));
+        let persisted = std::sync::Arc::new(std::sync::Mutex::new(vec![binding("A")]));
+        let transition_runtime = runtime.clone();
+        let persist_runtime = runtime.clone();
+        let persist_store = persisted.clone();
+
+        let result = persist_shortcut_change(
+            true,
+            move || {
+                *transition_runtime.lock().unwrap() = "B".to_owned();
+                Ok(())
+            },
+            || panic!("rollback is not expected after a successful persistence"),
+            move |next| {
+                *persist_store.lock().unwrap() = next.clone();
+                assert_eq!(*persist_runtime.lock().unwrap(), "B");
+                Ok(next)
+            },
+            vec![binding("B")],
+        )
+        .unwrap();
+
+        assert_eq!(result[0].accelerator, "B");
+        assert_eq!(*runtime.lock().unwrap(), "B");
+        assert_eq!(persisted.lock().unwrap()[0].accelerator, "B");
+    }
+
+    #[test]
+    fn persistence_failure_rolls_native_binding_back_to_old() {
+        let runtime = std::sync::Arc::new(std::sync::Mutex::new("A".to_owned()));
+        let rollback_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let transition_runtime = runtime.clone();
+        let rollback_runtime = runtime.clone();
+        let rollback_called_for_rollback = rollback_called.clone();
+
+        let result = persist_shortcut_change(
+            true,
+            move || {
+                *transition_runtime.lock().unwrap() = "B".to_owned();
+                Ok(())
+            },
+            move || {
+                rollback_called_for_rollback.store(true, std::sync::atomic::Ordering::Release);
+                *rollback_runtime.lock().unwrap() = "A".to_owned();
+                Ok(())
+            },
+            |_| Err("database is read-only".to_owned()),
+            vec![binding("B")],
+        );
+
+        assert!(result.is_err());
+        assert_eq!(*runtime.lock().unwrap(), "A");
+        assert!(rollback_called.load(std::sync::atomic::Ordering::Acquire));
+    }
+
+    #[test]
+    fn disabled_master_persists_without_native_transition() {
+        let native_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let native_called_for_transition = native_called.clone();
+        let result = persist_shortcut_change(
+            false,
+            move || {
+                native_called_for_transition.store(true, std::sync::atomic::Ordering::Release);
+                Ok(())
+            },
+            || panic!("rollback is not expected when the master switch is disabled"),
+            Ok,
+            vec![binding("B")],
+        )
+        .unwrap();
+
+        assert_eq!(result[0].accelerator, "B");
+        assert!(!native_called.load(std::sync::atomic::Ordering::Acquire));
     }
 }
