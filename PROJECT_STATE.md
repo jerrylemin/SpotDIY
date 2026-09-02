@@ -306,3 +306,34 @@ nodes, 9,470 edges, and 277 communities. Build output remains external
 at `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` remains
 absent. The requested Gmail completion message `Plan 13 finished` was sent to
 `jerryle.minh.3@gmail.com`.
+
+## Plan 14 implementation snapshot — 2026-09-03
+
+Plan 14 is implemented through `f516eee`, `6a02daa`, `ab01f3e`, `aedd3a8`,
+`4527b02`, and `dbcdb2f`; the final docs commit closes the record. Migration 9
+advances SQLite to schema 9 and adds exactly `track_genres`,
+`listening_sessions`, `play_history`, and `smart_playlists`. Library metadata
+normalizes bounded genres and validated release dates without guessing from
+paths. `AnalyticsService` and `AnalyticsRecorder` keep history local, count
+only qualified play time, group sessions with a 30-minute gap, and exclude
+Private Session and Temporary Mode activity. `PlaybackService` remains the
+sole queue owner; Temporary Mode checkpoints and restores the durable queue.
+
+Typed, parameter-bound smart-playlist rules, deterministic non-ML Smart
+Shuffle, anti-repetition, discovery controls, Analytics, Smart Playlist, and
+listening-mode surfaces are wired through the native-only boundary. The Plan
+13 restore staging helper now validates every existing component with
+`symlink_metadata`, rejects symlink/reparse/non-directory components, proves
+trusted ownership before cleanup, and has a Unix symlink regression test.
+
+Frontend typecheck, lint, Vitest, and production build pass; Rust formatting
+passes. Rust test/Clippy and Tauri packaging are not runnable on this machine:
+the installed MSVC/Windows SDK lacks usable `msvcrt.lib`/`excpt.h`. Playwright
+is blocked by the missing Chromium headless shell. The Plan 14 packaged
+harness parses successfully but has not run without a release executable.
+Graphify was refreshed after the code changes: 279 files, 5,298 nodes,
+12,027 edges, and 260 communities. The commits are local only: native/package
+gates remain blocked, and three unrelated pre-existing worktree changes
+(`.gitignore` plus two old report deletions) remain unstaged.
+The requested Gmail completion message `Plan 14 finished` was sent to
+`jerryle.minh.3@gmail.com`.

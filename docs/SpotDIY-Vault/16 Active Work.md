@@ -164,3 +164,20 @@ is recorded in `docs/execution/verification-log.md` and
 
 STOPPED AFTER PLAN 13.
 Awaiting external ChatGPT GitHub review before Plan 14.
+
+## Plan 14 active work — 2026-09-03
+
+Plan 14 is implemented locally through `f516eee`, `6a02daa`, `ab01f3e`,
+`aedd3a8`, `4527b02`, and `dbcdb2f`, with documentation closure in the final
+docs commit.
+It adds
+schema-9 local listening history/sessions, tagged genres and release dates,
+qualified-play recording, Private Session, Temporary Mode, typed smart
+playlists, deterministic Smart Shuffle, `/analytics`, Taste Timeline,
+Time Machine, and reopen-as-queue controls. Plan 13 restore staging now uses
+trusted component creation and cleanup ownership checks.
+
+Frontend checks and Rust formatting pass. Native compilation, Playwright, and
+release/package smokes are environment-blocked, so this remains `IN PROGRESS`.
+Three unrelated pre-existing worktree changes remain unstaged. Do not start
+Plan 15.

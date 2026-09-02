@@ -101,3 +101,17 @@ does not touch the active database until restart apply. A pending restore keeps
 an online copy of the staged original and an active rollback snapshot so a
 crash or apply failure can restore the prior state without deleting unrelated
 user files.
+
+## Plan 14 schema 9 smart analytics
+
+Migration 9 is additive and advances the latest schema to 9. It adds exactly
+`track_genres`, `listening_sessions`, `play_history`, and `smart_playlists`.
+Albums already carry the normalized release date used by smart rules; genres
+are local tag data with whitespace collapse, case-insensitive deduplication,
+and bounded storage. History rows contain typed track/source/session facts,
+outcomes, qualified/listened milliseconds, and local calendar fields, never a
+filesystem path or provider raw URL.
+
+The migration is included in fresh startup and schema-8 upgrade fixtures.
+Native execution of those fixtures remains pending the local Rust linker
+toolchain; the source-level migration assertions are present.

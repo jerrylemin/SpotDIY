@@ -171,3 +171,23 @@ other mode hint and Portable startup does not fall back to AppData.
 database replacement, media creation, and rollback remain native and
 restart-gated. The frontend sees validated DTOs only and never supplies
 arbitrary export/import paths.
+
+## Plan 14 smart features and analytics structure
+
+```text
+src-tauri/src/analytics/mod.rs  --> recorder, sessions, history, aggregates,
+                                   heatmap, timeline, time machine, reopen
+src-tauri/src/sessions/mod.rs   --> in-memory Private/Temporary mode state
+src-tauri/src/smart/mod.rs      --> typed rules, SQL compiler, CRUD, preview,
+                                   deterministic Smart Shuffle
+src-tauri/src/playback/mod.rs  --> queue ownership, mode transitions, history hooks
+src-tauri/migrations/0009_smart_analytics.sql
+
+src/pages/AnalyticsPage.tsx + src/components/analytics/*
+src/components/smart/SmartPlaylistPanel.tsx
+src/hooks/useAnalytics.ts + useSmartPlaylists.ts + useListeningModes.ts
+```
+
+The native services are local-only and the frontend receives Zod-validated
+DTOs. `PlaybackService` remains the only owner allowed to open a smart mix
+into the live queue.

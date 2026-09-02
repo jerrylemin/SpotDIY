@@ -378,3 +378,30 @@ results. Native Tauri dialogs own destination selection for export, archive
 selection for import, and Standard-mode included-audio restore folders.
 Credentials, tokens, provider payloads, live SQLite sidecars, temp files, and
 untrusted media paths are outside the archive boundary.
+
+## Plan 14 smart features and local analytics boundary
+
+Migration 9 adds only the four logical tables `track_genres`,
+`listening_sessions`, `play_history`, and `smart_playlists`. Genres and
+validated release dates are derived from local tags and stored with the local
+library. `AnalyticsRecorder` observes the existing playback owner, writes
+qualified activity in batches, groups sessions using the fixed 30-minute gap,
+and emits only typed aggregate/history DTOs. No filesystem path, provider raw
+URL, telemetry, or analytics network call crosses the frontend boundary.
+
+`ListeningModeService` holds Private Session and Temporary Mode in memory.
+Private activity is never persisted; Temporary Mode saves a durable queue
+checkpoint, owns its transient queue mutations, and restores the checkpoint
+without autoplay on exit. `PlaybackService` remains the sole queue and
+transport owner.
+
+`SmartPlaylistService` validates a bounded typed rule tree and compiles
+allowlisted fields/operators into parameter-bound SQL. `SmartShuffleService`
+uses a deterministic seeded weighted heuristic over familiarity, variety,
+freshness, and discovery signals, with a recent-track and recent-artist
+window; it is not an ML recommendation service and does not persist a seed.
+
+The `/analytics` route and Playlists smart-rule surface consume these typed
+contracts. Browser preview adapters return empty analytics and reject native
+smart operations, so production UI cannot fabricate local history or
+recommendations.

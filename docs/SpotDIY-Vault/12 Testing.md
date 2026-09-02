@@ -210,3 +210,17 @@ restart smoke all pass with clean shutdown. The Plan 13 packaged harness does
 not automate OS-native save/open/folder dialogs; those production dialog
 boundaries remain covered by native command wiring and the archive/restore
 unit suite. Live provider, LRCLIB, and download smoke remain optional.
+
+## Plan 14 verification status
+
+The frontend gates pass with 83 Vitest tests across 23 files, typecheck, lint,
+and production build; the same three Fast Refresh warnings remain. Rust fmt
+and `git diff --check` pass. Focused native tests cover schema 8-to-9,
+metadata normalization, qualified play and session grouping, privacy and
+Temporary Mode, smart rule compilation/shuffle, and trusted restore staging.
+
+Native tests/Clippy/Tauri packaging are not reported as passing because the
+machine's MSVC/Windows SDK is missing usable `msvcrt.lib`/`excpt.h`; Playwright
+is blocked by its missing Chromium headless shell. The Plan 14 packaged smoke
+script parses, but release smoke and the `.spotdiy` schema-9 roundtrip await a
+working native build. Graphify was refreshed after implementation.

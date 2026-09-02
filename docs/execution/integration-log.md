@@ -265,3 +265,30 @@
 - `codegraph sync .` reported the index already current at 176 files, 5,781
   nodes, and 21,456 edges; `graphify update .` reports 4,723 nodes, 9,470
   edges, and 277 communities.
+
+## 2026-09-03 - Plan 14 smart features and local analytics
+
+- Integrated schema 9 with exactly four new tables: `track_genres`,
+  `listening_sessions`, `play_history`, and `smart_playlists`. Existing
+  albums release dates are reused; local tag extraction supplies bounded,
+  normalized genres and validated release dates.
+- Integrated `AnalyticsRecorder` with `PlaybackService` observation,
+  qualified-play batching, 30-minute session grouping, local aggregate
+  queries, heatmap, Taste Timeline, Time Machine, and reopen-as-queue actions.
+  Paused time, skipped/unqualified plays, Private Session, and Temporary Mode
+  follow the documented persistence boundaries.
+- Integrated typed smart-playlist rule validation/CRUD/preview and
+  parameter-bound allowlisted SQL, plus deterministic non-ML Smart Shuffle
+  with familiarity/variety/freshness/discovery signals and anti-repetition.
+- Integrated `/analytics`, the Playlists smart-rule surface, command-palette
+  and listening-mode controls, strict frontend DTO validation, and a Plan 14
+  packaged harness. The harness parses successfully; native/package execution
+  remains blocked by the local MSVC/SDK and browser availability.
+- Hardened Plan 13 restore staging with component-by-component trusted-root
+  checks and cleanup ownership proof; added a symlink `imports` regression.
+- Phase commits are `f516eee` (trusted staging), `6a02daa` (history and
+  sessions), `ab01f3e` (smart playlists), `aedd3a8` (shuffle and Temporary
+  Mode), `4527b02` (analytics interface), and `dbcdb2f` (packaged coverage).
+  The final docs commit closes the record. The commits are local only while native
+  and package gates remain blocked; three unrelated pre-existing worktree
+  changes remain unstaged.

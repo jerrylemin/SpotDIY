@@ -446,3 +446,27 @@ below.
   no runtime data or secrets are retained in the repository.
 - `codegraph sync .` and `codegraph status .` - passed; the index is up to date
   at 176 files, 5,781 nodes, and 21,456 edges.
+
+## 2026-09-03 - Plan 14 verification status
+
+- `pnpm typecheck` - passed. `pnpm lint` - passed with three pre-existing Fast
+  Refresh warnings. `pnpm test` - passed: 83 tests across 23 files.
+- `pnpm build` - passed; existing non-fatal frontend notices remain.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` - passed.
+  `git diff --check` - passed. The Plan 14 packaged Node harness and
+  PowerShell smoke script both pass syntax/parser checks.
+- `cargo test`, strict all-features Clippy, and `pnpm tauri build` could not
+  reach source compilation because this machine's MSVC/Windows SDK cannot
+  provide `msvcrt.lib`/`excpt.h`. This is an environment blocker, not a
+  passing native result.
+- `pnpm exec playwright test` could not start because the configured Chromium
+  headless shell is missing. Consequently the release-based regular/Plan 11/
+  Plan 12/Plan 13/Plan 14 packaged runs, including schema 8-to-9 and
+  `.spotdiy` schema-9 roundtrip, are not claimed here.
+- `graphify update .` passed after the code changes: 279 files, 5,298 nodes,
+  12,027 edges, and 260 communities. CodeGraph was unavailable in this
+  checkout and no refresh result is claimed.
+- No runtime SQLite, archive, media, browser report, target directory,
+  credentials, tokens, or `memory.zip` was staged or tracked. The blocked
+  Playwright run produced ignored `test-results` diagnostics in the workspace;
+  they are outside the commit scope.
