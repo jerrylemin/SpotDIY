@@ -207,6 +207,29 @@ impl Database {
         foreign_keys_enabled(&connection)
     }
 
+    pub fn online_backup_to(&self, destination: impl AsRef<Path>) -> Result<(), DatabaseError> {
+        let destination = destination.as_ref().to_path_buf();
+        if let Some(parent) = destination
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).map_err(|source| DatabaseError::CreateParent {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let source = self.connection()?;
+        let mut target = Connection::open(&destination).map_err(|source| DatabaseError::Open {
+            path: destination.clone(),
+            source,
+        })?;
+        let backup =
+            rusqlite::backup::Backup::new(&source, &mut target).map_err(DatabaseError::Query)?;
+        backup
+            .run_to_completion(128, Duration::from_millis(5), None)
+            .map_err(DatabaseError::Query)
+    }
+
     pub fn with_connection<T>(
         &self,
         action: impl FnOnce(&Connection) -> Result<T, rusqlite::Error>,
@@ -548,6 +571,42 @@ mod tests {
                 info: "#8E7BFF".to_owned(),
             },
         }
+    }
+
+    #[test]
+    fn online_backup_copies_an_open_wal_database() {
+        let source_path = TempDatabasePath::new("online-backup-source");
+        let target_path = TempDatabasePath::new("online-backup-target");
+        let source = Database::open(source_path.path()).unwrap();
+        SettingsRepository::new(&source)
+            .set_setting(SettingValue::Theme(Theme::Light))
+            .unwrap();
+        source
+            .with_connection(|connection| {
+                connection.execute(
+                    "UPDATE settings_metadata
+                     SET value_json = '\"backup-marker\"'
+                     WHERE setting_key = 'theme'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        source.online_backup_to(target_path.path()).unwrap();
+
+        let target = Database::open(target_path.path()).unwrap();
+        let theme: String = target
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT value_json FROM settings_metadata WHERE setting_key = 'theme'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(theme, "\"backup-marker\"");
+        assert_eq!(target.schema_version().unwrap(), LATEST_SCHEMA_VERSION);
     }
 
     #[test]

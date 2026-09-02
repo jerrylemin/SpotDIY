@@ -9,6 +9,7 @@ use thiserror::Error;
 use crate::db::{Database, DatabaseError};
 use crate::domain::ProviderKind;
 use crate::playback::{normalize_output_profiles, OutputProfile};
+pub use crate::storage::StorageMode;
 
 const SETTINGS_SCHEMA_VERSION: i64 = 1;
 const CUSTOM_THEME_SCHEMA_VERSION: u32 = 1;
@@ -67,13 +68,6 @@ pub struct SpotThemeDefinition {
     pub name: String,
     pub base_mode: ThemeBaseMode,
     pub tokens: SpotThemeTokens,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum StorageMode {
-    Standard,
-    Portable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -144,6 +138,7 @@ pub enum SettingValue {
     WindowsIntegration(WindowsIntegrationSettings),
     GlobalShortcuts(Vec<GlobalShortcutBinding>),
     OutputProfiles(Vec<OutputProfile>),
+    StorageMode(StorageMode),
 }
 
 impl SettingValue {
@@ -300,8 +295,6 @@ pub enum SettingsError {
         key: &'static str,
         value_type: String,
     },
-    #[error("portable storage mode is not supported by the current standard startup path")]
-    UnsupportedStorageMode,
 }
 
 pub struct SettingsRepository<'database> {
@@ -479,10 +472,6 @@ impl<'database> SettingsRepository<'database> {
                     key: "output_profiles",
                     reason: error.detail,
                 })?;
-        }
-
-        if snapshot.storage_mode == StorageMode::Portable {
-            return Err(SettingsError::UnsupportedStorageMode);
         }
 
         if snapshot.theme == Theme::Custom && snapshot.custom_theme.is_none() {
@@ -750,6 +739,14 @@ fn encode_setting(
                 })?,
             ))
         }
+        SettingValue::StorageMode(value) => Ok((
+            "storage_mode",
+            "storage_mode",
+            serde_json::to_string(value).map_err(|source| SettingsError::Serialization {
+                key: "storage_mode",
+                source,
+            })?,
+        )),
     }
 }
 
@@ -1290,7 +1287,7 @@ mod tests {
     }
 
     #[test]
-    fn portable_mode_is_rejected_until_portable_startup_is_implemented() {
+    fn portable_mode_is_an_ordinary_setting_for_the_resolved_startup_mode() {
         let path = TempDatabasePath::new("settings-portable");
         let database = Database::open(path.path()).unwrap();
         database
@@ -1303,8 +1300,12 @@ mod tests {
             })
             .unwrap();
 
-        let result = SettingsRepository::new(&database).get_snapshot();
+        let snapshot = SettingsRepository::new(&database).get_snapshot().unwrap();
 
-        assert!(matches!(result, Err(SettingsError::UnsupportedStorageMode)));
+        assert_eq!(snapshot.storage_mode, StorageMode::Portable);
+        let updated = SettingsRepository::new(&database)
+            .set_setting(SettingValue::StorageMode(StorageMode::Standard))
+            .unwrap();
+        assert_eq!(updated.storage_mode, StorageMode::Standard);
     }
 }
