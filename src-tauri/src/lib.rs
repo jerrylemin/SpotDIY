@@ -13,6 +13,7 @@ pub mod playback;
 pub mod playlists;
 pub mod queue;
 pub mod settings;
+pub mod windows;
 pub mod search {
     pub mod sort;
     pub mod types;
@@ -36,9 +37,12 @@ use playback::{
     TrackPlaybackRequest, PLAYBACK_STATE_EVENT, QUEUE_STATE_EVENT,
 };
 use playlists::{PlaylistErrorDto, PlaylistService};
-use settings::{SettingValue, SettingsRepository, SettingsSnapshot};
+use settings::{
+    GlobalShortcutBinding, SettingValue, SettingsRepository, SettingsSnapshot,
+    WindowsIntegrationSettings,
+};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
@@ -49,6 +53,9 @@ use crate::search::{SearchEvent, SearchEventSink, SearchRequest, SearchResult, S
 use crate::sources::{
     LocalSourceAdapter, SoundcloudSourceAdapter, SourceAdapter, SourceResolution, SourceResolver,
     SpotifySourceAdapter, YoutubeSourceAdapter,
+};
+use crate::windows::{
+    GamingClickThroughError, WindowsIntegrationService, WindowsIntegrationSnapshot,
 };
 
 pub const SEARCH_PROVIDER_UPDATE_EVENT: &str = "search://provider-update";
@@ -251,6 +258,115 @@ fn set_setting(
     SettingsRepository::new(&state.database)
         .set_setting(setting)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_windows_integration_snapshot(
+    state: State<'_, WindowsIntegrationService>,
+) -> WindowsIntegrationSnapshot {
+    state.snapshot()
+}
+
+#[tauri::command]
+fn set_windows_integration_settings(
+    settings: WindowsIntegrationSettings,
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<WindowsIntegrationSnapshot, String> {
+    state.set_windows_integration_settings(settings)
+}
+
+#[tauri::command]
+fn set_global_shortcuts_enabled(
+    enabled: bool,
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<WindowsIntegrationSnapshot, String> {
+    state.set_global_shortcuts_enabled(enabled)
+}
+
+#[tauri::command]
+fn update_global_shortcut(
+    binding: GlobalShortcutBinding,
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<WindowsIntegrationSnapshot, String> {
+    state.update_global_shortcut(binding)
+}
+
+#[tauri::command]
+fn reset_global_shortcuts(
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<WindowsIntegrationSnapshot, String> {
+    state.reset_global_shortcuts()
+}
+
+#[tauri::command]
+async fn open_overlay(
+    kind: windows::OverlayKind,
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<WindowsIntegrationSnapshot, String> {
+    state.open_overlay(kind)
+}
+
+#[tauri::command]
+async fn close_overlay(
+    kind: windows::OverlayKind,
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<WindowsIntegrationSnapshot, String> {
+    state.close_overlay(kind)
+}
+
+#[tauri::command]
+async fn toggle_overlay(
+    kind: windows::OverlayKind,
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<WindowsIntegrationSnapshot, String> {
+    state.toggle_overlay(kind)
+}
+
+#[tauri::command]
+fn set_gaming_click_through(
+    enabled: bool,
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<WindowsIntegrationSnapshot, GamingClickThroughError> {
+    state.set_gaming_click_through(enabled)
+}
+
+#[tauri::command]
+fn list_output_profiles(
+    state: State<'_, WindowsIntegrationService>,
+) -> Vec<playback::OutputProfile> {
+    state.list_output_profiles()
+}
+
+#[tauri::command]
+fn create_output_profile(
+    name: String,
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<WindowsIntegrationSnapshot, String> {
+    state.create_output_profile(name)
+}
+
+#[tauri::command]
+fn update_output_profile(
+    profile: playback::OutputProfile,
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<WindowsIntegrationSnapshot, String> {
+    state.update_output_profile(profile)
+}
+
+#[tauri::command]
+fn delete_output_profile(
+    id: String,
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<WindowsIntegrationSnapshot, String> {
+    state.delete_output_profile(&id)
+}
+
+#[tauri::command]
+fn apply_output_profile(
+    id: String,
+    state: State<'_, WindowsIntegrationService>,
+) -> Result<PlaybackSnapshot, playback::OutputProfileApplyError> {
+    state.apply_output_profile(&id)
 }
 
 #[tauri::command]
@@ -1266,10 +1382,20 @@ pub fn run() {
             let source_resolver = SourceResolver::new(library.clone());
             let playlists = PlaylistService::new(library.database().clone());
             let inspector = TrackInspectorService::new(database.clone(), playlists.clone());
+            let windows_slot: Arc<Mutex<Option<WindowsIntegrationService>>> =
+                Arc::new(Mutex::new(None));
             let playback_sink = {
                 let app_handle = app.handle().clone();
+                let windows_slot = windows_slot.clone();
                 Arc::new(move |snapshot: PlaybackSnapshot| {
-                    let _ = app_handle.emit(PLAYBACK_STATE_EVENT, snapshot);
+                    let _ = app_handle.emit(PLAYBACK_STATE_EVENT, snapshot.clone());
+                    let windows = windows_slot
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .clone();
+                    if let Some(windows) = windows {
+                        windows.on_playback_snapshot(&snapshot);
+                    }
                 })
             };
             let queue_sink = {
@@ -1287,6 +1413,16 @@ pub fn run() {
             let lyrics = LyricsService::new(database.clone(), library.clone())?;
             let bookmarks = BookmarkService::new(database.clone());
             library.register_watchers(sink.clone())?;
+            let windows = WindowsIntegrationService::new(
+                app.handle().clone(),
+                database.clone(),
+                playback.clone(),
+            );
+            app.manage(windows.clone());
+            *windows_slot
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(windows.clone());
+            windows.initialize();
             app.manage(AppState {
                 database,
                 library: library.clone(),
@@ -1307,6 +1443,18 @@ pub fn run() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if event.state() != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        return;
+                    }
+                    if let Some(windows) = app.try_state::<WindowsIntegrationService>() {
+                        windows.handle_shortcut(shortcut.id());
+                    }
+                })
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             get_app_status,
             get_source_capabilities,
@@ -1324,6 +1472,20 @@ pub fn run() {
             get_track_inspector,
             get_settings_snapshot,
             set_setting,
+            get_windows_integration_snapshot,
+            set_windows_integration_settings,
+            set_global_shortcuts_enabled,
+            update_global_shortcut,
+            reset_global_shortcuts,
+            open_overlay,
+            close_overlay,
+            toggle_overlay,
+            set_gaming_click_through,
+            list_output_profiles,
+            create_output_profile,
+            update_output_profile,
+            delete_output_profile,
+            apply_output_profile,
             get_download_snapshot,
             queue_search_result_download,
             queue_source_download,
@@ -1414,6 +1576,9 @@ pub fn run() {
         .expect("error while building SpotDIY")
         .run(|app_handle, event| {
             if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+                if let Some(windows) = app_handle.try_state::<WindowsIntegrationService>() {
+                    windows.shutdown();
+                }
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     let _ = state.search.cancel_search();
                     let _ = state.downloads.shutdown();
