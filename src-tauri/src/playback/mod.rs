@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod mpv;
+pub mod output;
 pub mod protocol;
 pub mod queue;
 pub mod types;
@@ -30,6 +31,10 @@ use crate::sources::{
 pub use self::backend::{
     BackendCommand, BackendEvent, EndFileReason, GenerationStampedBackendEvent, PlaybackBackend,
     PlaybackBackendSession,
+};
+pub use self::output::{
+    normalize_output_profiles, validate_output_profiles, OutputProfile, OutputProfileApplyError,
+    OutputProfileApplyErrorCode, OutputProfileValidationError, MAX_OUTPUT_PROFILES,
 };
 pub use self::types::{
     AbLoopState, AudioDevice, PlaybackBackendHealth, PlaybackError, PlaybackErrorCode,
@@ -285,6 +290,16 @@ impl PlaybackService {
     ) -> Result<PlaybackSnapshot, PlaybackError> {
         let name = name.into();
         self.snapshot_command(|reply| Command::SetAudioDevice { name, reply })
+    }
+
+    pub fn apply_output_profile(
+        &self,
+        profile: OutputProfile,
+    ) -> Result<PlaybackSnapshot, OutputProfileApplyError> {
+        if let Err(error) = profile.validate() {
+            return Err(output_profile_invalid_error(error.detail));
+        }
+        self.output_command(|reply| Command::ApplyOutputProfile { profile, reply })
     }
 
     pub fn switch_playback_source(
@@ -573,6 +588,49 @@ impl PlaybackService {
             .recv_timeout(response_timeout)
             .map_err(|_| controller_unavailable_error())?
     }
+
+    fn output_command(
+        &self,
+        build: impl FnOnce(Sender<Result<PlaybackSnapshot, OutputProfileApplyError>>) -> Command,
+    ) -> Result<PlaybackSnapshot, OutputProfileApplyError> {
+        if !self.accepting_commands.load(Ordering::Acquire) {
+            return Err(output_profile_apply_error(
+                "playback is shutting down",
+                true,
+            ));
+        }
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let mut command = build(reply_tx);
+        let deadline = Instant::now() + COMMAND_SEND_TIMEOUT;
+        loop {
+            match self.command_tx.try_send(command) {
+                Ok(()) => break,
+                Err(tokio_mpsc::error::TrySendError::Full(returned))
+                    if Instant::now() < deadline =>
+                {
+                    command = returned;
+                    thread::yield_now();
+                }
+                Err(tokio_mpsc::error::TrySendError::Full(_)) => {
+                    return Err(output_profile_apply_error(
+                        "the playback command queue is busy",
+                        true,
+                    ));
+                }
+                Err(tokio_mpsc::error::TrySendError::Closed(_)) => {
+                    return Err(output_profile_apply_error(
+                        "the playback controller is unavailable",
+                        true,
+                    ));
+                }
+            }
+        }
+        reply_rx
+            .recv_timeout(COMMAND_RESPONSE_TIMEOUT)
+            .map_err(|_| {
+                output_profile_apply_error("the output profile operation timed out", true)
+            })?
+    }
 }
 
 impl Drop for PlaybackService {
@@ -640,6 +698,10 @@ enum Command {
     SetAudioDevice {
         name: String,
         reply: SnapshotReply,
+    },
+    ApplyOutputProfile {
+        profile: OutputProfile,
+        reply: OutputProfileReply,
     },
     SwitchSource {
         request: TrackPlaybackRequest,
@@ -727,6 +789,7 @@ type SnapshotListReply = Sender<Result<Vec<QueueSnapshotSummary>, PlaybackError>
 type PresetReply = Sender<Result<AbLoopPreset, PlaybackError>>;
 type PresetListReply = Sender<Result<Vec<AbLoopPreset>, PlaybackError>>;
 type UnitReply = Sender<Result<(), PlaybackError>>;
+type OutputProfileReply = Sender<Result<PlaybackSnapshot, OutputProfileApplyError>>;
 
 struct ResolvedPlayback {
     track_id: TrackId,
@@ -778,6 +841,19 @@ struct RecoveryPlan {
     waiting_for_backend: bool,
 }
 
+#[derive(Clone)]
+struct OutputPlaybackState {
+    device: String,
+    volume_percent: u8,
+    muted: bool,
+}
+
+struct PendingOutputProfile {
+    profile: OutputProfile,
+    previous: OutputPlaybackState,
+    reply: OutputProfileReply,
+}
+
 struct Controller {
     library: LibraryService,
     resolver: SourceResolver,
@@ -804,6 +880,7 @@ struct Controller {
     desired_paused: bool,
     shutting_down: bool,
     pending_audio_devices: Option<Sender<Result<Vec<AudioDevice>, PlaybackError>>>,
+    pending_output_profile: Option<PendingOutputProfile>,
 }
 
 impl Controller {
@@ -845,6 +922,7 @@ impl Controller {
             desired_paused: false,
             shutting_down: false,
             pending_audio_devices: None,
+            pending_output_profile: None,
         }
     }
 
@@ -1002,6 +1080,28 @@ impl Controller {
             Command::SetAudioDevice { name, reply } => {
                 let result = self.set_audio_device(name);
                 let _ = reply.send(result);
+            }
+            Command::ApplyOutputProfile { profile, reply } => {
+                if self.pending_audio_devices.is_some() || self.pending_output_profile.is_some() {
+                    let _ = reply.send(Err(output_profile_apply_error(
+                        "another audio-device operation is already pending",
+                        true,
+                    )));
+                } else if let Err(error) = profile.validate() {
+                    let _ = reply.send(Err(output_profile_invalid_error(error.detail)));
+                } else if let Err(error) = self.backend.send(BackendCommand::QueryAudioDevices) {
+                    let _ = reply.send(Err(output_profile_apply_error(error.detail, true)));
+                } else {
+                    self.pending_output_profile = Some(PendingOutputProfile {
+                        profile,
+                        previous: OutputPlaybackState {
+                            device: self.snapshot.selected_audio_device.clone(),
+                            volume_percent: self.snapshot.volume_percent,
+                            muted: self.snapshot.muted,
+                        },
+                        reply,
+                    });
+                }
             }
             Command::SwitchSource { request, reply } => {
                 let result = self.switch_source(request);
@@ -1543,6 +1643,84 @@ impl Controller {
         Ok(self.snapshot.clone())
     }
 
+    fn apply_output_profile_after_enumeration(
+        &mut self,
+        profile: OutputProfile,
+        previous: OutputPlaybackState,
+        devices: &[AudioDevice],
+    ) -> Result<PlaybackSnapshot, OutputProfileApplyError> {
+        if !profile.audio_device_name.eq_ignore_ascii_case("auto")
+            && !devices
+                .iter()
+                .any(|device| device.name == profile.audio_device_name)
+        {
+            return Err(output_profile_device_error(format!(
+                "audio device '{}' is not currently available",
+                profile.audio_device_name
+            )));
+        }
+
+        let target_device = if profile.audio_device_name.eq_ignore_ascii_case("auto") {
+            "auto".to_owned()
+        } else {
+            profile.audio_device_name.clone()
+        };
+        if let Err(error) = self
+            .backend
+            .send(BackendCommand::SelectAudioDevice(target_device.clone()))
+        {
+            return Err(output_profile_apply_error(error.detail, true));
+        }
+        self.snapshot.selected_audio_device = target_device;
+        self.publish();
+
+        if let Err(error) = self
+            .backend
+            .send(BackendCommand::SetVolume(profile.volume_percent))
+        {
+            let rollback_succeeded = self.rollback_output_state(&previous);
+            return Err(output_profile_apply_error(error.detail, rollback_succeeded));
+        }
+        self.snapshot.volume_percent = profile.volume_percent;
+        self.publish();
+
+        if let Err(error) = self.backend.send(BackendCommand::SetMuted(profile.muted)) {
+            let rollback_succeeded = self.rollback_output_state(&previous);
+            return Err(output_profile_apply_error(error.detail, rollback_succeeded));
+        }
+        self.snapshot.muted = profile.muted;
+        self.publish();
+        Ok(self.snapshot.clone())
+    }
+
+    fn rollback_output_state(&mut self, previous: &OutputPlaybackState) -> bool {
+        let device_succeeded = self
+            .backend
+            .send(BackendCommand::SelectAudioDevice(previous.device.clone()))
+            .is_ok();
+        if device_succeeded {
+            self.snapshot.selected_audio_device = previous.device.clone();
+        }
+
+        let volume_succeeded = self
+            .backend
+            .send(BackendCommand::SetVolume(previous.volume_percent))
+            .is_ok();
+        if volume_succeeded {
+            self.snapshot.volume_percent = previous.volume_percent;
+        }
+
+        let mute_succeeded = self
+            .backend
+            .send(BackendCommand::SetMuted(previous.muted))
+            .is_ok();
+        if mute_succeeded {
+            self.snapshot.muted = previous.muted;
+        }
+        self.publish();
+        device_succeeded && volume_succeeded && mute_succeeded
+    }
+
     fn switch_source(
         &mut self,
         request: TrackPlaybackRequest,
@@ -1622,6 +1800,12 @@ impl Controller {
             .and_then(|()| self.persist_queue_state(false).map(|_| ()));
         if let Some(reply) = self.pending_audio_devices.take() {
             let _ = reply.send(Err(shutting_down_error()));
+        }
+        if let Some(pending) = self.pending_output_profile.take() {
+            let _ = pending.reply.send(Err(output_profile_apply_error(
+                "playback is shutting down",
+                true,
+            )));
         }
         self.snapshot.phase = PlaybackPhase::ShuttingDown;
         self.snapshot.recovering = false;
@@ -1748,7 +1932,16 @@ impl Controller {
                 self.publish();
             }
             BackendEvent::AudioDevices(devices) => {
-                if let Some(reply) = self.pending_audio_devices.take() {
+                if let Some(pending) = self.pending_output_profile.take() {
+                    let PendingOutputProfile {
+                        profile,
+                        previous,
+                        reply,
+                    } = pending;
+                    let result =
+                        self.apply_output_profile_after_enumeration(profile, previous, &devices);
+                    let _ = reply.send(result);
+                } else if let Some(reply) = self.pending_audio_devices.take() {
                     let _ = reply.send(Ok(devices));
                 }
             }
@@ -3084,6 +3277,25 @@ fn controller_unavailable_error() -> PlaybackError {
     )
 }
 
+fn output_profile_apply_error(
+    detail: impl Into<String>,
+    rollback_succeeded: bool,
+) -> OutputProfileApplyError {
+    output::apply_error(
+        OutputProfileApplyErrorCode::ApplyFailed,
+        detail,
+        rollback_succeeded,
+    )
+}
+
+fn output_profile_invalid_error(detail: impl Into<String>) -> OutputProfileApplyError {
+    output::apply_error(OutputProfileApplyErrorCode::InvalidProfile, detail, false)
+}
+
+fn output_profile_device_error(detail: impl Into<String>) -> OutputProfileApplyError {
+    output::apply_error(OutputProfileApplyErrorCode::DeviceUnavailable, detail, true)
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     match mutex.lock() {
         Ok(guard) => guard,
@@ -3128,6 +3340,13 @@ mod tests {
         Shutdown,
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum FakeOutputCommand {
+        Device,
+        Volume,
+        Muted,
+    }
+
     struct FakeState {
         operations: Vec<FakeOperation>,
         health: BackendHealth,
@@ -3137,6 +3356,7 @@ mod tests {
         auto_file_loaded: bool,
         duration_ms: Option<u64>,
         devices: Vec<AudioDevice>,
+        output_failures: Vec<FakeOutputCommand>,
     }
 
     impl Default for FakeState {
@@ -3154,6 +3374,7 @@ mod tests {
                     description: "Default output".to_owned(),
                     selected: true,
                 }],
+                output_failures: Vec::new(),
             }
         }
     }
@@ -3253,6 +3474,18 @@ mod tests {
         fn operations(&self) -> Vec<FakeOperation> {
             self.state.lock().unwrap().operations.clone()
         }
+
+        fn set_devices(&self, devices: Vec<AudioDevice>) {
+            self.state.lock().unwrap().devices = devices;
+        }
+
+        fn fail_next_output(&self, command: FakeOutputCommand) {
+            self.state.lock().unwrap().output_failures.push(command);
+        }
+
+        fn fail_next_outputs(&self, commands: impl IntoIterator<Item = FakeOutputCommand>) {
+            self.state.lock().unwrap().output_failures.extend(commands);
+        }
     }
 
     struct FakeBackend {
@@ -3336,21 +3569,37 @@ mod tests {
                     Ok(())
                 }
                 BackendCommand::SetVolume(volume_percent) => {
-                    self.control
-                        .state
-                        .lock()
-                        .unwrap()
-                        .operations
-                        .push(FakeOperation::Volume(volume_percent));
+                    let mut state = self.control.state.lock().unwrap();
+                    state.operations.push(FakeOperation::Volume(volume_percent));
+                    if let Some(index) = state
+                        .output_failures
+                        .iter()
+                        .position(|command| *command == FakeOutputCommand::Volume)
+                    {
+                        state.output_failures.remove(index);
+                        return Err(PlaybackError::new(
+                            PlaybackErrorCode::DeviceUnavailable,
+                            "injected volume failure",
+                            true,
+                        ));
+                    }
                     Ok(())
                 }
                 BackendCommand::SetMuted(muted) => {
-                    self.control
-                        .state
-                        .lock()
-                        .unwrap()
-                        .operations
-                        .push(FakeOperation::Muted(muted));
+                    let mut state = self.control.state.lock().unwrap();
+                    state.operations.push(FakeOperation::Muted(muted));
+                    if let Some(index) = state
+                        .output_failures
+                        .iter()
+                        .position(|command| *command == FakeOutputCommand::Muted)
+                    {
+                        state.output_failures.remove(index);
+                        return Err(PlaybackError::new(
+                            PlaybackErrorCode::DeviceUnavailable,
+                            "injected mute failure",
+                            true,
+                        ));
+                    }
                     Ok(())
                 }
                 BackendCommand::SetAbLoop { a_ms, b_ms } => {
@@ -3381,12 +3630,20 @@ mod tests {
                     Ok(())
                 }
                 BackendCommand::SelectAudioDevice(name) => {
-                    self.control
-                        .state
-                        .lock()
-                        .unwrap()
-                        .operations
-                        .push(FakeOperation::Device(name));
+                    let mut state = self.control.state.lock().unwrap();
+                    state.operations.push(FakeOperation::Device(name));
+                    if let Some(index) = state
+                        .output_failures
+                        .iter()
+                        .position(|command| *command == FakeOutputCommand::Device)
+                    {
+                        state.output_failures.remove(index);
+                        return Err(PlaybackError::new(
+                            PlaybackErrorCode::DeviceUnavailable,
+                            "injected device failure",
+                            true,
+                        ));
+                    }
                     Ok(())
                 }
                 BackendCommand::Stop => {
@@ -3828,6 +4085,164 @@ mod tests {
         assert_eq!(selected.selected_audio_device, "auto");
         assert!(control.operations().contains(&FakeOperation::Volume(100)));
         assert!(control.operations().contains(&FakeOperation::Muted(true)));
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn output_profile_apply_preserves_playback_context_and_updates_all_output_fields() {
+        let library = test_library(2);
+        let (service, control, _) = service_with(&library);
+        control.set_devices(vec![
+            AudioDevice {
+                name: "auto".to_owned(),
+                description: "Default output".to_owned(),
+                selected: true,
+            },
+            AudioDevice {
+                name: "Headphones".to_owned(),
+                description: "Desk headphones".to_owned(),
+                selected: false,
+            },
+        ]);
+        service.play_track(library.tracks[0].clone()).unwrap();
+        control.push_event(BackendEvent::FileLoaded);
+        wait_until_playing(&service);
+        control.push_event(BackendEvent::PositionChanged(1_250));
+        wait_for_snapshot(&service, |snapshot| snapshot.position_ms == 1_250);
+        service.enqueue_track(library.tracks[1].clone()).unwrap();
+        service.set_playback_volume(42).unwrap();
+        service.set_playback_muted(true).unwrap();
+        let before = service.snapshot();
+
+        let applied = service
+            .apply_output_profile(OutputProfile {
+                id: "desk".to_owned(),
+                name: "Desk".to_owned(),
+                audio_device_name: "Headphones".to_owned(),
+                volume_percent: 86,
+                muted: false,
+            })
+            .unwrap();
+
+        assert_eq!(applied.current_track_id, before.current_track_id);
+        assert_eq!(applied.current_source_id, before.current_source_id);
+        assert_eq!(applied.position_ms, before.position_ms);
+        assert_eq!(applied.queue_length, before.queue_length);
+        assert_eq!(applied.selected_audio_device, "Headphones");
+        assert_eq!(applied.volume_percent, 86);
+        assert!(!applied.muted);
+        let operations = control.operations();
+        assert!(operations.contains(&FakeOperation::Device("Headphones".to_owned())));
+        assert!(operations.contains(&FakeOperation::Volume(86)));
+        assert!(operations.contains(&FakeOperation::Muted(false)));
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn output_profile_rejects_unavailable_devices_without_partial_state() {
+        let library = test_library(1);
+        let (service, control, _) = service_with(&library);
+        let before = service.snapshot();
+
+        let error = service
+            .apply_output_profile(OutputProfile {
+                id: "missing".to_owned(),
+                name: "Missing".to_owned(),
+                audio_device_name: "Not enumerated".to_owned(),
+                volume_percent: 80,
+                muted: true,
+            })
+            .unwrap_err();
+
+        assert_eq!(error.code, OutputProfileApplyErrorCode::DeviceUnavailable);
+        assert!(error.rollback_succeeded);
+        let after = service.snapshot();
+        assert_eq!(after.selected_audio_device, before.selected_audio_device);
+        assert_eq!(after.volume_percent, before.volume_percent);
+        assert_eq!(after.muted, before.muted);
+        let operations = control.operations();
+        assert!(!operations.iter().any(|operation| matches!(
+            operation,
+            FakeOperation::Volume(80) | FakeOperation::Muted(true)
+        )));
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn output_profile_rolls_back_volume_and_reports_rollback_failure_truthfully() {
+        let library = test_library(1);
+        let (service, control, _) = service_with(&library);
+        control.set_devices(vec![
+            AudioDevice {
+                name: "auto".to_owned(),
+                description: "Default output".to_owned(),
+                selected: true,
+            },
+            AudioDevice {
+                name: "Headphones".to_owned(),
+                description: "Desk headphones".to_owned(),
+                selected: false,
+            },
+        ]);
+        service.set_playback_volume(42).unwrap();
+        service.set_playback_muted(false).unwrap();
+        let before = service.snapshot();
+        control.fail_next_output(FakeOutputCommand::Volume);
+
+        let error = service
+            .apply_output_profile(OutputProfile {
+                id: "desk".to_owned(),
+                name: "Desk".to_owned(),
+                audio_device_name: "Headphones".to_owned(),
+                volume_percent: 86,
+                muted: true,
+            })
+            .unwrap_err();
+
+        assert_eq!(error.code, OutputProfileApplyErrorCode::ApplyFailed);
+        assert!(error.rollback_succeeded);
+        let restored = service.snapshot();
+        assert_eq!(restored.selected_audio_device, before.selected_audio_device);
+        assert_eq!(restored.volume_percent, before.volume_percent);
+        assert_eq!(restored.muted, before.muted);
+        service.shutdown().unwrap();
+
+        let library = test_library(1);
+        let (service, control, _) = service_with(&library);
+        control.set_devices(vec![
+            AudioDevice {
+                name: "auto".to_owned(),
+                description: "Default output".to_owned(),
+                selected: true,
+            },
+            AudioDevice {
+                name: "Headphones".to_owned(),
+                description: "Desk headphones".to_owned(),
+                selected: false,
+            },
+        ]);
+        let before = service.snapshot();
+        control.fail_next_outputs([FakeOutputCommand::Muted, FakeOutputCommand::Muted]);
+
+        let error = service
+            .apply_output_profile(OutputProfile {
+                id: "desk".to_owned(),
+                name: "Desk".to_owned(),
+                audio_device_name: "Headphones".to_owned(),
+                volume_percent: 86,
+                muted: true,
+            })
+            .unwrap_err();
+
+        assert_eq!(error.code, OutputProfileApplyErrorCode::ApplyFailed);
+        assert!(!error.rollback_succeeded);
+        let partially_restored = service.snapshot();
+        assert_eq!(
+            partially_restored.selected_audio_device,
+            before.selected_audio_device
+        );
+        assert_eq!(partially_restored.volume_percent, before.volume_percent);
+        assert_eq!(partially_restored.muted, before.muted);
         service.shutdown().unwrap();
     }
 

@@ -1,0 +1,13 @@
+[package]
+name = "spotdiy-windows-smtc"
+version = "0.1.0"
+description = "Small isolated Windows SMTC bridge for SpotDIY"
+edition = "2021"
+
+[dependencies]
+windows = { version = "0.62.2", features = ["Foundation", "Media", "Win32_Foundation", "Win32_System_WinRT"] }
+thiserror = "2"
+
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
