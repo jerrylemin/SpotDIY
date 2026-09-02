@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -243,14 +243,7 @@ pub(crate) fn stage_archive(
     validate_declared_payloads(&entries, &manifest)?;
 
     let import_id = Uuid::new_v4();
-    let root = layout
-        .restore_root
-        .join("imports")
-        .join(import_id.to_string());
-    fs::create_dir_all(&root).map_err(|source| ImportError::CreateStaging {
-        path: root.clone(),
-        source,
-    })?;
+    let root = create_staging_root(layout, import_id)?;
     let staged_database_path =
         root.join(DATABASE_ARCHIVE_PATH.replace('/', std::path::MAIN_SEPARATOR_STR));
     let stage_result = stage_payloads(
@@ -261,7 +254,7 @@ pub(crate) fn stage_archive(
         &staged_database_path,
     );
     if let Err(error) = stage_result {
-        let _ = fs::remove_dir_all(&root);
+        let _ = cleanup_staged_root_for_failure(layout, &root);
         return Err(error);
     }
 
@@ -274,9 +267,210 @@ pub(crate) fn stage_archive(
         import_id,
     );
     if result.is_err() {
-        let _ = fs::remove_dir_all(&root);
+        let _ = cleanup_staged_root_for_failure(layout, &root);
     }
     result
+}
+
+fn staging_error(path: PathBuf, detail: impl Into<String>) -> ImportError {
+    ImportError::CreateStaging {
+        path,
+        source: io::Error::new(io::ErrorKind::InvalidInput, detail.into()),
+    }
+}
+
+fn trusted_existing_directory(path: &Path) -> Result<PathBuf, ImportError> {
+    let metadata = fs::symlink_metadata(path).map_err(|source| ImportError::CreateStaging {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+        return Err(staging_error(
+            path.to_path_buf(),
+            "staging directory cannot be a symbolic link or reparse point",
+        ));
+    }
+    if !metadata.is_dir() {
+        return Err(staging_error(
+            path.to_path_buf(),
+            "staging path is not a directory",
+        ));
+    }
+    let canonical = fs::canonicalize(path).map_err(|source| ImportError::CreateStaging {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let canonical_metadata =
+        fs::symlink_metadata(&canonical).map_err(|source| ImportError::CreateStaging {
+            path: canonical.clone(),
+            source,
+        })?;
+    if canonical_metadata.file_type().is_symlink()
+        || is_reparse_point(&canonical_metadata)
+        || !canonical_metadata.is_dir()
+    {
+        return Err(staging_error(
+            canonical,
+            "canonical staging directory is not trusted",
+        ));
+    }
+    Ok(canonical)
+}
+
+fn ensure_trusted_directory(root: &Path, directory: &Path) -> Result<PathBuf, ImportError> {
+    let canonical_root = trusted_existing_directory(root)?;
+    let relative = directory
+        .strip_prefix(root)
+        .map_err(|_| staging_error(directory.to_path_buf(), "staging path is outside its root"))?;
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err(staging_error(
+                directory.to_path_buf(),
+                "staging path contains a non-normal component",
+            ));
+        };
+        current.push(name);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || is_reparse_point(&metadata) => {
+                return Err(staging_error(
+                    current,
+                    "staging path component is a symbolic link or reparse point",
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(staging_error(
+                    current,
+                    "staging path component is not a directory",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                fs::create_dir(&current).map_err(|source| ImportError::CreateStaging {
+                    path: current.clone(),
+                    source,
+                })?;
+            }
+            Err(source) => {
+                return Err(ImportError::CreateStaging {
+                    path: current,
+                    source,
+                });
+            }
+        }
+
+        let metadata =
+            fs::symlink_metadata(&current).map_err(|source| ImportError::CreateStaging {
+                path: current.clone(),
+                source,
+            })?;
+        if metadata.file_type().is_symlink() || is_reparse_point(&metadata) || !metadata.is_dir() {
+            return Err(staging_error(
+                current,
+                "staging path component is not a trusted directory",
+            ));
+        }
+        let canonical_current =
+            fs::canonicalize(&current).map_err(|source| ImportError::CreateStaging {
+                path: current.clone(),
+                source,
+            })?;
+        if !canonical_current.starts_with(&canonical_root) {
+            return Err(staging_error(
+                current,
+                "staging path component escapes its trusted root",
+            ));
+        }
+    }
+
+    let canonical = fs::canonicalize(directory).map_err(|source| ImportError::CreateStaging {
+        path: directory.to_path_buf(),
+        source,
+    })?;
+    if !canonical.starts_with(&canonical_root) {
+        return Err(staging_error(
+            directory.to_path_buf(),
+            "staging directory escapes its trusted root",
+        ));
+    }
+    Ok(canonical)
+}
+
+fn create_staging_root(layout: &StorageLayout, import_id: Uuid) -> Result<PathBuf, ImportError> {
+    let canonical_restore_root = trusted_existing_directory(&layout.restore_root)?;
+    let imports_root = layout.restore_root.join("imports");
+    let canonical_imports_root = ensure_trusted_directory(&layout.restore_root, &imports_root)?;
+    let root = imports_root.join(import_id.to_string());
+    match fs::symlink_metadata(&root) {
+        Ok(_) => return Err(staging_error(root, "generated staging root already exists")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(ImportError::CreateStaging { path: root, source });
+        }
+    }
+    fs::create_dir(&root).map_err(|source| ImportError::CreateStaging {
+        path: root.clone(),
+        source,
+    })?;
+    let canonical_root = trusted_existing_directory(&root)?;
+    if canonical_root.parent() != Some(canonical_imports_root.as_path())
+        || !canonical_root.starts_with(&canonical_restore_root)
+    {
+        return Err(staging_error(
+            root,
+            "generated staging root is outside the trusted restore root",
+        ));
+    }
+    Ok(canonical_root)
+}
+
+fn trusted_staged_root(layout: &StorageLayout, path: &Path) -> Result<PathBuf, ImportError> {
+    let canonical_restore_root = trusted_existing_directory(&layout.restore_root)?;
+    let canonical_imports_root = trusted_existing_directory(&layout.restore_root.join("imports"))?;
+    let canonical_root = trusted_existing_directory(path)?;
+    let name = canonical_root.file_name().and_then(|value| value.to_str());
+    if canonical_root.parent() != Some(canonical_imports_root.as_path())
+        || !canonical_root.starts_with(&canonical_restore_root)
+        || name.is_none_or(|value| Uuid::parse_str(value).is_err())
+    {
+        return Err(ImportError::InvalidPendingDescriptor(
+            "staged root is not an owned UUID directory under restore_root/imports".to_owned(),
+        ));
+    }
+    Ok(canonical_root)
+}
+
+pub(crate) fn cleanup_staged_root(layout: &StorageLayout, path: &Path) -> Result<(), ImportError> {
+    let trusted = trusted_staged_root(layout, path)?;
+    fs::remove_dir_all(&trusted).map_err(|source| ImportError::CreateStaging {
+        path: trusted,
+        source,
+    })
+}
+
+pub(crate) fn cleanup_staged_root_for_failure(
+    layout: &StorageLayout,
+    path: &Path,
+) -> Result<(), ImportError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => cleanup_staged_root(layout, path),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(ImportError::CreateStaging {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn cleanup_staging_root_if_present(layout: &StorageLayout, path: &Path) -> Result<(), ImportError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => cleanup_staged_root(layout, path),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(ImportError::CreateStaging {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 fn inspect_archive<R: Read + io::Seek>(
@@ -423,10 +617,7 @@ fn stage_payloads<R: Read + io::Seek>(
             staged_payload_path(root, &declared.path)?
         };
         if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(|source| ImportError::CreateStaging {
-                path: parent.to_path_buf(),
-                source,
-            })?;
+            ensure_trusted_directory(root, parent)?;
         }
         let (size, sha256) = copy_zip_entry_to_file(archive, archive_entry.index, &destination)?;
         if size != declared.size_bytes {
@@ -793,24 +984,54 @@ pub(crate) fn remove_pending_descriptor(layout: &StorageLayout) -> Result<(), Im
 }
 
 pub(crate) fn stage_path_is_trusted(layout: &StorageLayout, path: &Path) -> bool {
-    let Ok(root) = fs::canonicalize(&layout.restore_root) else {
+    let Ok(root) = trusted_existing_directory(&layout.restore_root) else {
         return false;
     };
-    let Ok(candidate) = fs::canonicalize(path) else {
+    trusted_path_within(&layout.restore_root, path, &root)
+}
+
+fn stage_path_is_below_trusted_root(root: &Path, path: &Path) -> bool {
+    let Ok(canonical_root) = fs::canonicalize(root) else {
         return false;
     };
-    candidate.starts_with(root)
+    trusted_path_within(root, path, &canonical_root)
+}
+
+fn trusted_path_within(root: &Path, path: &Path, canonical_root: &Path) -> bool {
+    let (base, relative) = if let Ok(relative) = path.strip_prefix(root) {
+        (root, relative)
+    } else if let Ok(relative) = path.strip_prefix(canonical_root) {
+        (canonical_root, relative)
+    } else {
+        return false;
+    };
+    let mut current = base.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return false;
+        };
+        current.push(name);
+        let Ok(metadata) = fs::symlink_metadata(&current) else {
+            return false;
+        };
+        if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+            return false;
+        }
+        let Ok(canonical_current) = fs::canonicalize(&current) else {
+            return false;
+        };
+        if !canonical_current.starts_with(canonical_root) {
+            return false;
+        }
+    }
+    true
 }
 
 pub(crate) fn revalidate_staged_import(
     descriptor: &PendingRestoreDescriptor,
 ) -> Result<Database, ImportError> {
-    if !descriptor.staged_root.exists()
-        || !descriptor.staged_database_path.exists()
-        || !descriptor
-            .staged_database_path
-            .starts_with(&descriptor.staged_root)
-    {
+    let staged_root = trusted_existing_directory(&descriptor.staged_root)?;
+    if !stage_path_is_below_trusted_root(&staged_root, &descriptor.staged_database_path) {
         return Err(ImportError::InvalidPendingDescriptor(
             "staged paths are missing or outside the staging root".to_owned(),
         ));
@@ -832,7 +1053,7 @@ pub(crate) fn revalidate_staged_import(
         .iter()
         .filter(|entry| entry.path != DATABASE_ARCHIVE_PATH)
     {
-        let path = staged_payload_path(&descriptor.staged_root, &entry.path)?;
+        let path = staged_payload_path(&staged_root, &entry.path)?;
         let metadata = fs::metadata(&path).map_err(|source| ImportError::StageFile {
             path: path.clone(),
             source,
@@ -1453,9 +1674,7 @@ fn cleanup_descriptor(
     layout: &StorageLayout,
     descriptor: &PendingRestoreDescriptor,
 ) -> Result<(), ImportError> {
-    if descriptor.staged_root.starts_with(&layout.restore_root) {
-        let _ = fs::remove_dir_all(&descriptor.staged_root);
-    }
+    cleanup_staging_root_if_present(layout, &descriptor.staged_root)?;
     remove_pending_descriptor(layout)
 }
 
@@ -1566,11 +1785,14 @@ fn remove_database_sidecars(path: &Path) {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::Write;
 
     use super::*;
     use crate::backup::archive::write_archive;
     use crate::backup::manifest::{SpotDiyArchiveEntry, SpotDiyExportOptions};
     use crate::backup::BackupService;
+    use rusqlite::params;
+    use zip::write::SimpleFileOptions;
 
     #[test]
     fn metadata_archive_stages_without_touching_active_database() {
@@ -1588,6 +1810,48 @@ mod tests {
                      VALUES ('test_marker', 'before', 'now')",
                     [],
                 )?;
+                let track_id = Uuid::new_v4().to_string();
+                let genre_track = connection.execute(
+                    "INSERT INTO tracks (id, title, normalized_title,
+                     created_at, updated_at)
+                     VALUES (?1, 'Fixture', 'fixture', 'now', 'now')",
+                    [&track_id],
+                )?;
+                assert_eq!(genre_track, 1);
+                connection.execute(
+                    "INSERT INTO track_genres (track_id, genre, normalized_genre)
+                     VALUES (?1, 'Rock', 'rock')",
+                    [&track_id],
+                )?;
+                let session_id = Uuid::new_v4().to_string();
+                connection.execute(
+                    "INSERT INTO listening_sessions
+                     (id, started_at, ended_at, created_at, updated_at)
+                     VALUES (?1, '2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z',
+                             '2026-01-01T00:01:00Z', '2026-01-01T00:01:00Z')",
+                    [&session_id],
+                )?;
+                connection.execute(
+                    "INSERT INTO play_history
+                     (id, session_id, track_id, title_snapshot, artists_json,
+                      started_at, ended_at, local_date, local_hour, local_weekday,
+                      listened_ms, outcome, qualified_play, created_at)
+                     VALUES (?1, ?2, ?3, 'Fixture', '[\"Artist\"]',
+                             '2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z',
+                             '2026-01-01', 0, 4, 60000, 'completed', 1,
+                             '2026-01-01T00:01:00Z')",
+                    params![Uuid::new_v4().to_string(), session_id, track_id],
+                )?;
+                connection.execute(
+                    "INSERT INTO smart_playlists
+                     (id, name, normalized_name, rule_json, sort_mode,
+                      sort_direction, created_at, updated_at)
+                     VALUES (?1, 'Rock', 'rock',
+                             '{\"type\":\"predicate\",\"field\":\"genre\",\"operation\":\"equals\",\"value\":\"rock\"}',
+                             'title', 'asc', '2026-01-01T00:00:00Z',
+                             '2026-01-01T00:00:00Z')",
+                    [Uuid::new_v4().to_string()],
+                )?;
                 Ok(())
             })
             .unwrap();
@@ -1602,6 +1866,34 @@ mod tests {
         .unwrap();
         let staged = stage_archive(&archive_path, &layout, StorageMode::Standard).unwrap();
         assert_eq!(staged.preview.entry_count, 1);
+        let staged_database = Database::open(&staged.staged_database_path).unwrap();
+        staged_database
+            .with_connection(|connection| {
+                for table in [
+                    "track_genres",
+                    "listening_sessions",
+                    "play_history",
+                    "smart_playlists",
+                ] {
+                    let count: i64 = connection.query_row(
+                        "SELECT COUNT(*) FROM sqlite_master
+                         WHERE type = 'table' AND name = ?1",
+                        [table],
+                        |row| row.get(0),
+                    )?;
+                    assert_eq!(count, 1, "missing table {table}");
+                }
+                let history_count: i64 =
+                    connection
+                        .query_row("SELECT COUNT(*) FROM play_history", [], |row| row.get(0))?;
+                let smart_count: i64 =
+                    connection
+                        .query_row("SELECT COUNT(*) FROM smart_playlists", [], |row| row.get(0))?;
+                assert_eq!(history_count, 1);
+                assert_eq!(smart_count, 1);
+                Ok(())
+            })
+            .unwrap();
         assert!(layout.database_path.exists());
         let marker: String = database
             .with_connection(|connection| {
@@ -1613,6 +1905,114 @@ mod tests {
             })
             .unwrap();
         assert_eq!(marker, "before");
+    }
+
+    #[test]
+    fn schema_eight_archive_is_migrated_to_nine_without_losing_prior_rows() {
+        let root = tempfile::tempdir().unwrap();
+        let exe = root.path().join("exe");
+        let local = root.path().join("local");
+        fs::create_dir_all(&exe).unwrap();
+        let layout = StorageLayout::for_mode(&exe, &local, StorageMode::Standard);
+        layout.ensure_runtime_directories().unwrap();
+
+        let legacy_database_path = root.path().join("legacy.sqlite3");
+        let legacy_database = Database::open(&legacy_database_path).unwrap();
+        legacy_database
+            .with_connection(|connection| {
+                connection.execute(
+                    "INSERT INTO schema_metadata(metadata_key, metadata_value, updated_at)
+                     VALUES ('legacy_marker', 'preserved', '2026-01-01T00:00:00Z')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        drop(legacy_database);
+
+        let connection = rusqlite::Connection::open(&legacy_database_path).unwrap();
+        connection
+            .execute_batch(
+                "DROP TABLE smart_playlists;
+                 DROP TABLE play_history;
+                 DROP TABLE listening_sessions;
+                 DROP TABLE track_genres;
+                 UPDATE schema_metadata
+                 SET metadata_value = '8'
+                 WHERE metadata_key = 'schema_version';
+                 PRAGMA user_version = 8;",
+            )
+            .unwrap();
+        connection
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .unwrap();
+        drop(connection);
+
+        let database_bytes = fs::read(&legacy_database_path).unwrap();
+        let database_entry = SpotDiyArchiveEntry {
+            path: DATABASE_ARCHIVE_PATH.to_owned(),
+            kind: SpotDiyArchiveEntryKind::Database,
+            size_bytes: database_bytes.len() as u64,
+            sha256: digest_bytes(&database_bytes),
+        };
+        let manifest = SpotDiyManifest {
+            format_version: super::super::manifest::SPOTDIY_ARCHIVE_FORMAT_VERSION,
+            app_version: "0.1.0".to_owned(),
+            database_schema_version: 8,
+            source_storage_mode: StorageMode::Standard,
+            entries: vec![database_entry],
+            media_mappings: Vec::new(),
+        };
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        let archive_path = root.path().join("schema-eight.spotdiy");
+        let file = File::create(&archive_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file(MANIFEST_PATH, options).unwrap();
+        writer.write_all(&manifest_bytes).unwrap();
+        writer.start_file(MANIFEST_CHECKSUM_PATH, options).unwrap();
+        writer
+            .write_all(format!("{}\n", digest_bytes(&manifest_bytes)).as_bytes())
+            .unwrap();
+        writer.start_file(DATABASE_ARCHIVE_PATH, options).unwrap();
+        writer.write_all(&database_bytes).unwrap();
+        writer.finish().unwrap();
+
+        let staged = stage_archive(&archive_path, &layout, StorageMode::Standard).unwrap();
+        let staged_database = Database::open(&staged.staged_database_path).unwrap();
+        assert_eq!(
+            staged_database.schema_version().unwrap(),
+            LATEST_SCHEMA_VERSION
+        );
+        let marker: String = staged_database
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT metadata_value FROM schema_metadata WHERE metadata_key = 'legacy_marker'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(marker, "preserved");
+        staged_database
+            .with_connection(|connection| {
+                for table in [
+                    "track_genres",
+                    "listening_sessions",
+                    "play_history",
+                    "smart_playlists",
+                ] {
+                    let count: i64 = connection.query_row(
+                        "SELECT COUNT(*) FROM sqlite_master
+                         WHERE type = 'table' AND name = ?1",
+                        [table],
+                        |row| row.get(0),
+                    )?;
+                    assert_eq!(count, 1, "missing table {table}");
+                }
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
@@ -1635,6 +2035,124 @@ mod tests {
             stage_archive(&file_path, &layout, StorageMode::Standard),
             Err(ImportError::UnsafeEntryPath(_))
         ));
+    }
+
+    #[test]
+    fn staging_rejects_a_non_directory_imports_component() {
+        let root = tempfile::tempdir().unwrap();
+        let exe = root.path().join("exe");
+        let local = root.path().join("local");
+        fs::create_dir_all(&exe).unwrap();
+        let layout = StorageLayout::for_mode(&exe, &local, StorageMode::Standard);
+        layout.ensure_runtime_directories().unwrap();
+        fs::write(layout.restore_root.join("imports"), b"not a directory").unwrap();
+
+        assert!(matches!(
+            create_staging_root(&layout, Uuid::new_v4()),
+            Err(ImportError::CreateStaging { .. })
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staging_rejects_a_symlink_imports_component() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let exe = root.path().join("exe");
+        let local = root.path().join("local");
+        let outside = root.path().join("outside");
+        fs::create_dir_all(&exe).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let layout = StorageLayout::for_mode(&exe, &local, StorageMode::Standard);
+        layout.ensure_runtime_directories().unwrap();
+        fs::remove_dir(&layout.restore_root.join("imports")).unwrap();
+        symlink(&outside, layout.restore_root.join("imports")).unwrap();
+
+        assert!(matches!(
+            create_staging_root(&layout, Uuid::new_v4()),
+            Err(ImportError::CreateStaging { .. })
+        ));
+        assert!(fs::read_dir(&outside).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn cleanup_refuses_an_unowned_staging_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let exe = root.path().join("exe");
+        let local = root.path().join("local");
+        fs::create_dir_all(&exe).unwrap();
+        let layout = StorageLayout::for_mode(&exe, &local, StorageMode::Standard);
+        layout.ensure_runtime_directories().unwrap();
+        let foreign = layout.restore_root.join("foreign");
+        fs::create_dir(&foreign).unwrap();
+        let marker = foreign.join("keep");
+        fs::write(&marker, b"keep").unwrap();
+
+        assert!(cleanup_staged_root(&layout, &foreign).is_err());
+        assert!(marker.exists());
+
+        let owned = create_staging_root(&layout, Uuid::new_v4()).unwrap();
+        fs::write(owned.join("owned"), b"owned").unwrap();
+        cleanup_staged_root(&layout, &owned).unwrap();
+        assert!(!owned.exists());
+    }
+
+    #[test]
+    fn staging_rejects_a_destination_outside_the_generated_root() {
+        let root = tempfile::tempdir().unwrap();
+        let exe = root.path().join("exe");
+        let local = root.path().join("local");
+        fs::create_dir_all(&exe).unwrap();
+        let layout = StorageLayout::for_mode(&exe, &local, StorageMode::Standard);
+        layout.ensure_runtime_directories().unwrap();
+        let owned = create_staging_root(&layout, Uuid::new_v4()).unwrap();
+
+        assert!(ensure_trusted_directory(&owned, &layout.restore_root).is_err());
+        cleanup_staged_root(&layout, &owned).unwrap();
+    }
+
+    #[test]
+    fn staging_rejects_a_file_payload_parent_without_writing_outside() {
+        let root = tempfile::tempdir().unwrap();
+        let exe = root.path().join("exe");
+        let local = root.path().join("local");
+        fs::create_dir_all(&exe).unwrap();
+        let layout = StorageLayout::for_mode(&exe, &local, StorageMode::Standard);
+        layout.ensure_runtime_directories().unwrap();
+        let owned = create_staging_root(&layout, Uuid::new_v4()).unwrap();
+        let payloads = owned.join("payloads");
+        fs::create_dir(&payloads).unwrap();
+        fs::write(payloads.join("escape"), b"not a directory").unwrap();
+        let destination = payloads.join("escape").join("payload.bin");
+
+        assert!(ensure_trusted_directory(&owned, destination.parent().unwrap()).is_err());
+        assert!(!layout.restore_root.join("payload.bin").exists());
+        cleanup_staged_root(&layout, &owned).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staging_rejects_a_symlink_payload_parent_without_writing_outside() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let exe = root.path().join("exe");
+        let local = root.path().join("local");
+        let outside = root.path().join("outside");
+        fs::create_dir_all(&exe).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let layout = StorageLayout::for_mode(&exe, &local, StorageMode::Standard);
+        layout.ensure_runtime_directories().unwrap();
+        let owned = create_staging_root(&layout, Uuid::new_v4()).unwrap();
+        let payloads = owned.join("payloads");
+        fs::create_dir(&payloads).unwrap();
+        symlink(&outside, payloads.join("escape")).unwrap();
+        let destination = payloads.join("escape").join("payload.bin");
+
+        assert!(ensure_trusted_directory(&owned, destination.parent().unwrap()).is_err());
+        assert!(!outside.join("payload.bin").exists());
+        cleanup_staged_root(&layout, &owned).unwrap();
     }
 
     #[test]
