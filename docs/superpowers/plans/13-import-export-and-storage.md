@@ -31,3 +31,22 @@ Failed imports cannot damage the active library and portable mode never silently
 ## Commit boundary
 
 `feat: add local backup restore and portable storage`
+
+## Delivery evidence
+
+Implemented in `7579312`, `d287f65`, `6c2b026`, `bdf04f0`, and `5e70fdf`, with the Plan 12
+shortcut repair in `3ca57a4`. No schema 9 migration was added. The final
+storage resolver selects Standard or Portable before database open; the
+executable-adjacent marker is authoritative and Portable has no AppData
+fallback. The archive is deterministic format 1 with online SQLite snapshots,
+manifest/checksum validation, trusted optional media, artwork, and exact
+same-stem sidecars. Import is bounded and secure, staged without active DB
+mutation, previewed, committed through a pending descriptor, applied on
+restart, and recoverable with database/media rollback.
+
+Final checks pass: 393 Rust unit tests plus real-mpv, 81 Vitest, 69 Playwright,
+frontend typecheck/lint/test/build, Rust fmt/strict Clippy/all-target tests,
+Tauri release/NSIS build, regular/Plan 11/Plan 12 packaged smokes, and the
+isolated packaged Plan 13 Standard/Portable restart smoke. Lint/build retain
+only the documented pre-existing warnings. Gmail completion delivery was not
+possible because no Gmail connector is installed.

@@ -186,3 +186,27 @@ reuse and topmost state, click-through recovery, output-profile apply/restore
 without playback-context mutation, schema version 8, and zero owned mpv
 processes. Browser preview remains native-free; live provider, LRCLIB, and
 download smoke remain optional.
+
+## Plan 13 verification
+
+Plan 13 passes 393 Rust unit tests plus one real-mpv integration test, 81
+Vitest tests across 22 files, and 69 Playwright tests across the 1280, 1920,
+and 2560 viewport projects. Frontend typecheck/lint/build, Rust fmt, strict
+all-features Clippy, all-target tests, `git diff --check`, and the external
+target Tauri release/NSIS build pass. The same three pre-existing Fast Refresh
+lint warnings and documented frontend build notices remain non-fatal.
+
+Focused native coverage includes deterministic ZIP bytes and fixed timestamps,
+manifest/hash exactness, safe path and case collision checks, symlink and
+compression-bomb rejection, payload declaration/size/hash checks, staged
+database migration/integrity/foreign-key validation, missing-file previews,
+audio/sidecar restoration, artwork cache allowlisting, crash recovery,
+database rollback, no-active-mutation staging, marker authority, exact
+Portable paths, and failure-preserving mode switches.
+
+The regular packaged playback smoke, packaged Plan 11 shell smoke, packaged
+Plan 12 Windows smoke, and the isolated packaged Plan 13 Standard/Portable
+restart smoke all pass with clean shutdown. The Plan 13 packaged harness does
+not automate OS-native save/open/folder dialogs; those production dialog
+boundaries remain covered by native command wiring and the archive/restore
+unit suite. Live provider, LRCLIB, and download smoke remain optional.

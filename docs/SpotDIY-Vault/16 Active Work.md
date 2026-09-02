@@ -147,3 +147,20 @@ rollback-safe output profiles. Verification evidence is recorded in
 ## Next atomic task
 
 Plan 13 import/export and portable mode remains unstarted.
+
+## Plan 13 completion
+
+Plan 13 is complete through implementation commits `7579312`, `d287f65`,
+`6c2b026`, `bdf04f0`, and `5e70fdf`; the Plan 12 shortcut repair is `3ca57a4`.
+It adds
+schema-8-compatible deterministic Standard/Portable startup, online WAL-safe
+`.spotdiy` archives, secure staged import/preview/commit, restart apply and
+rollback recovery, trusted media/artwork/sidecar handling, typed Settings
+backup controls, and an isolated packaged storage smoke. Verification evidence
+is recorded in `docs/execution/verification-log.md` and
+`docs/SpotDIY-Vault/12 Testing.md`.
+
+## Next atomic task
+
+STOPPED AFTER PLAN 13.
+Awaiting external ChatGPT GitHub review before Plan 14.

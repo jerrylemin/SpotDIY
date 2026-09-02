@@ -143,3 +143,31 @@ src/hooks/useWindowsIntegration.ts + overlay-store.ts --> typed UI state
 Gaming click-through are session state; settings, bindings, and output profiles
 are durable ordinary records. The frontend receives only validated snapshots,
 status details, typed overlay kinds, and profile values.
+
+## Plan 13 backup and storage structure
+
+```text
+src-tauri/src/storage/mod.rs
+        +--> deterministic Standard/Portable layout resolver
+        +--> marker, directory, writable-root, and mode-switch ownership
+        `--> StorageStatus / StorageModeSwitchResult
+
+src-tauri/src/backup/mod.rs
+        +--> archive.rs  online snapshot and deterministic ZIP export
+        +--> manifest.rs format-1 manifest, paths, mappings, and bounds
+        `--> import.rs   secure staging, preview, pending descriptor, apply/rollback
+
+src-tauri/src/lib.rs
+        +--> native save/pick/folder dialogs and typed backup/storage commands
+        `--> startup storage selection before Database::open
+
+src/components/backup/* + src/hooks/useBackup.ts
+        `--> Settings backup/export/import preview and storage status surface
+```
+
+`StorageLayout` is resolved before SQLite opens. The marker wins over every
+other mode hint and Portable startup does not fall back to AppData.
+`BackupService` owns archive lifecycle and pending-restore state; active
+database replacement, media creation, and rollback remain native and
+restart-gated. The frontend sees validated DTOs only and never supplies
+arbitrary export/import paths.

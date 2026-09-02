@@ -35,3 +35,19 @@ and a WebView2 CDP connection. The smoke confirms Local indexing and search,
 independent online-provider failure sections, cancellation, the Spotify gate,
 and cleanup of the packaged process and helper processes. The temporary profile
 is removed after the run and no repository-local Cargo target is retained.
+
+## Plan 13 release and storage smoke
+
+Plan 13 continues to redirect Cargo/Tauri output to the external
+`C:\CargoTarget\SpotDIY` target. `pnpm tauri build` produces the release
+executable and NSIS bundle there; `src-tauri\target` remains absent.
+
+The packaged Plan 13 smoke copies the release executable into an isolated
+temporary application directory, starts it with a temporary data root, and
+drives only typed Tauri storage commands over the packaged WebView bridge. It
+proves Standard startup, restart-gated Standard-to-Portable preparation,
+Portable startup from the executable marker and `Database` path, exact
+portable directories, Portable-to-Standard preparation, marker removal, final
+Standard restart, and retention of both databases. Export/import OS dialogs
+are intentionally not bypassed by the smoke; archive and restore behavior is
+covered by the native suite.

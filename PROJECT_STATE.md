@@ -275,3 +275,33 @@ non-fatal warnings. CodeGraph reports 166 files, 5,349 nodes, and 19,394
 edges; Graphify reports 4,467 nodes, 8,952 edges, and 262 communities. Build
 output remains external at `C:\CargoTarget\SpotDIY`; repository-local
 `src-tauri\target` remains absent.
+
+## Plan 13 delivery snapshot
+
+Plan 13 is complete through implementation commits `7579312`, `d287f65`,
+`6c2b026`, `bdf04f0`, and `5e70fdf`. The Plan 12 shortcut persistence repair remains in
+`3ca57a4` and was verified before Plan 13 work. SQLite remains at schema 8;
+the storage-mode row is a runtime mirror, while deterministic startup selects
+Standard or Portable from the executable-adjacent `SpotDIY.portable` marker.
+
+The native boundary now owns WAL-safe online database snapshots, deterministic
+format-1 `.spotdiy` archives with manifest and SHA-256 integrity metadata,
+trusted local-media/artwork/sidecar selection, bounded secure ZIP validation,
+staged import preview, restart-gated commit, crash recovery, rollback backups,
+and Standard/Portable mode transitions. Portable mode uses exact executable-
+relative `Data`, `Music`, `Covers`, `Lyrics`, `Database`, `Cache`, and `Config`
+roots without AppData fallback. Settings exposes typed export, import preview,
+cancel/confirm, storage status, and restart-required mode switching.
+
+Final evidence: 393 Rust unit tests plus one passing real-mpv integration test,
+81 Vitest tests across 22 files, 69 Playwright tests across the three viewport
+projects, frontend typecheck/lint/test/build, Rust fmt/strict all-features
+Clippy/all-target tests, Tauri release/NSIS packaging, regular/Plan 11/Plan 12
+packaged smokes, and the new isolated Plan 13 packaged Standard/Portable
+restart smoke. Lint retains three pre-existing Fast Refresh warnings; build
+retains the existing Browserslist, Tailwind content, ineffective dynamic
+import, and large-chunk notices. Graphify's final code-only refresh reports
+4,723 nodes, 9,470 edges, and 277 communities. Build output remains external
+at `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` remains
+absent. Gmail delivery is not available because no Gmail connector is
+installed.

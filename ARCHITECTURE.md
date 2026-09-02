@@ -352,3 +352,29 @@ settings and apply through `PlaybackService` without changing track, queue,
 position, or playback phase; device/volume/mute failures roll back and report
 the recovery result. Overlay visibility, native handles, tray state, SMTC
 runtime objects, and click-through state are never persisted.
+
+## Plan 13 backup and portable storage boundary
+
+`StorageLayout` is the startup authority. It inspects only the exact
+`SpotDIY.portable` marker beside the running executable, validates every
+required directory without following symlinks or reparse points, and resolves
+the database before `Database::open`. Standard uses the platform local-data
+root; Portable uses executable-relative `Data`, `Music`, `Covers`, `Lyrics`,
+`Database`, `Cache`, and `Config` roots. A marker is authoritative, so a
+portable failure is explicit and never silently redirected to AppData.
+
+`BackupService` owns the archive and restore lifecycle. `archive.rs` creates a
+WAL-safe online database snapshot and a deterministic format-1 ZIP containing
+stable JSON, an exact manifest checksum, and only trusted local audio, exact
+same-stem sidecars, and active artwork-cache files. `import.rs` validates ZIP
+names, compression, bounds, hashes, declared entries, schema, integrity, and
+foreign keys before staging. Commit writes a pending descriptor and requires a
+restart; startup applies it before normal database open, records created media,
+keeps one rollback snapshot, and restores the prior database/deletes only files
+created by the failed import on error.
+
+The frontend receives only typed/Zod-validated status, options, previews, and
+results. Native Tauri dialogs own destination selection for export, archive
+selection for import, and Standard-mode included-audio restore folders.
+Credentials, tokens, provider payloads, live SQLite sidecars, temp files, and
+untrusted media paths are outside the archive boundary.

@@ -177,3 +177,27 @@ CodeGraph reports 166 files, 5,349 nodes, and 19,394 edges; Graphify reports
 ## Next atomic task
 
 Plan 13 import/export and portable mode remains unstarted.
+
+## Plan 13 handoff
+
+Plan 13 is complete through `7579312`, `d287f65`, `6c2b026`, `bdf04f0`, and
+`5e70fdf`.
+Startup selects Standard or Portable from the exact executable marker before
+opening SQLite; Portable has no AppData fallback. `BackupService` owns
+deterministic export, secure staging, preview, restart-gated apply, media
+restore, crash recovery, and rollback. The settings surface uses strict typed
+IPC and native dialogs for paths. The packaged Plan 13 smoke proves
+Standard -> Portable -> Standard restart behavior and exact directory layout.
+
+Verified evidence: 393 Rust unit tests plus real-mpv integration, 81 Vitest,
+69 Playwright, frontend/native quality gates, Tauri packaging, regular/Plan 11/
+Plan 12 packaged smokes, and the Plan 13 packaged storage smoke. Graphify
+reports 4,723 nodes, 9,470 edges, and 277 communities. Build output is
+external at `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target`
+is absent. Gmail delivery is unavailable because the Gmail connector is not
+installed.
+
+## Next atomic task
+
+STOPPED AFTER PLAN 13.
+Awaiting external ChatGPT GitHub review before Plan 14.

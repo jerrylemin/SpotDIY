@@ -235,3 +235,30 @@
   schema-8 restart persistence, and zero owned mpv processes.
 - Implementation commits are `95eb41b`, `b7daac6`, `d9b58c3`, `e4793b6`, and
   `3d39e1d`; documentation closure follows this verified integration.
+
+## 2026-09-02 - Plan 13 import/export and portable storage
+
+- Integrated deterministic startup storage resolution before SQLite open. The
+  exact executable-adjacent `SpotDIY.portable` marker selects Portable; no
+  marker selects Standard; portable setup failures are explicit and never fall
+  back to AppData. Mode switches copy databases with online WAL-safe backups,
+  change the settings row only as a runtime mirror, and create/remove the
+  marker last with restart required.
+- Integrated `BackupService` with format-1 `.spotdiy` export/import. ZIP paths,
+  compression, bounds, case collisions, symlinks, manifest bytes, declared
+  payloads, hashes, schema, integrity, and foreign keys are validated before
+  import staging. Export includes only the database and explicitly selected
+  trusted local audio, same-stem sidecars, and active artwork cache.
+- Integrated pending restore descriptors, restart-before-apply, applying-state
+  recovery, active database rollback via online snapshot, created-media
+  tracking, and missing-file preview. Native dialogs retain ownership of
+  destination, archive, and Standard audio restore folder selection.
+- Integrated typed frontend IPC, `useBackup`, the Settings Backup section,
+  import preview/confirm/cancel, storage status, and restart-required mode
+  controls. Browser preview remains path-safe and native-free.
+- Fixed the packaged startup path by resolving the current executable's parent
+  directly; the release executable now passes regular, Plan 11, Plan 12, and
+  Plan 13 isolated packaged smokes.
+- Implementation commits are `7579312`, `d287f65`, `6c2b026`, `bdf04f0`, and
+  `5e70fdf`;
+  Plan 12 shortcut repair is `3ca57a4`.

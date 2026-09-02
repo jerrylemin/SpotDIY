@@ -81,3 +81,23 @@ schema 7-to-8 fixture compares all prior settings rows before and after the
 migration and keeps `foreign_key_check` at zero; the packaged Plan 12 smoke
 also verifies a fresh database reaches schema 8 and retains the durable values
 across restart.
+
+## Plan 13 storage and database snapshots
+
+Plan 13 keeps the final SQLite schema at version 8; no migration 9 is added.
+Startup resolves the active database from the exact executable-adjacent
+`SpotDIY.portable` marker before opening SQLite. Standard uses the platform
+local-data root; Portable uses the executable-relative `Database\spotdiy.sqlite3`
+and exact `Data`, `Music`, `Covers`, `Lyrics`, `Cache`, and `Config` roots. The
+persisted `storage_mode` value is a mirror of the resolved runtime mode and is
+updated only after startup or a verified mode transition.
+
+`Database::online_backup_to` uses SQLite's backup API so live WAL databases are
+never copied with `fs::copy`. Archive export snapshots the database into a
+trusted temporary workspace, validates schema/integrity/foreign keys, and
+stores only the finalized `database/spotdiy.sqlite3` entry. Import migrates
+only its staged database, forces the active storage mode, validates it, and
+does not touch the active database until restart apply. A pending restore keeps
+an online copy of the staged original and an active rollback snapshot so a
+crash or apply failure can restore the prior state without deleting unrelated
+user files.

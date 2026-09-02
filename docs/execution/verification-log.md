@@ -410,3 +410,37 @@ below.
   4,467 nodes, 8,952 edges, and 262 communities. No runtime database, media,
   credentials, tokens, raw provider payloads, or generated test artifacts are
   retained in the repository.
+
+## 2026-09-02 - Plan 13 final verification
+
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` - passed.
+  `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+  --all-features -- -D warnings` - passed. `cargo test --manifest-path
+  src-tauri/Cargo.toml --all-targets` - passed: 393 Rust unit tests plus one
+  real-mpv synthetic WAV integration test.
+- Backup-focused native coverage passed for deterministic archive metadata and
+  byte equality, exact manifest checksums, online WAL snapshots, secure ZIP
+  bounds/path/compression/symlink/case checks, staged import isolation,
+  migration/integrity/FK validation, missing references, audio and sidecar
+  restore, artwork trust boundaries, crash recovery, rollback, and both
+  Standard/Portable transitions.
+- `pnpm typecheck` - passed. `pnpm lint` - passed with the same three
+  pre-existing Fast Refresh warnings in `SpotIcon.tsx` and
+  `theme-controller.tsx`. `pnpm test` - passed: 81 tests across 22 files.
+- `pnpm exec playwright test` - passed: 69 tests across the 1280, 1920, and
+  2560 viewport projects. `pnpm build` - passed. Existing non-fatal notices
+  remain for stale Browserslist data, empty Tailwind content configuration,
+  ineffective dynamic import, and the large frontend chunk.
+- `pnpm tauri build` - passed. Release executable and NSIS bundle are under
+  external `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target`
+  remains absent.
+- `scripts/packaged-playback-smoke.ps1` - passed. Packaged Plan 11 shell
+  smoke - passed. `scripts/packaged-windows-integration-smoke.ps1` - passed.
+  `scripts/packaged-backup-storage-smoke.ps1` - passed: isolated release
+  Standard startup, Standard-to-Portable preparation, Portable restart,
+  Portable-to-Standard preparation, final Standard restart, exact portable
+  directories, marker removal, and retained databases.
+- `graphify update .` - passed; final code-only graph reports 4,723 nodes,
+  9,470 edges, and 277 communities. `git diff --check` - passed before
+  documentation closure. `memory.zip` remains untracked and was not touched;
+  no runtime data or secrets are retained in the repository.

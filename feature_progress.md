@@ -21,7 +21,7 @@ verification gates.
 | UI design system | 10 | COMPLETE | `6eb231d` | 70 Vitest, 51 Playwright; typecheck/lint/build | Semantic themes, layout profiles, accessible primitives, context actions, inspector/gallery foundation, and Settings APPEARANCE are delivered. |
 | Main-player refinement | 11 | COMPLETE | `15031bf` | 73 Vitest, 63 Playwright, packaged Plan 11 smoke | Source switcher, quality/provenance, Track Inspector, capability-aware actions, Home dashboard, command palette, Escape priority, and three in-shell modes are delivered. |
 | Overlays and Windows integration | 12 | COMPLETE | `3d39e1d` | 365 Rust + 78 Vitest + 69 Playwright; fmt/clippy/build/package/smoke | Schema 8 settings, native overlays/tray/shortcuts/SMTC, click-through recovery, output profiles, browser/native/package coverage, and restart persistence are delivered. |
-| Import/export and portable mode | 13 | NOT STARTED | — | — | Transactional `.spotdiy` archive and deterministic portable startup. |
+| Import/export and portable mode | 13 | COMPLETE | `5e70fdf` | 393 Rust + 81 Vitest + 69 Playwright; fmt/clippy/build/package/smoke | Deterministic `.spotdiy` archive, secure staged restore/rollback, exact Portable layout, typed Settings UI, and restart-gated Standard/Portable switching. |
 | Smart features and analytics | 14 | NOT STARTED | — | — | Local-only listening analytics. |
 | Advanced visual exploration | 15 | NOT STARTED | — | — | Music Map, Galaxy, radial menu, Theme Studio. |
-| Quality, performance, release | 16 | IN PROGRESS | `3d39e1d` | 365 Rust + 78 Vitest + 69 Playwright; fmt/clippy/build/package/smoke | Plan 12 verification gates pass locally; clean-install and later performance/accessibility work remain. |
+| Quality, performance, release | 16 | IN PROGRESS | `5e70fdf` | 393 Rust + 81 Vitest + 69 Playwright; fmt/clippy/build/package/smoke | Plan 13 verification gates pass locally; clean-install and later performance/accessibility work remain. |

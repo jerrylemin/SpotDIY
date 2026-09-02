@@ -214,3 +214,33 @@
   247 communities; CodeGraph was refreshed once for the shell/player/inspector
   dependency query. No online playback, Spotify download, provider behavior,
   media mutation, secret, or repository-local `src-tauri\target` is included.
+
+## Plan 13 verification
+
+- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`, strict
+  all-targets/all-features Clippy, and `cargo test --manifest-path
+  src-tauri/Cargo.toml --all-targets` pass. The final suite reports 393 Rust
+  unit tests plus one real-mpv synthetic WAV integration test.
+- Backup/storage coverage includes exact manifest bytes and SHA-256 checksums,
+  deterministic archive bytes and timestamps, format/schema/path/count/bomb
+  rejection, case and symlink rejection, missing/undeclared payloads, WAL-safe
+  online snapshots, staged DB isolation, schema migration in staging, missing
+  references, audio/sidecar restoration, artwork trust boundaries, crash
+  recovery, active DB rollback, Standard/Portable path resolution, no-fallback
+  marker behavior, and mode-switch failure preservation.
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass;
+  Vitest reports 81 tests across 22 files. Lint retains three pre-existing Fast
+  Refresh warnings and build retains the documented non-fatal notices.
+- Browser: `pnpm exec playwright test` passes 69 tests across the 1280, 1920,
+  and 2560 viewport projects; backup Settings controls and browser IPC preview
+  boundaries are covered by the frontend contract suite.
+- Runtime: `pnpm tauri build` passes with release/NSIS output under external
+  `C:\CargoTarget\SpotDIY`. The regular playback, Plan 11 shell, and Plan 12
+  Windows packaged smokes pass. `scripts/packaged-backup-storage-smoke.ps1`
+  passes using an isolated release copy and proves Standard -> Portable ->
+  Standard restart selection, exact portable directories, marker removal, and
+  retention of both databases.
+- Safety: no `.spotdiy` archive, runtime database, rollback, portable test
+  directory, media, credentials, tokens, or repository-local
+  `src-tauri\target` is retained. `memory.zip` remains an untracked user file
+  and was not touched.

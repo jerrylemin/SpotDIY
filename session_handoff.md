@@ -236,3 +236,33 @@ remain explicit unavailable states.
 ## Next atomic task
 
 Plan 13 import/export and portable mode remains unstarted.
+
+## Plan 13 completion
+
+Plan 13 is complete through `7579312`, `d287f65`, `6c2b026`, `bdf04f0`, and
+`5e70fdf`.
+The Plan 12 shortcut repair is `3ca57a4`. Schema 8 remains the latest schema;
+startup resolves Standard or Portable from the executable-adjacent marker
+before opening SQLite, and the settings storage-mode value is only a mirror.
+
+Native code owns deterministic format-1 `.spotdiy` export, online WAL-safe
+database snapshots, trusted media/artwork/sidecar inclusion, secure bounded ZIP
+validation, staged preview, restart-gated commit, crash recovery, media-aware
+rollback, and exact Standard/Portable mode switches. Settings now exposes
+typed backup actions and status. The packaged Plan 13 smoke runs the release
+executable from an isolated copy and proves Standard -> Portable -> Standard
+restart selection, exact portable directories, and retained databases.
+
+Verified evidence: 393 Rust unit tests plus real-mpv integration, 81 Vitest
+tests across 22 files, 69 Playwright tests, frontend/native quality gates,
+Tauri release/NSIS packaging, regular/Plan 11/Plan 12 packaged smokes, and the
+Plan 13 packaged storage smoke. Graphify reports 4,723 nodes, 9,470 edges,
+and 277 communities. Build output is external at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
+The Gmail completion message could not be sent because the Gmail connector is
+not installed.
+
+## Next atomic task
+
+STOPPED AFTER PLAN 13.
+Awaiting external ChatGPT GitHub review before Plan 14.
