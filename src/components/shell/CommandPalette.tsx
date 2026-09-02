@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { usePlayback } from "../../hooks/usePlayback";
+import { useWindowsIntegration } from "../../hooks/useWindowsIntegration";
 import { useUiStore } from "../../stores/ui-store";
 import { SpotIcon, type SpotIconName } from "../icons/SpotIcon";
 
@@ -20,6 +21,7 @@ export function CommandPalette() {
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
   const navigate = useNavigate();
   const playback = usePlayback();
+  const windows = useWindowsIntegration();
   const playerMode = useUiStore((state) => state.playerMode);
   const setPlayerMode = useUiStore((state) => state.setPlayerMode);
   const setQueueDrawerOpen = useUiStore((state) => state.setQueueDrawerOpen);
@@ -64,6 +66,19 @@ export function CommandPalette() {
       action: () => { void playback.clearQueue(); },
     },
   ], [playback, queueReady]);
+
+  const overlayCommands = useMemo<Command[]>(() => {
+    if (!windows.snapshot?.platformSupported) {
+      return [];
+    }
+    return [
+      { id: "overlay-mini", label: "Toggle Mini Overlay", hint: "Show or hide the native Mini overlay", icon: "collapse", action: () => { void windows.toggleOverlay("mini"); } },
+      { id: "overlay-edge", label: "Toggle Edge Overlay", hint: "Show or hide the native Edge overlay", icon: "expand", action: () => { void windows.toggleOverlay("edge"); } },
+      { id: "overlay-lyrics", label: "Toggle Lyrics Overlay", hint: "Show or hide the native Lyrics overlay", icon: "lyrics", action: () => { void windows.toggleOverlay("lyrics"); } },
+      { id: "overlay-gaming", label: "Toggle Gaming Overlay", hint: "Show or hide the native Gaming overlay", icon: "play", action: () => { void windows.toggleOverlay("gaming"); } },
+      { id: "show-spotdiy", label: "Show SpotDIY", hint: "Bring the main SpotDIY window to the front", icon: "home", action: () => { void windows.showMain(); } },
+    ];
+  }, [windows]);
 
   const commands = useMemo<Command[]>(() => [
     { id: "search", label: "Search sources", hint: "Find music across your sources", icon: "search", path: "/search" },
@@ -116,7 +131,8 @@ export function CommandPalette() {
       action: () => setPlayerMode("expanded"),
     },
     ...transportCommands,
-  ], [openTrackInspector, playback.snapshot.currentTrackId, playerMode, setPlayerMode, setQueueDrawerOpen, transportCommands]);
+    ...overlayCommands,
+  ], [openTrackInspector, overlayCommands, playback.snapshot.currentTrackId, playerMode, setPlayerMode, setQueueDrawerOpen, transportCommands]);
 
   const filteredCommands = useMemo(
     () => commands.filter((command) => `${command.label} ${command.hint}`.toLowerCase().includes(query.toLowerCase())),

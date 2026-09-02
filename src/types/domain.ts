@@ -193,6 +193,88 @@ export interface SettingsSnapshot {
   sourcePreferenceOrder: ProviderKind[];
   firstRun: boolean;
   storageMode: StorageMode;
+  windowsIntegration: WindowsIntegrationSettings;
+  globalShortcuts: GlobalShortcutBinding[];
+  outputProfiles: OutputProfile[];
+}
+
+export interface WindowsIntegrationSettings {
+  smtcEnabled: boolean;
+  globalShortcutsEnabled: boolean;
+}
+
+export type GlobalShortcutAction =
+  | "playPause"
+  | "next"
+  | "previous"
+  | "volumeUp"
+  | "volumeDown"
+  | "showHideMain"
+  | "toggleMiniOverlay"
+  | "toggleLyricsOverlay"
+  | "toggleGamingOverlay";
+
+export interface GlobalShortcutBinding {
+  action: GlobalShortcutAction;
+  accelerator: string;
+  enabled: boolean;
+}
+
+export type OverlayKind = "mini" | "edge" | "lyrics" | "gaming";
+export type OverlayStatus = "closed" | "open" | "error";
+export type TrayStatus = "ready" | "failed";
+export type SmtcStatus = "ready" | "disabled" | "unsupported" | "failed";
+export type ShortcutRegistrationStatus = "disabled" | "registered" | "conflict" | "invalid" | "failed";
+
+export interface ShortcutStatus {
+  action: GlobalShortcutAction;
+  accelerator: string;
+  enabled: boolean;
+  status: ShortcutRegistrationStatus;
+  detail: string | null;
+}
+
+export interface OverlaySnapshot {
+  kind: OverlayKind;
+  status: OverlayStatus;
+  detail: string | null;
+}
+
+export interface OutputProfile {
+  id: string;
+  name: string;
+  audioDeviceName: string;
+  volumePercent: number;
+  muted: boolean;
+}
+
+export interface WindowsIntegrationSnapshot {
+  revision: number;
+  platformSupported: boolean;
+  trayStatus: TrayStatus;
+  trayDetail: string | null;
+  smtcStatus: SmtcStatus;
+  smtcDetail: string | null;
+  globalShortcutsEnabled: boolean;
+  shortcutStatuses: ShortcutStatus[];
+  overlays: OverlaySnapshot[];
+  gamingClickThrough: boolean;
+  outputProfiles: OutputProfile[];
+}
+
+export type GamingClickThroughErrorCode = "rescueUnavailable" | "nativeCallFailed" | "overlayUnavailable";
+
+export interface GamingClickThroughError {
+  code: GamingClickThroughErrorCode;
+  detail: string;
+}
+
+export type OutputProfileApplyErrorCode = "invalidProfile" | "deviceUnavailable" | "applyFailed";
+
+export interface OutputProfileApplyError {
+  code: OutputProfileApplyErrorCode;
+  detail: string;
+  rollbackSucceeded: boolean;
 }
 
 export type SettingValue =
@@ -200,7 +282,10 @@ export type SettingValue =
   | { key: "layoutProfile"; value: LayoutProfile }
   | { key: "customTheme"; value: SpotThemeDefinition | null }
   | { key: "downloadsDirectory"; value: string | null }
-  | { key: "sourcePreferenceOrder"; value: ProviderKind[] };
+  | { key: "sourcePreferenceOrder"; value: ProviderKind[] }
+  | { key: "windowsIntegration"; value: WindowsIntegrationSettings }
+  | { key: "globalShortcuts"; value: GlobalShortcutBinding[] }
+  | { key: "outputProfiles"; value: OutputProfile[] };
 
 export interface ProviderStatus {
   kind: ProviderKind;

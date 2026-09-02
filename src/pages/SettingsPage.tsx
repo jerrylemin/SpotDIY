@@ -8,6 +8,7 @@ import { SegmentedControl } from "../components/common/SegmentedControl";
 import { StatusChip } from "../components/common/StatusChip";
 import { IconGallery } from "../components/icons/IconGallery";
 import { SpotIcon } from "../components/icons/SpotIcon";
+import { WindowsIntegrationSettingsSection } from "../components/settings/WindowsIntegrationSettingsSection";
 import { LAYOUT_PROFILE_LABELS, LAYOUT_PROFILES } from "../features/layout/layout-profiles";
 import { MAX_THEME_BYTES } from "../features/theme/theme-schema";
 import { useTheme } from "../features/theme/theme-controller";
@@ -286,6 +287,7 @@ export function SettingsPage() {
           </details>
         ) : null}
       </section>
+      <WindowsIntegrationSettingsSection />
       <section className="settings-section">
         <div className="settings-section-heading"><span className="eyebrow">SOURCE CONNECTIONS</span><p>Optional online sources augment your local library. Spotify provides catalog metadata only and never enters the playback or download path.</p></div>
         <div className="settings-source-list">

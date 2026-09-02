@@ -73,6 +73,12 @@ import type {
   QueueSnapshotId,
   QueueSnapshotSummary,
   QueueWorkspace,
+  GlobalShortcutBinding,
+  OutputProfile,
+  OverlayKind,
+  OverlaySnapshot,
+  WindowsIntegrationSettings,
+  WindowsIntegrationSnapshot,
 } from "../types/domain";
 import { spotThemeDefinitionSchema } from "../features/theme/theme-schema";
 
@@ -193,6 +199,67 @@ const sourcePreferenceOrderSchema = z
   .array(providerKindSchema)
   .length(4)
   .refine((value) => new Set(value).size === value.length, "Provider preference order cannot contain duplicates.");
+const windowsIntegrationSettingsSchema = z.object({
+  smtcEnabled: z.boolean(),
+  globalShortcutsEnabled: z.boolean(),
+}).strict();
+const globalShortcutActionSchema = z.enum([
+  "playPause",
+  "next",
+  "previous",
+  "volumeUp",
+  "volumeDown",
+  "showHideMain",
+  "toggleMiniOverlay",
+  "toggleLyricsOverlay",
+  "toggleGamingOverlay",
+]);
+const globalShortcutBindingSchema = z.object({
+  action: globalShortcutActionSchema,
+  accelerator: z.string().min(1),
+  enabled: z.boolean(),
+}).strict();
+const overlayKindSchema = z.enum(["mini", "edge", "lyrics", "gaming"]);
+const overlaySnapshotSchema = z.object({
+  kind: overlayKindSchema,
+  status: z.enum(["closed", "open", "error"]),
+  detail: z.string().nullable(),
+}).strict();
+const outputProfileSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(80),
+  audioDeviceName: z.string().min(1),
+  volumePercent: z.number().int().min(0).max(100),
+  muted: z.boolean(),
+}).strict();
+const windowsIntegrationSnapshotSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  platformSupported: z.boolean(),
+  trayStatus: z.enum(["ready", "failed"]),
+  trayDetail: z.string().nullable(),
+  smtcStatus: z.enum(["ready", "disabled", "unsupported", "failed"]),
+  smtcDetail: z.string().nullable(),
+  globalShortcutsEnabled: z.boolean(),
+  shortcutStatuses: z.array(z.object({
+    action: globalShortcutActionSchema,
+    accelerator: z.string().min(1),
+    enabled: z.boolean(),
+    status: z.enum(["disabled", "registered", "conflict", "invalid", "failed"]),
+    detail: z.string().nullable(),
+  }).strict()),
+  overlays: z.array(overlaySnapshotSchema),
+  gamingClickThrough: z.boolean(),
+  outputProfiles: z.array(outputProfileSchema),
+}).strict();
+const gamingClickThroughErrorSchema = z.object({
+  code: z.enum(["rescueUnavailable", "nativeCallFailed", "overlayUnavailable"]),
+  detail: z.string().min(1),
+}).strict();
+const outputProfileApplyErrorSchema = z.object({
+  code: z.enum(["invalidProfile", "deviceUnavailable", "applyFailed"]),
+  detail: z.string().min(1),
+  rollbackSucceeded: z.boolean(),
+}).strict();
 const settingsSnapshotSchema = z.object({
   theme: themeSchema,
   layoutProfile: layoutProfileSchema,
@@ -201,13 +268,19 @@ const settingsSnapshotSchema = z.object({
   sourcePreferenceOrder: sourcePreferenceOrderSchema,
   firstRun: z.boolean(),
   storageMode: z.enum(["standard", "portable"]),
-});
+  windowsIntegration: windowsIntegrationSettingsSchema,
+  globalShortcuts: z.array(globalShortcutBindingSchema),
+  outputProfiles: z.array(outputProfileSchema),
+}).strict();
 const settingValueSchema = z.discriminatedUnion("key", [
   z.object({ key: z.literal("theme"), value: themeSchema }),
   z.object({ key: z.literal("layoutProfile"), value: layoutProfileSchema }),
   z.object({ key: z.literal("customTheme"), value: spotThemeDefinitionSchema.nullable() }),
   z.object({ key: z.literal("downloadsDirectory"), value: z.string().nullable() }),
   z.object({ key: z.literal("sourcePreferenceOrder"), value: sourcePreferenceOrderSchema }),
+  z.object({ key: z.literal("windowsIntegration"), value: windowsIntegrationSettingsSchema }),
+  z.object({ key: z.literal("globalShortcuts"), value: z.array(globalShortcutBindingSchema) }),
+  z.object({ key: z.literal("outputProfiles"), value: z.array(outputProfileSchema) }),
 ]);
 
 const downloadTaskIdSchema = z.string().min(1).transform((value) => value as DownloadTaskId);
@@ -891,9 +964,12 @@ export const LIBRARY_PROGRESS_EVENT = "library://scan-progress";
 export const PLAYBACK_STATE_EVENT = "playback://state";
 export const QUEUE_STATE_EVENT = "queue://state";
 export const DOWNLOAD_STATE_EVENT = "downloads://state";
+export const WINDOWS_STATE_EVENT = "windows://state";
 
 type PlaybackSnapshotListener = (snapshot: PlaybackSnapshot) => void;
 type PlaybackSnapshotErrorListener = (error: IpcError) => void;
+export type WindowsIntegrationListener = (snapshot: WindowsIntegrationSnapshot) => void;
+export type WindowsIntegrationErrorListener = (error: IpcError) => void;
 export type QueueWorkspaceListener = (workspace: QueueWorkspace) => void;
 export type QueueWorkspaceErrorListener = (error: IpcError) => void;
 export type DownloadSnapshotListener = (snapshot: DownloadSnapshot) => void;
@@ -1669,6 +1745,18 @@ function browserPreviewStatus(): AppStatus {
   };
 }
 
+const browserDefaultGlobalShortcuts: GlobalShortcutBinding[] = [
+  { action: "playPause", accelerator: "Ctrl+Alt+Space", enabled: true },
+  { action: "next", accelerator: "Ctrl+Alt+Right", enabled: true },
+  { action: "previous", accelerator: "Ctrl+Alt+Left", enabled: true },
+  { action: "volumeUp", accelerator: "Ctrl+Alt+Up", enabled: true },
+  { action: "volumeDown", accelerator: "Ctrl+Alt+Down", enabled: true },
+  { action: "showHideMain", accelerator: "Ctrl+Alt+S", enabled: true },
+  { action: "toggleMiniOverlay", accelerator: "Ctrl+Alt+M", enabled: true },
+  { action: "toggleLyricsOverlay", accelerator: "Ctrl+Alt+L", enabled: true },
+  { action: "toggleGamingOverlay", accelerator: "Ctrl+Alt+G", enabled: true },
+];
+
 let browserPreviewSettingsState: SettingsSnapshot = {
   theme: "dark",
   layoutProfile: "comfortable",
@@ -1677,6 +1765,17 @@ let browserPreviewSettingsState: SettingsSnapshot = {
   sourcePreferenceOrder: ["local", "soundcloud", "youtube", "spotify"],
   firstRun: true,
   storageMode: "standard",
+  windowsIntegration: { smtcEnabled: true, globalShortcutsEnabled: false },
+  globalShortcuts: browserDefaultGlobalShortcuts.map((binding) => ({ ...binding })),
+  outputProfiles: [],
+};
+
+let browserWindowsIntegrationRevision = 0;
+const browserOverlayStates: Record<OverlayKind, OverlaySnapshot["status"]> = {
+  mini: "closed",
+  edge: "closed",
+  lyrics: "closed",
+  gaming: "closed",
 };
 
 function browserPreviewSettings(): SettingsSnapshot {
@@ -1689,6 +1788,9 @@ function browserPreviewSettings(): SettingsSnapshot {
         tokens: { ...browserPreviewSettingsState.customTheme.tokens },
       }
       : null,
+    windowsIntegration: { ...browserPreviewSettingsState.windowsIntegration },
+    globalShortcuts: browserPreviewSettingsState.globalShortcuts.map((binding) => ({ ...binding })),
+    outputProfiles: browserPreviewSettingsState.outputProfiles.map((profile) => ({ ...profile })),
   };
 }
 
@@ -1708,8 +1810,45 @@ function setBrowserPreviewSetting(setting: SettingValue): SettingsSnapshot {
     ...(parsedSetting.key === "customTheme" ? { customTheme: parsedSetting.value } : {}),
     ...(parsedSetting.key === "downloadsDirectory" ? { downloadsDirectory: parsedSetting.value } : {}),
     ...(parsedSetting.key === "sourcePreferenceOrder" ? { sourcePreferenceOrder: [...parsedSetting.value] } : {}),
+    ...(parsedSetting.key === "windowsIntegration" ? { windowsIntegration: { ...parsedSetting.value } } : {}),
+    ...(parsedSetting.key === "globalShortcuts" ? { globalShortcuts: parsedSetting.value.map((binding) => ({ ...binding })) } : {}),
+    ...(parsedSetting.key === "outputProfiles" ? { outputProfiles: parsedSetting.value.map((profile) => ({ ...profile })) } : {}),
   };
   return browserPreviewSettings();
+}
+
+function browserWindowsIntegrationSnapshot(): WindowsIntegrationSnapshot {
+  const settings = browserPreviewSettingsState;
+  return {
+    revision: browserWindowsIntegrationRevision,
+    platformSupported: false,
+    trayStatus: "failed",
+    trayDetail: "Windows integration is available in the native SpotDIY desktop app.",
+    smtcStatus: settings.windowsIntegration.smtcEnabled ? "unsupported" : "disabled",
+    smtcDetail: settings.windowsIntegration.smtcEnabled
+      ? "System media controls are available in the native Windows app."
+      : null,
+    globalShortcutsEnabled: settings.windowsIntegration.globalShortcutsEnabled,
+    shortcutStatuses: settings.globalShortcuts.map((binding) => ({
+      ...binding,
+      status: settings.windowsIntegration.globalShortcutsEnabled && binding.enabled ? "failed" : "disabled",
+      detail: settings.windowsIntegration.globalShortcutsEnabled && binding.enabled
+        ? "Global shortcuts require the native desktop app."
+        : null,
+    })),
+    overlays: (Object.keys(browserOverlayStates) as OverlayKind[]).map((kind) => ({
+      kind,
+      status: browserOverlayStates[kind],
+      detail: null,
+    })),
+    gamingClickThrough: false,
+    outputProfiles: settings.outputProfiles.map((profile) => ({ ...profile })),
+  };
+}
+
+function bumpBrowserWindowsIntegrationRevision(): WindowsIntegrationSnapshot {
+  browserWindowsIntegrationRevision += 1;
+  return browserWindowsIntegrationSnapshot();
 }
 
 
@@ -2433,6 +2572,242 @@ export async function setSetting(setting: SettingValue): Promise<SettingsSnapsho
       throw error;
     }
     throw new IpcError("SpotDIY could not persist that local setting.", error);
+  }
+}
+
+export function parseWindowsIntegrationSnapshot(value: unknown): WindowsIntegrationSnapshot {
+  return windowsIntegrationSnapshotSchema.parse(value) as WindowsIntegrationSnapshot;
+}
+
+async function invokeWindowsSnapshot(
+  command: string,
+  args: Record<string, unknown> | undefined,
+  message: string,
+): Promise<WindowsIntegrationSnapshot> {
+  try {
+    const response = args ? await invoke<unknown>(command, args) : await invoke<unknown>(command);
+    return parseWindowsIntegrationSnapshot(response);
+  } catch (error) {
+    throw new IpcError(message, error);
+  }
+}
+
+export async function getWindowsIntegrationSnapshot(): Promise<WindowsIntegrationSnapshot> {
+  if (!isTauriRuntime()) {
+    return browserWindowsIntegrationSnapshot();
+  }
+  return invokeWindowsSnapshot(
+    "get_windows_integration_snapshot",
+    undefined,
+    "SpotDIY could not read Windows integration status.",
+  );
+}
+
+export async function setWindowsIntegrationSettings(
+  settings: WindowsIntegrationSettings,
+): Promise<WindowsIntegrationSnapshot> {
+  const parsed = windowsIntegrationSettingsSchema.parse(settings) as WindowsIntegrationSettings;
+  if (!isTauriRuntime()) {
+    setBrowserPreviewSetting({ key: "windowsIntegration", value: parsed });
+    return bumpBrowserWindowsIntegrationRevision();
+  }
+  return invokeWindowsSnapshot(
+    "set_windows_integration_settings",
+    { settings: parsed },
+    "SpotDIY could not update Windows integration settings.",
+  );
+}
+
+export async function setGlobalShortcutsEnabled(enabled: boolean): Promise<WindowsIntegrationSnapshot> {
+  const parsed = z.boolean().parse(enabled);
+  if (!isTauriRuntime()) {
+    setBrowserPreviewSetting({
+      key: "windowsIntegration",
+      value: { ...browserPreviewSettingsState.windowsIntegration, globalShortcutsEnabled: parsed },
+    });
+    return bumpBrowserWindowsIntegrationRevision();
+  }
+  return invokeWindowsSnapshot(
+    "set_global_shortcuts_enabled",
+    { enabled: parsed },
+    "SpotDIY could not update global shortcut settings.",
+  );
+}
+
+export async function updateGlobalShortcut(
+  binding: GlobalShortcutBinding,
+): Promise<WindowsIntegrationSnapshot> {
+  const parsed = globalShortcutBindingSchema.parse(binding) as GlobalShortcutBinding;
+  if (!isTauriRuntime()) {
+    const bindings = browserPreviewSettingsState.globalShortcuts.map((item) => item.action === parsed.action ? parsed : item);
+    if (!bindings.some((item) => item.action === parsed.action)) {
+      bindings.push(parsed);
+    }
+    setBrowserPreviewSetting({ key: "globalShortcuts", value: bindings });
+    return bumpBrowserWindowsIntegrationRevision();
+  }
+  return invokeWindowsSnapshot(
+    "update_global_shortcut",
+    { binding: parsed },
+    "SpotDIY could not update that global shortcut.",
+  );
+}
+
+export async function resetGlobalShortcuts(): Promise<WindowsIntegrationSnapshot> {
+  if (!isTauriRuntime()) {
+    setBrowserPreviewSetting({
+      key: "globalShortcuts",
+      value: browserDefaultGlobalShortcuts.map((binding) => ({ ...binding })),
+    });
+    return bumpBrowserWindowsIntegrationRevision();
+  }
+  return invokeWindowsSnapshot(
+    "reset_global_shortcuts",
+    undefined,
+    "SpotDIY could not reset global shortcuts.",
+  );
+}
+
+export async function subscribeToWindowsIntegrationState(
+  listener: WindowsIntegrationListener,
+  onError?: WindowsIntegrationErrorListener,
+): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    return () => undefined;
+  }
+  try {
+    return await listen<unknown>(WINDOWS_STATE_EVENT, (event) => {
+      try {
+        listener(parseWindowsIntegrationSnapshot(event.payload));
+      } catch (error) {
+        onError?.(new IpcError("SpotDIY received an invalid Windows integration state event.", error));
+      }
+    });
+  } catch (error) {
+    throw new IpcError("SpotDIY could not subscribe to Windows integration updates.", error);
+  }
+}
+
+export async function openOverlay(kind: OverlayKind): Promise<WindowsIntegrationSnapshot> {
+  const parsedKind = overlayKindSchema.parse(kind) as OverlayKind;
+  if (!isTauriRuntime()) {
+    browserOverlayStates[parsedKind] = "open";
+    return bumpBrowserWindowsIntegrationRevision();
+  }
+  return invokeWindowsSnapshot("open_overlay", { kind: parsedKind }, "SpotDIY could not open that overlay.");
+}
+
+export async function closeOverlay(kind: OverlayKind): Promise<WindowsIntegrationSnapshot> {
+  const parsedKind = overlayKindSchema.parse(kind) as OverlayKind;
+  if (!isTauriRuntime()) {
+    browserOverlayStates[parsedKind] = "closed";
+    return bumpBrowserWindowsIntegrationRevision();
+  }
+  return invokeWindowsSnapshot("close_overlay", { kind: parsedKind }, "SpotDIY could not close that overlay.");
+}
+
+export async function toggleOverlay(kind: OverlayKind): Promise<WindowsIntegrationSnapshot> {
+  const parsedKind = overlayKindSchema.parse(kind) as OverlayKind;
+  if (!isTauriRuntime()) {
+    browserOverlayStates[parsedKind] = browserOverlayStates[parsedKind] === "open" ? "closed" : "open";
+    return bumpBrowserWindowsIntegrationRevision();
+  }
+  return invokeWindowsSnapshot("toggle_overlay", { kind: parsedKind }, "SpotDIY could not toggle that overlay.");
+}
+
+export async function setGamingClickThrough(enabled: boolean): Promise<WindowsIntegrationSnapshot> {
+  const parsed = z.boolean().parse(enabled);
+  if (!isTauriRuntime()) {
+    if (parsed) {
+      const error = { code: "overlayUnavailable", detail: "Gaming click-through requires the native desktop app." };
+      throw new IpcError(error.detail, error);
+    }
+    return browserWindowsIntegrationSnapshot();
+  }
+  try {
+    return parseWindowsIntegrationSnapshot(await invoke<unknown>("set_gaming_click_through", { enabled: parsed }));
+  } catch (error) {
+    const typed = gamingClickThroughErrorSchema.safeParse(error);
+    if (typed.success) {
+      throw new IpcError(typed.data.detail, typed.data);
+    }
+    throw new IpcError("SpotDIY could not update Gaming click-through.", error);
+  }
+}
+
+export async function listOutputProfiles(): Promise<OutputProfile[]> {
+  if (!isTauriRuntime()) {
+    return browserPreviewSettingsState.outputProfiles.map((profile) => ({ ...profile }));
+  }
+  try {
+    return z.array(outputProfileSchema).parse(await invoke<unknown>("list_output_profiles")) as OutputProfile[];
+  } catch (error) {
+    throw new IpcError("SpotDIY could not read output profiles.", error);
+  }
+}
+
+export async function createOutputProfile(name: string): Promise<WindowsIntegrationSnapshot> {
+  const parsedName = z.string().trim().min(1).max(80).parse(name);
+  if (!isTauriRuntime()) {
+    const playback = await getPlaybackSnapshot();
+    const profile: OutputProfile = {
+      id: `browser-output-${Date.now()}`,
+      name: parsedName,
+      audioDeviceName: playback.selectedAudioDevice,
+      volumePercent: playback.volumePercent,
+      muted: playback.muted,
+    };
+    setBrowserPreviewSetting({ key: "outputProfiles", value: [...browserPreviewSettingsState.outputProfiles, profile] });
+    return bumpBrowserWindowsIntegrationRevision();
+  }
+  return invokeWindowsSnapshot("create_output_profile", { name: parsedName }, "SpotDIY could not create that output profile.");
+}
+
+export async function updateOutputProfile(profile: OutputProfile): Promise<WindowsIntegrationSnapshot> {
+  const parsed = outputProfileSchema.parse(profile) as OutputProfile;
+  if (!isTauriRuntime()) {
+    const profiles = browserPreviewSettingsState.outputProfiles.map((item) => item.id === parsed.id ? parsed : item);
+    setBrowserPreviewSetting({ key: "outputProfiles", value: profiles });
+    return bumpBrowserWindowsIntegrationRevision();
+  }
+  return invokeWindowsSnapshot("update_output_profile", { profile: parsed }, "SpotDIY could not update that output profile.");
+}
+
+export async function deleteOutputProfile(id: string): Promise<WindowsIntegrationSnapshot> {
+  const parsedId = z.string().min(1).parse(id);
+  if (!isTauriRuntime()) {
+    setBrowserPreviewSetting({
+      key: "outputProfiles",
+      value: browserPreviewSettingsState.outputProfiles.filter((profile) => profile.id !== parsedId),
+    });
+    return bumpBrowserWindowsIntegrationRevision();
+  }
+  return invokeWindowsSnapshot("delete_output_profile", { id: parsedId }, "SpotDIY could not delete that output profile.");
+}
+
+export async function applyOutputProfile(id: string): Promise<PlaybackSnapshot> {
+  const parsedId = z.string().min(1).parse(id);
+  const profile = browserPreviewSettingsState.outputProfiles.find((item) => item.id === parsedId);
+  if (!isTauriRuntime()) {
+    if (!profile) {
+      throw new IpcError("That output profile was not found.");
+    }
+    const snapshot = await getPlaybackSnapshot();
+    return {
+      ...snapshot,
+      selectedAudioDevice: profile.audioDeviceName,
+      volumePercent: profile.volumePercent,
+      muted: profile.muted,
+    };
+  }
+  try {
+    return parsePlaybackSnapshot(await invoke<unknown>("apply_output_profile", { id: parsedId }));
+  } catch (error) {
+    const typed = outputProfileApplyErrorSchema.safeParse(error);
+    if (typed.success) {
+      throw new IpcError(typed.data.detail, typed.data);
+    }
+    throw new IpcError("SpotDIY could not apply that output profile.", error);
   }
 }
 

@@ -198,6 +198,38 @@ kbd { border: 1px solid var(--color-border-strong); border-bottom-color: var(--c
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
 
+.windows-integration-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.windows-integration-card { display: flex; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.02); }
+.windows-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.windows-card-heading > div, .windows-shortcut-copy, .windows-profile-row > div:first-child { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.windows-card-heading strong, .windows-profile-row strong { font-size: 12px; }
+.windows-card-heading span, .windows-shortcut-copy span, .windows-profile-row span { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.windows-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-top: 13px; border-top: 1px solid var(--line); }
+.windows-toggle-row > span { display: flex; flex-direction: column; gap: 4px; }
+.windows-toggle-row small { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.windows-toggle-row input, .windows-toggle-label input, .windows-inline-checkbox input { accent-color: var(--lime); }
+.windows-toggle-label, .windows-inline-checkbox { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.windows-muted-copy, .windows-status-detail { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.windows-status-detail { padding: 9px 11px; border-left: 2px solid var(--line-strong); }
+.windows-shortcut-list { display: flex; flex-direction: column; gap: 8px; }
+.windows-shortcut-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(125px, .7fr) auto auto; align-items: center; gap: 9px; padding: 9px 0; border-top: 1px solid var(--line); }
+.windows-shortcut-input, .windows-profile-create input, .windows-profile-edit input { min-width: 0; height: 31px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 5px; outline: 0; background: var(--panel); color: var(--text); font-size: 10px; }
+.windows-shortcut-input:focus, .windows-profile-create input:focus, .windows-profile-edit input:focus { border-color: var(--lime); }
+.windows-overlay-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.windows-overlay-buttons .button { gap: 6px; }
+.windows-overlay-buttons .status-chip { min-height: 18px; padding: 0 5px; font-size: 8px; }
+.windows-gaming-warning { display: flex; align-items: flex-start; gap: 8px; padding: 11px 12px; border: 1px solid rgba(255,181,112,.24); border-radius: 7px; background: rgba(255,181,112,.07); color: var(--orange); font-size: 10px; line-height: 1.45; }
+.windows-gaming-toggle { border-top: 0; padding-top: 0; }
+.windows-profile-count { color: var(--lime) !important; font-size: 10px !important; font-weight: 800; }
+.windows-profile-create { display: flex; flex-wrap: wrap; gap: 8px; }
+.windows-profile-create input { min-width: 180px; flex: 1; }
+.windows-profile-list { display: flex; flex-direction: column; gap: 8px; }
+.windows-profile-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
+.windows-profile-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.windows-profile-edit { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(120px, 1fr) 70px auto auto auto; }
+
+@media (max-width: 880px) { .windows-integration-grid { grid-template-columns: 1fr; } .windows-shortcut-row { grid-template-columns: 1fr 1fr; } .windows-shortcut-copy { grid-column: 1 / -1; } }
+
 .search-controls { display: flex; flex-direction: column; gap: 12px; }
 .search-field-clear-button { padding: 3px 0; border: 0; background: transparent; cursor: pointer; }
 .search-field-clear-button:hover { color: var(--lime); }
