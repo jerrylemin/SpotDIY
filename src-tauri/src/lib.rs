@@ -13,10 +13,12 @@ pub mod lyrics;
 pub mod media_tools;
 pub mod playback;
 pub mod playlists;
+pub mod preview;
 pub mod queue;
 pub mod sessions;
 pub mod settings;
 pub mod smart;
+pub mod visual_explorer;
 pub mod windows;
 pub mod search {
     pub mod sort;
@@ -47,6 +49,7 @@ use playback::{
     TrackPlaybackRequest, PLAYBACK_STATE_EVENT, QUEUE_STATE_EVENT,
 };
 use playlists::{PlaylistErrorDto, PlaylistService};
+use preview::{PreviewService, PreviewState};
 use sessions::{ListeningModeChange, ListeningModeService, ListeningModeState};
 use settings::{
     GlobalShortcutBinding, SettingValue, SettingsRepository, SettingsSnapshot,
@@ -63,6 +66,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
+use visual_explorer::{VisualDatasetRequest, VisualExplorerService, VisualLibraryDataset};
 
 use crate::db::repository::TrackRepository;
 use crate::domain::{ProviderKind, TrackId};
@@ -97,6 +101,8 @@ struct AppState {
     fusion: SourceFusionService,
     source_resolver: SourceResolver,
     inspector: TrackInspectorService,
+    visual_explorer: VisualExplorerService,
+    preview: PreviewService,
 }
 
 #[tauri::command]
@@ -687,6 +693,17 @@ fn get_library_page(
 }
 
 #[tauri::command]
+fn get_visual_library_dataset(
+    request: VisualDatasetRequest,
+    state: State<'_, AppState>,
+) -> Result<VisualLibraryDataset, String> {
+    state
+        .visual_explorer
+        .dataset(request)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn list_playlists(
     state: State<'_, AppState>,
 ) -> Result<Vec<playlists::Playlist>, PlaylistErrorDto> {
@@ -843,6 +860,7 @@ fn play_playlist(
     item_ids: Vec<crate::domain::PlaylistItemId>,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.preview.cancel_preview();
     state
         .playback
         .play_playlist(playlist_id, item_ids)
@@ -1147,11 +1165,33 @@ fn get_playback_snapshot(state: State<'_, AppState>) -> PlaybackSnapshot {
 }
 
 #[tauri::command]
+fn get_preview_state(state: State<'_, AppState>) -> PreviewState {
+    state.preview.state()
+}
+
+#[tauri::command]
+fn start_preview(
+    track_id: crate::domain::TrackId,
+    state: State<'_, AppState>,
+) -> Result<PreviewState, String> {
+    state
+        .preview
+        .start_preview(track_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn cancel_preview(state: State<'_, AppState>) -> PreviewState {
+    state.preview.cancel_preview()
+}
+
+#[tauri::command]
 fn play_track(
     track_id: crate::domain::TrackId,
     source_id: Option<crate::domain::SourceId>,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.preview.cancel_preview();
     state
         .playback
         .play_track(TrackPlaybackRequest {
@@ -1167,6 +1207,7 @@ fn enqueue_track(
     source_id: Option<crate::domain::SourceId>,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.preview.cancel_preview();
     state
         .playback
         .enqueue_track(TrackPlaybackRequest {
@@ -1182,6 +1223,7 @@ fn play_track_next(
     source_id: Option<crate::domain::SourceId>,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.preview.cancel_preview();
     state
         .playback
         .play_track_next(TrackPlaybackRequest {
@@ -1193,6 +1235,7 @@ fn play_track_next(
 
 #[tauri::command]
 fn toggle_play_pause(state: State<'_, AppState>) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.preview.cancel_preview();
     state
         .playback
         .toggle_play_pause()
@@ -1204,6 +1247,7 @@ fn seek_playback(
     position_ms: u64,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.preview.cancel_preview();
     state
         .playback
         .seek_playback(position_ms)
@@ -1272,11 +1316,13 @@ fn delete_ab_loop_preset(
 
 #[tauri::command]
 fn next_track(state: State<'_, AppState>) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.preview.cancel_preview();
     state.playback.next_track().map_err(|error| error.dto())
 }
 
 #[tauri::command]
 fn previous_track(state: State<'_, AppState>) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.preview.cancel_preview();
     state.playback.previous_track().map_err(|error| error.dto())
 }
 
@@ -1683,6 +1729,7 @@ fn open_smart_mix(
     seed: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.preview.cancel_preview();
     state
         .playback
         .open_smart_mix(pool, options, seed)
@@ -1839,6 +1886,9 @@ pub fn run() {
                 queue_sink,
                 modes.clone(),
             );
+            let visual_explorer = VisualExplorerService::new(database.clone(), library.clone());
+            let preview =
+                PreviewService::new(library.clone(), playback.clone(), media_tools.clone());
             let lyrics = LyricsService::new(database.clone(), library.clone())?;
             let bookmarks = BookmarkService::new(database.clone());
             library.register_watchers(sink.clone())?;
@@ -1870,6 +1920,8 @@ pub fn run() {
                 fusion,
                 source_resolver,
                 inspector,
+                visual_explorer,
+                preview,
             });
             library.start_all_scans(sink)?;
             Ok(())
@@ -1940,6 +1992,7 @@ pub fn run() {
             rescan_library_folder,
             rescan_all_library_folders,
             get_library_page,
+            get_visual_library_dataset,
             reveal_local_file,
             list_playlists,
             get_playlist,
@@ -1979,6 +2032,9 @@ pub fn run() {
             update_bookmark,
             delete_bookmark,
             get_playback_snapshot,
+            get_preview_state,
+            start_preview,
+            cancel_preview,
             play_track,
             enqueue_track,
             play_track_next,
@@ -2045,6 +2101,7 @@ pub fn run() {
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     let _ = state.search.cancel_search();
                     let _ = state.downloads.shutdown();
+                    let _ = state.preview.shutdown();
                     let _ = state.playback.shutdown();
                 }
             }
