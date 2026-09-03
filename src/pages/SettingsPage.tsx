@@ -12,7 +12,7 @@ import { SpotIcon } from "../components/icons/SpotIcon";
 import { WindowsIntegrationSettingsSection } from "../components/settings/WindowsIntegrationSettingsSection";
 import { LAYOUT_PROFILE_LABELS, LAYOUT_PROFILES } from "../features/layout/layout-profiles";
 import { MAX_THEME_BYTES } from "../features/theme/theme-schema";
-import { useTheme } from "../features/theme/theme-controller";
+import { useTheme } from "../features/theme/theme-controller-model";
 import { useAppStatus } from "../hooks/useAppStatus";
 import {
   IpcError,

@@ -545,7 +545,9 @@ const visualTrackSchema = z.object({
   title: z.string(),
   primaryArtist: z.string(),
   artists: z.array(z.string()),
+  artistIds: z.array(z.string()),
   album: z.string().nullable(),
+  albumId: z.string().nullable(),
   genres: z.array(z.string()),
   year: z.number().int().min(0).max(9999).nullable(),
   dateAdded: z.string(),
@@ -557,6 +559,9 @@ const visualTrackSchema = z.object({
   audioQuality: visualAudioQualitySchema,
   providerCount: z.number().int().nonnegative(),
   artworkPath: z.string().nullable(),
+  canPlayback: z.boolean(),
+  canPreview: z.boolean(),
+  canRevealLocal: z.boolean(),
 }).strict();
 const visualLibraryDatasetSchema = z.object({
   totalTracks: z.number().int().nonnegative(),
@@ -1439,7 +1444,9 @@ const e2eVisualTracks: VisualTrackPoint[] = e2eLibraryTracks.map((track, index) 
   title: track.title,
   primaryArtist: track.artists[0] ?? "Unknown artist",
   artists: track.artists,
+  artistIds: track.artists.map((_artist, artistIndex) => `artist-e2e-${index + 1}-${artistIndex + 1}`),
   album: track.album,
+  albumId: track.album ? `album-e2e-${index + 1}` : null,
   genres: [index === 0 ? "Electronic" : "Ambient"],
   year: 2026,
   dateAdded: track.createdAt,
@@ -1451,6 +1458,9 @@ const e2eVisualTracks: VisualTrackPoint[] = e2eLibraryTracks.map((track, index) 
   audioQuality: track.codec?.toLowerCase() === "flac" ? "lossless" : "unknown",
   providerCount: 1,
   artworkPath: track.artworkPath,
+  canPlayback: true,
+  canPreview: true,
+  canRevealLocal: true,
 }));
 const e2eDevices: PlaybackAudioDevice[] = [
   { name: "auto", description: "Default output", selected: true },

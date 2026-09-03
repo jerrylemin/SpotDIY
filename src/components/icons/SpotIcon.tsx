@@ -1,47 +1,7 @@
 import type { SVGProps } from "react";
+import type { SpotIconName } from "./spot-icon-data";
 
-export type SpotIconName =
-  | "home"
-  | "search"
-  | "library"
-  | "lyrics"
-  | "playlist"
-  | "download"
-  | "analytics"
-  | "settings"
-  | "play"
-  | "pause"
-  | "previous"
-  | "next"
-  | "queue"
-  | "command"
-  | "folder"
-  | "spark"
-  | "chevron"
-  | "close"
-  | "arrow"
-  | "refresh"
-  | "trash"
-  | "file"
-  | "alert"
-  | "more"
-  | "check"
-  | "info"
-  | "pin"
-  | "bookmark"
-  | "edit"
-  | "theme"
-  | "layout"
-  | "sun"
-  | "moon"
-  | "system"
-  | "expand"
-  | "collapse"
-  | "volume"
-  | "mute"
-  | "shuffle"
-  | "repeat"
-  | "device";
+export type { SpotIconName } from "./spot-icon-data";
 
 interface SpotIconProps extends SVGProps<SVGSVGElement> {
   name: SpotIconName;
@@ -91,8 +51,6 @@ const paths: Record<SpotIconName, string> = {
   repeat: "M17 17H7a3 3 0 0 1-3-3V9m0 0 3 3M4 9l-3 3M7 7h10a3 3 0 0 1 3 3v5m0 0-3-3m3 3 3-3",
   device: "M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5v7A1.5 1.5 0 0 1 17.5 15H13l-2 4-2-4H6.5A1.5 1.5 0 0 1 5 13.5z",
 };
-
-export const spotIconNames = Object.keys(paths) as SpotIconName[];
 
 export function SpotIcon({ name, size = 20, strokeWidth = 1.8, ...props }: SpotIconProps) {
   return (

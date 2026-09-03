@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
@@ -11,6 +11,7 @@ import {
 import { usePlayback } from "../../hooks/usePlayback";
 import type { LayoutProfile, SettingValue, SettingsSnapshot, Theme } from "../../types/domain";
 import { DARK_THEME } from "./theme-presets";
+import { SETTINGS_QUERY_KEY, resolveTheme, ThemeContext, type ResolvedTheme, type ThemeContextValue } from "./theme-controller-model";
 import {
   parseThemeDefinition,
   serializeThemeDefinition,
@@ -19,29 +20,6 @@ import {
 } from "./theme-schema";
 import { sampleAccentFromPixels } from "./theme-studio/dynamic-accent";
 
-export const SETTINGS_QUERY_KEY = ["settings"] as const;
-
-export type ResolvedTheme = "dark" | "light";
-
-interface ThemeContextValue {
-  settings: SettingsSnapshot | undefined;
-  isLoading: boolean;
-  theme: Theme;
-  resolvedTheme: ResolvedTheme;
-  resolvedSystemTheme: ResolvedTheme;
-  error: string | null;
-  setTheme: (theme: Theme) => Promise<SettingsSnapshot>;
-  setLayoutProfile: (profile: LayoutProfile) => Promise<SettingsSnapshot>;
-  importCustomTheme: (theme: unknown) => Promise<SettingsSnapshot>;
-  exportCustomTheme: () => string | null;
-  resetCustomTheme: () => Promise<SettingsSnapshot>;
-  previewTheme: (theme: SpotThemeDefinition | null) => void;
-  stopThemePreview: () => void;
-  dynamicAccentEnabled: boolean;
-  setDynamicAccent: (enabled: boolean) => void;
-}
-
-const ThemeContext = createContext<ThemeContextValue | null>(null);
 const customVariableNames = Object.keys(themeCssVariables(DARK_THEME));
 
 function systemTheme(): ResolvedTheme {
@@ -96,20 +74,6 @@ function applyRootAppearance(
     root.style.setProperty("--color-accent", dynamicAccent.accent);
     root.style.setProperty("--color-accent-contrast", dynamicAccent.accentContrast);
   }
-}
-
-export function resolveTheme(theme: Theme, system: ResolvedTheme, customTheme?: SpotThemeDefinition | null): ResolvedTheme {
-  if (theme === "system") {
-    return system;
-  }
-  if (theme === "custom") {
-    try {
-      return customTheme ? parseThemeDefinition(customTheme).baseMode : "dark";
-    } catch {
-      return "dark";
-    }
-  }
-  return theme;
 }
 
 export function ThemeController({ children }: { children: ReactNode }) {
@@ -255,12 +219,4 @@ export function ThemeController({ children }: { children: ReactNode }) {
   }), [actionError, dynamicAccentEnabled, exportCustomTheme, importCustomTheme, previewThemeForSession, resolvedSystemTheme, resolvedTheme, resetCustomTheme, setDynamicAccentForSession, setLayoutProfile, setTheme, settingsQuery.data, settingsQuery.error, settingsQuery.isLoading, stopThemePreview, theme, validationError]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
-}
-
-export function useTheme() {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error("useTheme must be used within ThemeController");
-  }
-  return context;
 }

@@ -131,6 +131,7 @@ pub enum PreviewError {
 }
 
 struct PreviewInner {
+    audio_gate: Mutex<()>,
     state: Mutex<PreviewState>,
     child: Mutex<Option<Box<dyn PreviewProcess>>>,
     generation: AtomicU64,
@@ -164,6 +165,7 @@ impl PreviewService {
             playback,
             backend,
             inner: Arc::new(PreviewInner {
+                audio_gate: Mutex::new(()),
                 state: Mutex::new(PreviewState::default()),
                 child: Mutex::new(None),
                 generation: AtomicU64::new(0),
@@ -181,6 +183,26 @@ impl PreviewService {
     }
 
     pub fn start_preview(&self, track_id: TrackId) -> Result<PreviewState, PreviewError> {
+        let _audio_gate = self
+            .inner
+            .audio_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.start_preview_locked(track_id)
+    }
+
+    /// Stop a preview and keep normal playback serialized until `action` completes.
+    pub fn with_preview_stopped<T>(&self, action: impl FnOnce() -> T) -> T {
+        let _audio_gate = self
+            .inner
+            .audio_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.stop_owned_process_locked();
+        action()
+    }
+
+    fn start_preview_locked(&self, track_id: TrackId) -> Result<PreviewState, PreviewError> {
         if self.inner.shutting_down.load(Ordering::Acquire) {
             return Err(PreviewError::ShuttingDown);
         }
@@ -189,7 +211,7 @@ impl PreviewService {
             return Err(PreviewError::MainPlaybackActive);
         }
 
-        self.stop_owned_process();
+        self.stop_owned_process_locked();
         self.set_state(PreviewState {
             phase: PreviewPhase::Loading,
             track_id: Some(track_id),
@@ -240,14 +262,26 @@ impl PreviewService {
     }
 
     pub fn cancel_preview(&self) -> PreviewState {
-        self.stop_owned_process();
+        let _audio_gate = self
+            .inner
+            .audio_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.stop_owned_process_locked();
         self.set_state(PreviewState::default());
         self.state()
     }
 
     pub fn shutdown(&self) -> PreviewState {
+        let _audio_gate = self
+            .inner
+            .audio_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.inner.shutting_down.store(true, Ordering::Release);
-        self.cancel_preview()
+        self.stop_owned_process_locked();
+        self.set_state(PreviewState::default());
+        self.state()
     }
 
     fn local_source(
@@ -311,7 +345,7 @@ impl PreviewService {
         });
     }
 
-    fn stop_owned_process(&self) {
+    fn stop_owned_process_locked(&self) {
         self.inner.generation.fetch_add(1, Ordering::AcqRel);
         let child = self
             .inner
@@ -339,17 +373,23 @@ impl PreviewService {
                             .child
                             .lock()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        if inner.generation.load(Ordering::Acquire) != generation {
+                            return;
+                        }
                         match child.as_mut() {
                             Some(child) => child.try_wait().unwrap_or(true),
                             None => true,
                         }
                     };
                     if finished || Instant::now() >= deadline {
-                        let mut child = inner
+                        let mut child_guard = inner
                             .child
                             .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner())
-                            .take();
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        if inner.generation.load(Ordering::Acquire) != generation {
+                            return;
+                        }
+                        let mut child = child_guard.take();
                         if let Some(child) = child.as_mut() {
                             child.stop();
                         }
@@ -400,6 +440,11 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Database;
+    use crate::library::LibraryService;
+    use crate::media_tools::MediaToolManager;
+    use std::path::PathBuf;
+    use std::sync::mpsc;
 
     #[derive(Default)]
     struct FakePreviewBackend {
@@ -460,5 +505,55 @@ mod tests {
         assert!(!process.try_wait().unwrap());
         process.stop();
         assert!(process.try_wait().unwrap());
+    }
+
+    #[test]
+    fn preview_gate_stops_owned_audio_and_serializes_the_normal_transition() {
+        let root = tempfile::tempdir().unwrap();
+        let database = Database::open(root.path().join("preview.sqlite3")).unwrap();
+        let library = LibraryService::new(database, root.path().join("artwork")).unwrap();
+        let playback = PlaybackService::new(
+            library.clone(),
+            MediaToolManager::with_override(PathBuf::from("missing-mpv")),
+            Arc::new(|_| {}),
+        );
+        let preview = PreviewService::with_backend(
+            library,
+            playback.clone(),
+            Arc::new(FakePreviewBackend::default()),
+        );
+        let stopped = Arc::new(AtomicBool::new(false));
+        *preview.inner.child.lock().unwrap() = Some(Box::new(FakePreviewProcess {
+            stopped: stopped.clone(),
+        }));
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let held_preview = preview.clone();
+        let first = thread::spawn(move || {
+            held_preview.with_preview_stopped(|| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            });
+        });
+        entered_rx.recv().unwrap();
+        assert!(stopped.load(Ordering::Acquire));
+
+        let (attempted_tx, attempted_rx) = mpsc::channel();
+        let (completed_tx, completed_rx) = mpsc::channel();
+        let waiting_preview = preview.clone();
+        let second = thread::spawn(move || {
+            attempted_tx.send(()).unwrap();
+            waiting_preview.with_preview_stopped(|| {});
+            completed_tx.send(()).unwrap();
+        });
+        attempted_rx.recv().unwrap();
+        assert!(completed_rx.try_recv().is_err());
+
+        release_tx.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        assert!(completed_rx.recv().is_ok());
+        playback.shutdown().unwrap();
     }
 }

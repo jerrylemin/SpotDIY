@@ -84,7 +84,7 @@ export function MusicMapPage() {
       <section className="visual-workspace music-map-workspace">
         <div className="visual-canvas-panel">
           <div className="visual-panel-heading"><div><span className="eyebrow">RELATIONAL GRAPH</span><h2>Music Map</h2></div><span className="section-note">{graph.nodes.length} nodes · {graph.edges.length} edges</span></div>
-          <svg aria-label="Music Map graph" className="music-map-svg" onPointerMove={move} role="img" viewBox="0 0 1000 700">
+          <svg aria-label="Music Map graph" className="music-map-svg" onPointerMove={move} role="group" viewBox="0 0 1000 700">
             <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
               {graph.edges.map((edge) => {
                 const source = positions.get(edge.source);
@@ -103,7 +103,7 @@ export function MusicMapPage() {
         <aside aria-label="Map Navigator" className="visual-navigator">
           <div className="visual-panel-heading"><div><span className="eyebrow">KEYBOARD FALLBACK</span><h2>Map Navigator</h2></div><span className="section-note">{Math.min(200, graph.nodes.length)} shown</span></div>
           <div className="visual-node-list">{graph.nodes.slice(0, 200).map((node) => <button className={`visual-node-list-item${selectedId === node.id ? " visual-node-list-item-selected" : ""}`} key={node.id} onClick={() => selectNode(node)} type="button"><span className={`visual-node-kind visual-node-kind-${node.kind}`}>{node.kind}</span><strong>{node.label}</strong></button>)}</div>
-          {selectedTrack ? <div className="visual-selected-panel"><span className="eyebrow">SELECTED TRACK</span><h3>{trackLabel(selectedTrack)}</h3><button className="button button-quiet button-small" onClick={() => openInspector(selectedTrack.trackId)} type="button"><SpotIcon name="info" size={13} /> Inspect</button><VisualTrackActions track={selectedTrack} /><TrackActionDragPanel disabled={playback.pending} onInbox={() => { void addTrackToInbox(selectedTrack.trackId); }} onPlayNext={() => void playback.playNext(selectedTrack.trackId, null)} onQueue={() => void playback.addToQueue(selectedTrack.trackId, null)} trackId={selectedTrack.trackId} /></div> : <p className="visual-helper">Select a track node to reveal actions and inspection.</p>}
+          {selectedTrack ? <div className="visual-selected-panel"><span className="eyebrow">SELECTED TRACK</span><h3>{trackLabel(selectedTrack)}</h3><button className="button button-quiet button-small" onClick={() => openInspector(selectedTrack.trackId)} type="button"><SpotIcon name="info" size={13} /> Inspect</button><VisualTrackActions track={selectedTrack} /><TrackActionDragPanel disabled={playback.pending} onInbox={() => { void addTrackToInbox(selectedTrack.trackId); }} onPlayNext={() => void playback.playNext(selectedTrack.trackId, null)} onQueue={() => void playback.addToQueue(selectedTrack.trackId, null)} playbackAllowed={selectedTrack.canPlayback} trackId={selectedTrack.trackId} /></div> : <p className="visual-helper">Select a track node to reveal actions and inspection.</p>}
         </aside>
       </section>
     </div>

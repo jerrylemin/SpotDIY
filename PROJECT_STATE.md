@@ -375,3 +375,30 @@ import and large-chunk notices. Graphify reports 5,517 nodes, 12,505 edges,
 and 268 communities; CodeGraph is unavailable. Build output remains external
 at `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` remains
 absent. Three unrelated pre-existing worktree changes remain unstaged.
+
+## Plan 16 quality and release snapshot — 2026-09-03
+
+Plan 16 is partially implemented in the working tree and remains uncommitted.
+The confirmed Plan 15 blockers are closed in source: PreviewService now owns a
+shared audio gate for preview/main transport serialization; visual DTOs carry
+ordered artist and album IDs; Music Map/Galaxy use stable IDs; and visual
+actions use native capability booleans with truthful disabled reasons.
+
+The release workflow pins full GitHub Action SHAs, Node 24.11.1, pnpm 11.22.0,
+frozen installs, external Cargo output, frontend/native/audit/package jobs,
+and NSIS-only artifact upload. All routes are lazy-loaded, the three Fast
+Refresh warnings are removed, and axe-core 4.13.0 coverage exercises all
+representative routes plus keyboard/focus/reduced-motion paths.
+
+Local frontend evidence is green: typecheck, ESLint with zero warnings, 90
+Vitest tests, the targeted six-test accessibility matrix at three widths, and
+the production build. The deterministic 5,000-track layout harness reports
+Music Map p95 295.40 ms and Galaxy p95 64.87 ms. Native compilation,
+RustSec, Tauri packaging, installer/clean-install checks, and packaged
+acceptance are blocked by missing MSVC headers/libraries on this host, so no
+release artifact or completion claim is recorded. See
+`docs/SpotDIY-Vault/Sessions/final-verification.md` and
+`docs/SpotDIY-Vault/Research/performance-baseline.md`.
+Graphify refreshed the final code state to 5,625 nodes, 12,674 edges, and 271
+communities; its HTML visualization was skipped at the 5,000-node safety
+limit. CodeGraph remains unavailable.

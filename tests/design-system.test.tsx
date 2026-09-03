@@ -9,9 +9,10 @@ import { IconButton } from "../src/components/common/IconButton";
 import { SegmentedControl } from "../src/components/common/SegmentedControl";
 import { StatusChip } from "../src/components/common/StatusChip";
 import { IconGallery } from "../src/components/icons/IconGallery";
-import { spotIconNames } from "../src/components/icons/SpotIcon";
+import { spotIconNames } from "../src/components/icons/spot-icon-data";
 import { InspectorPanel } from "../src/components/inspector/InspectorPanel";
-import { ThemeController, resolveTheme, useTheme } from "../src/features/theme/theme-controller";
+import { ThemeController } from "../src/features/theme/theme-controller";
+import { resolveTheme, useTheme } from "../src/features/theme/theme-controller-model";
 import { DARK_THEME } from "../src/features/theme/theme-presets";
 import { getSettingsSnapshot, setSetting } from "../src/services/ipc";
 

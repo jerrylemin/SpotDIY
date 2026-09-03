@@ -51,3 +51,16 @@ portable directories, Portable-to-Standard preparation, marker removal, final
 Standard restart, and retention of both databases. Export/import OS dialogs
 are intentionally not bypassed by the smoke; archive and restore behavior is
 covered by the native suite.
+
+## Plan 16 release gate — 2026-09-03
+
+The release workflow now uses full commit-SHA action pins, Node 24.11.1,
+pnpm 11.22.0, frozen installs, an external per-run Cargo target, strict
+frontend/Rust/audit jobs, Playwright Chromium, and NSIS-only artifact upload.
+The application remains version 0.1.0, schema 9, and archive format 1.
+
+The current host cannot produce the release executable because its Visual
+Studio MSVC installation is missing headers/libraries, including
+`msvcrt.lib`. Therefore installer hash/signature, clean-install, uninstall,
+and packaged acceptance evidence is `BLOCKED`, not PASS. No root LICENSE,
+certificate, tag, or GitHub Release was created.

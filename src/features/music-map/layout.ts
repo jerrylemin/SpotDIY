@@ -30,10 +30,16 @@ function nodeId(kind: MusicMapNodeKind, label: string): string {
   return `${kind}:${key(label)}`;
 }
 
-function addNode(nodes: Map<string, MusicMapNode>, kind: MusicMapNodeKind, label: string, trackId?: VisualTrackPoint["trackId"]): string {
+function addNode(
+  nodes: Map<string, MusicMapNode>,
+  kind: MusicMapNodeKind,
+  label: string,
+  identity?: string,
+  trackId?: VisualTrackPoint["trackId"],
+): string {
   const trimmed = label.trim();
   if (!trimmed) return "";
-  const id = kind === "track" ? `track:${trackId}` : nodeId(kind, trimmed);
+  const id = kind === "track" ? `track:${trackId}` : identity?.trim() ? `${kind}:${identity.trim()}` : nodeId(kind, trimmed);
   if (!nodes.has(id)) nodes.set(id, { id, kind, label: trimmed, ...(trackId ? { trackId } : {}) });
   return id;
 }
@@ -52,10 +58,10 @@ export function buildMusicMapGraph(tracks: readonly VisualTrackPoint[], maxNodes
   };
 
   for (const track of tracks.slice(0, 5_000)) {
-    const trackNode = addNode(nodes, "track", track.title, track.trackId);
-    const artistNodes = track.artists.map((artist) => addNode(nodes, "artist", artist)).filter(Boolean);
+    const trackNode = addNode(nodes, "track", track.title, undefined, track.trackId);
+    const artistNodes = track.artists.map((artist, index) => addNode(nodes, "artist", artist, track.artistIds[index])).filter(Boolean);
     const genreNodes = track.genres.map((genre) => addNode(nodes, "genre", genre)).filter(Boolean);
-    const albumNode = track.album ? addNode(nodes, "album", track.album) : "";
+    const albumNode = track.album ? addNode(nodes, "album", track.album, track.albumId ?? undefined) : "";
 
     if (albumNode) connect(albumNode, trackNode);
     for (const artistNode of artistNodes) connect(artistNode, albumNode || trackNode);

@@ -217,3 +217,25 @@ The visual routes consume one typed/Zod-validated dataset and do not invent
 production data in browser preview. Native preview resolves only an indexed
 managed local source through the existing library/playback policy; it never
 joins queue, history, analytics, SMTC, or provider behavior.
+
+## Plan 16 quality and release structure
+
+```text
+src-tauri/src/preview/mod.rs           --> shared preview/main audio gate
+src-tauri/src/windows/mod.rs           --> gated SMTC, shortcut, tray, profile paths
+src-tauri/src/visual_explorer/mod.rs   --> stable IDs and set-based capabilities
+
+src/routes.tsx                         --> lazy secondary route components
+src/components/icons/spot-icon-data.ts
+src/features/theme/theme-controller-model.ts
+                                          --> non-component Fast Refresh exports
+scripts/performance-baseline.test.ts  --> deterministic layout benchmark
+tests/playwright/accessibility.spec.ts --> axe and keyboard release gate
+.github/workflows/ci.yml               --> pinned frontend/Rust/audit/package jobs
+THIRD_PARTY_NOTICES.md                 --> dependency/license index
+```
+
+The release evidence and known host blockers are recorded in
+`docs/SpotDIY-Vault/Sessions/final-verification.md`; native/package checks do
+not get represented as passing until a complete MSVC host produces a clean
+release worktree and installer.

@@ -42,22 +42,27 @@ export function VisualTrackActions({ onActionError, track }: VisualTrackActionsP
   const actions = useMemo<ContextAction[]>(() => {
     const previewBlocked = ["playing", "seeking", "loading", "recovering"].includes(playback.snapshot.phase);
     const playbackEnabled = nativeOrE2ePlayback();
+    const canPlayback = playbackEnabled && track.canPlayback;
+    const canPreview = playbackEnabled && track.canPreview;
+    const canRevealLocal = isTauriRuntime() && track.canRevealLocal;
+    const playbackReason = track.canPlayback ? "Playback requires the native app." : "No playable source is available.";
+    const previewReason = track.canPreview ? "Preview requires the native app." : "Preview requires an indexed local source.";
     return [
-      { id: "play", label: "Play Now", onSelect: () => { void run(() => playback.playNow(track.trackId, null), "Could not start playback."); }, disabled: !playbackEnabled, disabledReason: "Playback requires the native app." },
-      { id: "play-next", label: "Play Next", onSelect: () => { void run(() => playback.playNext(track.trackId, null), "Could not queue the track to play next."); }, disabled: !playbackEnabled, disabledReason: "Playback requires the native app." },
-      { id: "queue", label: "Add to Queue", onSelect: () => { void run(() => playback.addToQueue(track.trackId, null), "Could not add the track to the queue."); }, disabled: !playbackEnabled, disabledReason: "Queue actions require the native app." },
+      { id: "play", label: "Play Now", onSelect: () => { void run(() => playback.playNow(track.trackId, null), "Could not start playback."); }, disabled: !canPlayback, disabledReason: playbackReason },
+      { id: "play-next", label: "Play Next", onSelect: () => { void run(() => playback.playNext(track.trackId, null), "Could not queue the track to play next."); }, disabled: !canPlayback, disabledReason: playbackReason },
+      { id: "queue", label: "Add to Queue", onSelect: () => { void run(() => playback.addToQueue(track.trackId, null), "Could not add the track to the queue."); }, disabled: !canPlayback, disabledReason: playbackReason },
       { id: "inbox", label: "Add to Inbox", onSelect: () => { void run(() => addTrackToInbox(track.trackId).then(() => undefined), "Could not add the track to Inbox."); }, disabled: !isTauriRuntime(), disabledReason: "Inbox actions require the native app." },
       { id: "inspect", label: "Inspect", onSelect: () => useUiStore.getState().openTrackInspector(track.trackId) },
       { id: "lyrics", label: "Open Lyrics", onSelect: () => navigate({ to: "/lyrics" }) },
       { id: "reveal", label: "Reveal Local File", onSelect: () => { void run(async () => {
         const inspector = await getTrackInspector(track.trackId);
         const source = inspector.sources.find((item) => item.provider === "local" && item.available);
-        if (!source) throw new Error("No available managed local file is attached to this track.");
+        if (!source) throw new Error("No revealable local source is available.");
         await revealLocalFile(source.sourceId);
-      }, "Could not reveal the local file."); }, disabled: !isTauriRuntime(), disabledReason: "File locations require the native app." },
-      { id: "preview", label: previewRunning ? "Cancel Preview" : "Preview", onSelect: () => { void run(() => previewRunning ? preview.cancel.mutateAsync() : preview.start.mutateAsync(track.trackId), previewRunning ? "Could not cancel the local preview." : "Could not start the local preview."); }, disabled: previewRunning ? preview.cancel.isPending : !playbackEnabled || previewBlocked || preview.start.isPending, disabledReason: previewBlocked ? "Pause playback to preview." : "Preview requires the native app." },
+      }, "Could not reveal the local file."); }, disabled: !canRevealLocal, disabledReason: track.canRevealLocal ? "File locations require the native app." : "No revealable local source is available." },
+      { id: "preview", label: previewRunning ? "Cancel Preview" : "Preview", onSelect: () => { void run(() => previewRunning ? preview.cancel.mutateAsync() : preview.start.mutateAsync(track.trackId), previewRunning ? "Could not cancel the local preview." : "Could not start the local preview."); }, disabled: previewRunning ? preview.cancel.isPending : !canPreview || previewBlocked || preview.start.isPending, disabledReason: previewBlocked ? "Pause playback to preview." : previewReason },
     ];
-  }, [navigate, playback, preview, previewRunning, run, track.trackId]);
+  }, [navigate, playback, preview, previewRunning, run, track.canPlayback, track.canPreview, track.canRevealLocal, track.trackId]);
 
   return (
     <div

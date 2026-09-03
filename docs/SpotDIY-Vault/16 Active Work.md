@@ -194,3 +194,15 @@ Plan 16 work was started.
 Final evidence is recorded in `docs/execution/verification-log.md` and
 `docs/SpotDIY-Vault/12 Testing.md`. Preserve the three unrelated pre-existing
 worktree changes; they remain unstaged.
+
+## Plan 16 quality and release — 2026-09-03
+
+Plan 16 is `PARTIAL` in the current checkout. Preview/main playback
+serialization, stable visual IDs, capability-aware visual actions, CI pinning,
+Fast Refresh cleanup, route splitting, axe/keyboard coverage, dependency
+notices, and deterministic frontend layout measurements are implemented.
+
+Frontend gates pass locally. Native/package/RustSec/installer gates are
+blocked by missing MSVC headers/libraries, so Plan 16 is not marked complete
+and no release artifact or commit SHA is claimed. See the final verification
+session and performance research note.

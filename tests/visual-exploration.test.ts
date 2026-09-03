@@ -12,7 +12,9 @@ const track = (id: string, overrides: Partial<VisualTrackPoint> = {}): VisualTra
   title: `Track ${id}`,
   primaryArtist: "Artist",
   artists: ["Artist"],
+  artistIds: ["artist-1"],
   album: "Album",
+  albumId: "album-1",
   genres: ["Electronic"],
   year: 2026,
   dateAdded: "2026-01-01T00:00:00Z",
@@ -24,6 +26,9 @@ const track = (id: string, overrides: Partial<VisualTrackPoint> = {}): VisualTra
   audioQuality: "unknown",
   providerCount: 1,
   artworkPath: null,
+  canPlayback: true,
+  canPreview: true,
+  canRevealLocal: true,
   ...overrides,
 });
 
@@ -38,6 +43,20 @@ describe("advanced visual exploration pure contracts", () => {
     expect(first.edges.every((edge) => first.nodes.some((node) => node.id === edge.source))).toBe(true);
     expect(first.nodes.length).toBeLessThanOrEqual(1_500);
     expect(first.edges.length).toBeLessThanOrEqual(3_500);
+  });
+
+  it("uses source IDs when labels are shared", () => {
+    const tracks = [
+      track("same-name-a", { artistIds: ["artist-a"], albumId: "album-a" }),
+      track("same-name-b", { artistIds: ["artist-b"], albumId: "album-b" }),
+    ];
+    const graph = buildMusicMapGraph(tracks);
+    const artistIds = graph.nodes.filter((node) => node.kind === "artist").map((node) => node.id).sort();
+    const albumIds = graph.nodes.filter((node) => node.kind === "album").map((node) => node.id).sort();
+    expect(artistIds).toEqual(["artist:artist-a", "artist:artist-b"]);
+    expect(albumIds).toEqual(["album:album-a", "album:album-b"]);
+    const galaxy = buildGalaxyLayout(tracks, 800, 500, "artist");
+    expect(galaxy.clusters.map((cluster) => cluster.key).sort()).toEqual(["artist:artist-a", "artist:artist-b"]);
   });
 
   it("keeps Galaxy coordinates deterministic and bounded", () => {

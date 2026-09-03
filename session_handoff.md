@@ -324,3 +324,29 @@ repository-local `src-tauri\target` is absent.
 ## Next atomic task
 
 STOPPED AFTER PLAN 15. Do not start Plan 16 in this task.
+
+## Plan 16 handoff — 2026-09-03
+
+Plan 16 is partially implemented in the primary checkout. Preserve the three
+pre-existing unrelated changes (`.gitignore` modified and the two deleted old
+Plan 05 reports); they remain unstaged. The implementation closes the Plan 15
+preview/main transport race with a shared PreviewService audio gate, adds
+stable visual artist/album identity and native capability flags, removes all
+three Fast Refresh warnings, lazy-loads routes, adds axe/keyboard coverage,
+and adds the deterministic layout performance harness and pinned CI gates.
+
+Verified locally: typecheck, ESLint `--max-warnings 0`, 90 Vitest tests,
+targeted accessibility tests (6 at each of 1280/1920/2560 projects), JS audit,
+production build, and layout benchmark. Native compile, RustSec, Tauri
+packaging, installer/clean-install, and packaged acceptance are blocked by
+missing MSVC headers/libraries (`msvcrt.lib`) on this host. No installer,
+commit, push, tag, release, or Gmail message exists from this session.
+
+`graphify update .` completed at the final code state with 5,625 nodes, 12,674
+edges, and 271 communities; Graphify skipped the HTML visualization because
+the graph exceeded its 5,000-node safety limit. CodeGraph remains unavailable.
+
+Required next step: repair the Visual Studio x64 MSVC installation, create a
+clean detached release worktree from the implementation commit, rerun native
+and package gates, then obtain explicit approval before staging/committing and
+pushing `main`. Do not start Plan 17.

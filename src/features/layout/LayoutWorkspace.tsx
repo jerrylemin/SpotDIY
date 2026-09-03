@@ -1,4 +1,4 @@
-import { useTheme } from "../theme/theme-controller";
+import { useTheme } from "../theme/theme-controller-model";
 import { LAYOUT_PROFILE_LABELS, LAYOUT_PROFILES } from "./layout-profiles";
 import type { LayoutProfile } from "../../types/domain";
 

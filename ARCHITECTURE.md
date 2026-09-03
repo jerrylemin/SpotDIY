@@ -446,3 +446,26 @@ current theme. Dynamic accent is session-only, samples no more than 32x32
 client-side artwork pixels, applies contrast checks, and falls back to the
 existing accent pair. Layout Workspace reuses the existing persisted layout
 profiles.
+
+## Plan 16 quality and release boundary
+
+`PreviewService` owns a single `audio_gate` mutex. Preview start, cancel,
+shutdown, native transport, Windows SMTC/shortcut/tray transport, output
+profile/device changes, source switching, backend retry, and queue-opening
+operations use the same gate where they can start or resume main audio.
+Queue-only mutations remain independent. The gate stops the owned preview
+process before the normal operation runs and prevents a concurrent preview
+spawn from overtaking that operation.
+
+Visual DTOs expose ordered `artistIds` alongside `artists` and `albumId`.
+Music Map identities use `artist:<id>`, `album:<id>`, and `track:<id>`; Galaxy
+clusters use the primary artist ID. Display labels remain separate from
+identity, with normalized labels used only when a stable ID is absent. The
+same DTO carries set-based `canPlayback`, `canPreview`, and `canRevealLocal`
+capabilities derived by one native query rather than frontend/provider checks.
+
+All pages are lazy route components, while icon data and theme context values
+are kept in non-component modules so Fast Refresh can preserve component
+boundaries. The release workflow uses immutable action SHAs, frozen package
+installation, external Cargo targets, zero-warning lint, axe coverage, JS
+and Rust dependency audits, and an explicit NSIS artifact boundary.

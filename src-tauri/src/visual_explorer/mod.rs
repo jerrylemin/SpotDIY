@@ -55,7 +55,9 @@ pub struct VisualTrackPoint {
     pub title: String,
     pub primary_artist: String,
     pub artists: Vec<String>,
+    pub artist_ids: Vec<String>,
     pub album: Option<String>,
+    pub album_id: Option<String>,
     pub genres: Vec<String>,
     pub year: Option<u16>,
     pub date_added: String,
@@ -67,6 +69,9 @@ pub struct VisualTrackPoint {
     pub audio_quality: VisualAudioQuality,
     pub provider_count: u64,
     pub artwork_path: Option<PathBuf>,
+    pub can_playback: bool,
+    pub can_preview: bool,
+    pub can_reveal_local: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -148,6 +153,12 @@ impl VisualExplorerService {
         let track_id = TrackId::parse_str(&row.track_id)
             .map_err(|error| VisualExplorerError::InvalidData(format!("track ID: {error}")))?;
         let artists = parse_json_array(&row.artists, "artists")?;
+        let artist_ids = parse_json_array(&row.artist_ids, "artistIds")?;
+        if artists.len() != artist_ids.len() {
+            return Err(VisualExplorerError::InvalidData(
+                "artistIds and artists must have the same length".to_owned(),
+            ));
+        }
         let genres = parse_json_array(&row.genres, "genres")?;
         let artwork_path = row
             .artwork_cache_key
@@ -159,7 +170,9 @@ impl VisualExplorerService {
             title: row.title,
             primary_artist: row.primary_artist,
             artists,
+            artist_ids,
             album: row.album,
+            album_id: row.album_id,
             genres,
             year: parse_year(row.release_date),
             date_added: row.date_added,
@@ -178,6 +191,9 @@ impl VisualExplorerService {
             },
             provider_count: non_negative(row.provider_count, "provider_count")?,
             artwork_path,
+            can_playback: row.can_playback != 0,
+            can_preview: row.can_preview != 0,
+            can_reveal_local: row.can_reveal_local != 0,
         })
     }
 }
@@ -241,7 +257,9 @@ struct RawVisualTrack {
     title: String,
     primary_artist: String,
     artists: String,
+    artist_ids: String,
     album: Option<String>,
+    album_id: Option<String>,
     genres: String,
     release_date: Option<String>,
     date_added: String,
@@ -253,6 +271,9 @@ struct RawVisualTrack {
     audio_quality: i64,
     provider_count: i64,
     artwork_cache_key: Option<String>,
+    can_playback: i64,
+    can_preview: i64,
+    can_reveal_local: i64,
 }
 
 fn map_raw_track(row: &Row<'_>) -> Result<RawVisualTrack, rusqlite::Error> {
@@ -261,18 +282,23 @@ fn map_raw_track(row: &Row<'_>) -> Result<RawVisualTrack, rusqlite::Error> {
         title: row.get(1)?,
         primary_artist: row.get(2)?,
         artists: row.get(3)?,
-        album: row.get(4)?,
-        genres: row.get(5)?,
-        release_date: row.get(6)?,
-        date_added: row.get(7)?,
-        last_played: row.get(8)?,
-        liked: row.get(9)?,
-        rating: row.get(10)?,
-        qualified_plays: row.get(11)?,
-        listened_ms: row.get(12)?,
-        audio_quality: row.get(13)?,
-        provider_count: row.get(14)?,
-        artwork_cache_key: row.get(15)?,
+        artist_ids: row.get(4)?,
+        album: row.get(5)?,
+        album_id: row.get(6)?,
+        genres: row.get(7)?,
+        release_date: row.get(8)?,
+        date_added: row.get(9)?,
+        last_played: row.get(10)?,
+        liked: row.get(11)?,
+        rating: row.get(12)?,
+        qualified_plays: row.get(13)?,
+        listened_ms: row.get(14)?,
+        audio_quality: row.get(15)?,
+        provider_count: row.get(16)?,
+        artwork_cache_key: row.get(17)?,
+        can_playback: row.get(18)?,
+        can_preview: row.get(19)?,
+        can_reveal_local: row.get(20)?,
     })
 }
 
@@ -320,9 +346,14 @@ fn dataset_sql() -> String {
     "SELECT t.id, t.title,\n",
     "       coalesce((SELECT a.name FROM track_artists ta JOIN artists a ON a.id = ta.artist_id ",
     "                  WHERE ta.track_id = t.id ORDER BY ta.artist_order, a.id LIMIT 1), ''),\n",
-    "       coalesce((SELECT json_group_array(a.name) FROM track_artists ta JOIN artists a ON a.id = ta.artist_id ",
-    "                  WHERE ta.track_id = t.id ORDER BY ta.artist_order, a.id), '[]'),\n",
+    "       coalesce((SELECT json_group_array(artist_name) FROM (SELECT a.name AS artist_name ",
+    "                  FROM track_artists ta JOIN artists a ON a.id = ta.artist_id ",
+    "                  WHERE ta.track_id = t.id ORDER BY ta.artist_order, a.id)), '[]'),\n",
+    "       coalesce((SELECT json_group_array(artist_id) FROM (SELECT a.id AS artist_id ",
+    "                  FROM track_artists ta JOIN artists a ON a.id = ta.artist_id ",
+    "                  WHERE ta.track_id = t.id ORDER BY ta.artist_order, a.id)), '[]'),\n",
     "       al.title,\n",
+    "       al.id,\n",
     "       coalesce((SELECT json_group_array(tg.genre) FROM track_genres tg WHERE tg.track_id = t.id ",
     "                  ORDER BY tg.normalized_genre, tg.genre), '[]'),\n",
     "       al.release_date, t.created_at,\n",
@@ -341,6 +372,24 @@ fn dataset_sql() -> String {
     "       (SELECT count(DISTINCT s.provider_kind) FROM track_sources s WHERE s.track_id = t.id),\n",
     "       (SELECT lf.artwork_cache_key FROM local_files lf JOIN track_sources s ON s.id = lf.source_id\n",
     "        WHERE s.track_id = t.id AND lf.artwork_cache_key IS NOT NULL ORDER BY lf.source_id LIMIT 1)\n",
+    "       ,CASE WHEN EXISTS (SELECT 1 FROM local_files lf\n",
+    "                    JOIN track_sources s ON s.id = lf.source_id\n",
+    "                    JOIN library_folders f ON f.id = lf.library_folder_id\n",
+    "                    WHERE s.track_id = t.id AND s.provider_kind = 'local'\n",
+    "                      AND s.available = 1 AND s.can_playback = 1\n",
+    "                      AND lf.index_status = 'indexed' AND f.enabled = 1) THEN 1 ELSE 0 END\n",
+    "       ,CASE WHEN EXISTS (SELECT 1 FROM local_files lf\n",
+    "                    JOIN track_sources s ON s.id = lf.source_id\n",
+    "                    JOIN library_folders f ON f.id = lf.library_folder_id\n",
+    "                    WHERE s.track_id = t.id AND s.provider_kind = 'local'\n",
+    "                      AND s.available = 1 AND s.can_playback = 1\n",
+    "                      AND lf.index_status = 'indexed' AND f.enabled = 1) THEN 1 ELSE 0 END\n",
+    "       ,CASE WHEN EXISTS (SELECT 1 FROM local_files lf\n",
+    "                    JOIN track_sources s ON s.id = lf.source_id\n",
+    "                    JOIN library_folders f ON f.id = lf.library_folder_id\n",
+    "                    WHERE s.track_id = t.id AND s.provider_kind = 'local'\n",
+    "                      AND s.available = 1 AND s.can_playback = 1\n",
+    "                      AND lf.index_status = 'indexed' AND f.enabled = 1) THEN 1 ELSE 0 END\n",
     "FROM tracks t LEFT JOIN albums al ON al.id = t.album_id\n",
     "{}",
     "ORDER BY\n",
@@ -462,6 +511,17 @@ mod tests {
             "00000000-0000-0000-0000-000000000001"
         );
         assert_eq!(result.tracks[0].artists, vec!["Artist One"]);
+        assert_eq!(
+            result.tracks[0].artist_ids,
+            vec!["00000000-0000-0000-0000-000000000101"]
+        );
+        assert_eq!(
+            result.tracks[0].album_id.as_deref(),
+            Some("00000000-0000-0000-0000-000000000201")
+        );
+        assert!(!result.tracks[0].can_playback);
+        assert!(!result.tracks[0].can_preview);
+        assert!(!result.tracks[0].can_reveal_local);
         assert_eq!(result.tracks[0].genres, vec!["Electronic"]);
         assert_eq!(result.tracks[0].year, Some(2024));
         assert_eq!(result.tracks[0].qualified_plays, 1);

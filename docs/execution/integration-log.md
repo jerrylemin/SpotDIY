@@ -317,3 +317,23 @@
 - Implementation commits are `1403955`, `d73e755`, `e442767`, `977176e`,
   `aee1dad`, and `2612804`. Graphify final output is 5,517 nodes, 12,505
   edges, and 268 communities; CodeGraph is unavailable.
+
+## 2026-09-03 - Plan 16 quality and release implementation
+
+- Closed the Plan 15 preview/main audio race with a shared PreviewService gate
+  used by Tauri transport, Windows SMTC/shortcut/tray transport, output
+  profile/device changes, source switching, backend retry, and operations that
+  replace or start playback. Queue-only mutations remain independent.
+- Added ordered artist IDs, album IDs, and native set-based visual capabilities
+  without a schema migration or N+1 frontend/provider lookup. Music Map and
+  Galaxy now keep stable identity separate from display labels.
+- Removed all three Fast Refresh warnings by moving runtime icon/theme exports
+  to non-component modules. Lazy-loaded all page routes after the measured
+  large main chunk warning; the final main chunk is 404.04 kB minified.
+- Added axe-core 4.13.0 route/keyboard coverage, immutable-SHA CI gates with
+  exact Node/pnpm pins, a deterministic 5,000-track layout benchmark, and
+  third-party dependency notices. No speculative product feature or migration
+  was added.
+- Current implementation remains uncommitted pending explicit approval; the
+  primary checkout's unrelated `.gitignore` change and two deleted Plan 05
+  reports were not touched.

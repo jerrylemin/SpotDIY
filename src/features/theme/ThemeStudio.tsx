@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { SpotIcon } from "../../components/icons/SpotIcon";
 import { LayoutWorkspace } from "../layout/LayoutWorkspace";
-import { useTheme } from "./theme-controller";
+import { useTheme } from "./theme-controller-model";
 import { DARK_THEME, LIGHT_THEME } from "./theme-presets";
 import { MAX_THEME_BYTES, THEME_TOKEN_NAMES, parseThemeDefinition, serializeThemeDefinition, type SpotThemeDefinition, type SpotThemeTokenName } from "./theme-schema";
 

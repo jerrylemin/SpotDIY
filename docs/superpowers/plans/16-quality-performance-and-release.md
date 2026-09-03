@@ -31,3 +31,23 @@ No unverified PASS claims, no known load-bearing failures, no secrets/copyrighte
 ## Commit boundary
 
 `chore: verify and package SpotDIY release`
+
+## Implementation record — 2026-09-03
+
+Plan 15 release blockers were repaired in the working tree: PreviewService
+now serializes preview and all normal audio-transition entrypoints through a
+shared gate; visual artist/album identity is stable and capability flags are
+native-derived; and visual actions remain truthful for metadata-only tracks.
+
+The release workflow now uses full action SHAs, exact Node/pnpm pins, frozen
+installs, zero-warning lint, frontend/Rust/audit/package jobs, and NSIS-only
+artifact upload. The three Fast Refresh warnings were fixed, secondary routes
+were lazy-loaded after the measured large-chunk warning, and axe/keyboard
+coverage plus a deterministic 5,000-track layout benchmark were added.
+
+Current evidence is `PARTIAL`: frontend/browser/a11y/JS-audit/layout gates
+pass, but native compilation, RustSec, Tauri packaging, clean install, and
+packaged acceptance are blocked by missing MSVC headers/libraries. The primary
+worktree intentionally retains the three unrelated pre-existing changes.
+No migration 10, updater, tag, GitHub Release, root LICENSE, or reviewer loop
+was added. Commit/push remains pending explicit approval.

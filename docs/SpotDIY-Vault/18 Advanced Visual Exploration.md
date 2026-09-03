@@ -41,3 +41,12 @@ contrast fallback. Existing Comfortable/Compact/Dense profiles are reused.
 Playwright tests, strict native/frontend gates, Tauri release/NSIS packaging,
 and the packaged Plan 15 visual/restart smoke pass. See
 `docs/execution/verification-log.md` and `docs/SpotDIY-Vault/12 Testing.md`.
+
+## Plan 16 repairs
+
+Visual points now carry deterministic artist-ID/name pairs and album IDs, so
+same-label entities do not merge. They also carry native `canPlayback`,
+`canPreview`, and `canRevealLocal` capabilities; unavailable actions remain
+disabled with explicit reasons. Preview and Windows/main transport share one
+serialization gate, preserving the eight-second preview rule and the
+no-history/no-analytics boundary.

@@ -856,7 +856,9 @@ export interface VisualTrackPoint {
   title: string;
   primaryArtist: string;
   artists: string[];
+  artistIds: string[];
   album: string | null;
+  albumId: string | null;
   genres: string[];
   year: number | null;
   dateAdded: string;
@@ -868,6 +870,9 @@ export interface VisualTrackPoint {
   audioQuality: VisualAudioQuality;
   providerCount: number;
   artworkPath: string | null;
+  canPlayback: boolean;
+  canPreview: boolean;
+  canRevealLocal: boolean;
 }
 
 export interface VisualDatasetRequest {

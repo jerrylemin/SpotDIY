@@ -297,3 +297,33 @@
   unavailable. `git diff --check` passes, `Test-Path .\\src-tauri\\target` is
   `False`, and no runtime data, media, secrets, or generated diagnostics are
   retained in the repository.
+
+## Plan 16 final verification — 2026-09-03
+
+- Frontend: `pnpm typecheck`, `pnpm exec eslint . --max-warnings 0`,
+  `pnpm test`, and `pnpm build` pass. Vitest reports 90 tests across 25
+  files; ESLint reports zero warnings. The build has a 404.04 kB minified main
+  chunk and lazy secondary route chunks.
+- Browser/a11y: `pnpm exec playwright test` passes 76/76 across 1280, 1920,
+  2560, and the Plan 15 ultrawide project. The axe subset reports zero serious
+  or critical violations; keyboard/focus/reduced-motion paths pass.
+- Performance: the ten-run synthetic 5,000-track harness reports Music Map
+  p95 295.40 ms and Galaxy p95 64.87 ms. Packaged launch/idle/playback and
+  native VisualExplorer SQL budgets are blocked without a release executable.
+- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` passes.
+  Clippy and all-target tests are BLOCKED by missing MSVC headers/libraries
+  (`excpt.h`, `stdarg.h`, `stdint.h`, `vcruntime.h`).
+- Audit: both configured pnpm audits pass with no known vulnerabilities.
+  `cargo metadata --manifest-path src-tauri/Cargo.toml --locked` reports 596
+  packages and one workspace member. RustSec remains BLOCKED because
+  `cargo-audit 0.22.2` could not link without `msvcrt.lib`.
+- Packaging/install: `pnpm tauri build`, NSIS hash/signature, clean install,
+  uninstall, Standard/Portable install, and packaged smokes are BLOCKED by
+  the same native toolchain failure. No installer or certificate was created.
+- Safety: schema 9, archive format 1, external Cargo output, and absent
+  repository-local `src-tauri\\target` remain intact. The primary worktree
+  preserves the three unrelated pre-existing changes.
+
+`graphify update .` passes at the final code state with 5,625 nodes, 12,674
+edges, and 271 communities; the HTML visualization is skipped because the
+graph exceeds Graphify's 5,000-node safety limit. CodeGraph is unavailable.

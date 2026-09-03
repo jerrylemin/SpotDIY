@@ -252,3 +252,19 @@ local preview, visited Music Map/Galaxy/Theme Studio, verified restart state,
 and confirmed both packaged launches exited with zero owned mpv processes.
 Schema remains 9; no migration 10 was added. CodeGraph is unavailable and
 repository-local `src-tauri\target` remains absent.
+
+## Plan 16 verification — 2026-09-03
+
+Frontend typecheck, zero-warning ESLint, 90 Vitest tests, production build,
+and the deterministic 5,000-track layout benchmark pass. The latest isolated
+benchmark reports Music Map p95 295.40 ms and Galaxy p95 64.87 ms. The targeted axe
+matrix passes all representative routes with zero serious/critical findings
+at 1280, 1920, and 2560 widths; the keyboard suite covers shell navigation,
+context/radial actions, inspector, queue, visual navigators, Theme Studio,
+focus restoration, Escape, and reduced motion.
+
+Native `cargo fmt` passed after the final native edit. Rechecking native
+compile, Clippy, all-target tests, RustSec, Tauri packaging, and packaged
+smokes is blocked by the local MSVC installation's missing headers/libraries.
+The exact failure, performance evidence, dependency inventory, and truthful
+skips are in `docs/SpotDIY-Vault/Sessions/final-verification.md`.

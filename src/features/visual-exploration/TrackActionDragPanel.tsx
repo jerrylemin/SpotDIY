@@ -4,6 +4,7 @@ import type { TrackId } from "../../types/domain";
 import { resolveVisualDrop, type VisualDropAction } from "./drag-actions";
 
 interface TrackActionDragPanelProps {
+  playbackAllowed?: boolean;
   disabled?: boolean;
   onInbox: () => void;
   onPlayNext: () => void;
@@ -11,10 +12,10 @@ interface TrackActionDragPanelProps {
   trackId: TrackId;
 }
 
-function DropTarget({ action, onDrop }: { action: VisualDropAction; onDrop: (action: VisualDropAction) => void }) {
-  const { isOver, setNodeRef } = useDroppable({ id: action });
+function DropTarget({ action, disabled, onDrop }: { action: VisualDropAction; disabled?: boolean; onDrop: (action: VisualDropAction) => void }) {
+  const { isOver, setNodeRef } = useDroppable({ disabled, id: action });
   const labels: Record<VisualDropAction, string> = { "play-next": "PLAY NEXT", queue: "ADD TO QUEUE", inbox: "INBOX" };
-  return <button className={`visual-drop-target${isOver ? " visual-drop-target-over" : ""}`} onClick={() => onDrop(action)} ref={setNodeRef} type="button">{labels[action]}</button>;
+  return <button className={`visual-drop-target${isOver ? " visual-drop-target-over" : ""}`} disabled={disabled} onClick={() => onDrop(action)} ref={setNodeRef} type="button">{labels[action]}</button>;
 }
 
 function DragChip({ disabled, trackId }: { disabled?: boolean; trackId: TrackId }) {
@@ -33,8 +34,9 @@ function DragChip({ disabled, trackId }: { disabled?: boolean; trackId: TrackId 
   </button>;
 }
 
-export function TrackActionDragPanel({ disabled, onInbox, onPlayNext, onQueue, trackId }: TrackActionDragPanelProps) {
+export function TrackActionDragPanel({ disabled, onInbox, onPlayNext, onQueue, playbackAllowed = true, trackId }: TrackActionDragPanelProps) {
   const run = (action: VisualDropAction) => {
+    if (action !== "inbox" && (disabled || !playbackAllowed)) return;
     if (action === "play-next") onPlayNext();
     if (action === "queue") onQueue();
     if (action === "inbox") onInbox();
@@ -49,8 +51,8 @@ export function TrackActionDragPanel({ disabled, onInbox, onPlayNext, onQueue, t
     <DndContext onDragEnd={onDragEnd}>
       <div aria-label="Drag actions" className="visual-drag-actions">
         <DragChip disabled={disabled} trackId={trackId} />
-        <DropTarget action="play-next" onDrop={run} />
-        <DropTarget action="queue" onDrop={run} />
+        <DropTarget action="play-next" disabled={disabled || !playbackAllowed} onDrop={run} />
+        <DropTarget action="queue" disabled={disabled || !playbackAllowed} onDrop={run} />
         <DropTarget action="inbox" onDrop={run} />
       </div>
     </DndContext>

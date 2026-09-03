@@ -508,3 +508,43 @@ below.
   visual dataset coverage includes empty/filter/order/aggregate/truncation and
   path non-leakage cases; preview coverage includes bounded policy and an
   injectable process seam without an 8-second test sleep.
+
+## 2026-09-03 - Plan 16 final verification
+
+- `pnpm typecheck` - passed. `pnpm exec eslint . --max-warnings 0` - passed
+  with zero warnings. `pnpm test` - passed: 90 tests across 25 files.
+  `pnpm build` - passed: 751 modules transformed, 404.04 kB minified main
+  chunk / 123.89 kB gzip, and lazy route chunks with no ineffective dynamic
+  import warning.
+- `pnpm exec playwright test` - passed: 76/76 across the 1280, 1920, 2560,
+  and Plan 15 ultrawide projects. The Plan 16 accessibility subset passed all
+  six tests with zero serious/critical axe violations and passed keyboard,
+  focus-restoration, Escape, and reduced-motion paths.
+- The isolated `scripts/performance-baseline.test.ts` run passed after the
+  harness timeout was raised from Vitest's default 5 seconds to 30 seconds.
+  Ten measured runs after one warm-up reported Music Map p95 295.40 ms and
+  Galaxy p95 64.87 ms for 5,000 synthetic tracks.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` - passed after
+  the final native edit. `cargo clippy --manifest-path src-tauri/Cargo.toml
+  --all-targets --all-features -- -D warnings` and
+  `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` - BLOCKED
+  at `vswhom-sys`, `libsqlite3-sys`, and `aws-lc-sys` because the selected
+  Visual Studio MSVC installation lacks `excpt.h`, `stdarg.h`, `stdint.h`,
+  `vcruntime.h`, and the corresponding runtime libraries.
+- `pnpm audit --audit-level high` and `pnpm audit --prod --audit-level
+  moderate` - passed with no known vulnerabilities. `cargo metadata
+  --manifest-path src-tauri/Cargo.toml --locked --format-version 1` - passed,
+  reporting 596 packages and one workspace member. `cargo audit` is BLOCKED:
+  the pinned `cargo-audit 0.22.2` install failed at native linking because
+  `msvcrt.lib` is unavailable.
+- `pnpm tauri build`, installer hash/signature, clean install/uninstall, and
+  packaged acceptance are BLOCKED because no native release executable can be
+  produced. Live download is `SKIPPED — no approved legal live-download
+  fixture`; live provider checks were not required. No tag, GitHub Release,
+  certificate, or Gmail message was created.
+- The primary worktree still contains only the Plan 16 changes plus the three
+  unrelated pre-existing changes; `git diff --check` and the external-target
+  policy remain final checks before commit approval. `graphify update .` -
+  passed, refreshing 5,625 nodes, 12,674 edges, and 271 communities; the HTML
+  visualization was skipped at Graphify's 5,000-node safety limit. CodeGraph is
+  unavailable.

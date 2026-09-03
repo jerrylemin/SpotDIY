@@ -860,11 +860,12 @@ fn play_playlist(
     item_ids: Vec<crate::domain::PlaylistItemId>,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    state.preview.cancel_preview();
-    state
-        .playback
-        .play_playlist(playlist_id, item_ids)
-        .map_err(|error| error.dto())
+    state.preview.with_preview_stopped(|| {
+        state
+            .playback
+            .play_playlist(playlist_id, item_ids)
+            .map_err(|error| error.dto())
+    })
 }
 
 #[tauri::command]
@@ -1191,14 +1192,15 @@ fn play_track(
     source_id: Option<crate::domain::SourceId>,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    state.preview.cancel_preview();
-    state
-        .playback
-        .play_track(TrackPlaybackRequest {
-            track_id,
-            source_id,
-        })
-        .map_err(|error| error.dto())
+    state.preview.with_preview_stopped(|| {
+        state
+            .playback
+            .play_track(TrackPlaybackRequest {
+                track_id,
+                source_id,
+            })
+            .map_err(|error| error.dto())
+    })
 }
 
 #[tauri::command]
@@ -1207,7 +1209,6 @@ fn enqueue_track(
     source_id: Option<crate::domain::SourceId>,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    state.preview.cancel_preview();
     state
         .playback
         .enqueue_track(TrackPlaybackRequest {
@@ -1223,7 +1224,6 @@ fn play_track_next(
     source_id: Option<crate::domain::SourceId>,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    state.preview.cancel_preview();
     state
         .playback
         .play_track_next(TrackPlaybackRequest {
@@ -1235,11 +1235,12 @@ fn play_track_next(
 
 #[tauri::command]
 fn toggle_play_pause(state: State<'_, AppState>) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    state.preview.cancel_preview();
-    state
-        .playback
-        .toggle_play_pause()
-        .map_err(|error| error.dto())
+    state.preview.with_preview_stopped(|| {
+        state
+            .playback
+            .toggle_play_pause()
+            .map_err(|error| error.dto())
+    })
 }
 
 #[tauri::command]
@@ -1247,11 +1248,12 @@ fn seek_playback(
     position_ms: u64,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    state.preview.cancel_preview();
-    state
-        .playback
-        .seek_playback(position_ms)
-        .map_err(|error| error.dto())
+    state.preview.with_preview_stopped(|| {
+        state
+            .playback
+            .seek_playback(position_ms)
+            .map_err(|error| error.dto())
+    })
 }
 
 #[tauri::command]
@@ -1316,14 +1318,16 @@ fn delete_ab_loop_preset(
 
 #[tauri::command]
 fn next_track(state: State<'_, AppState>) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    state.preview.cancel_preview();
-    state.playback.next_track().map_err(|error| error.dto())
+    state
+        .preview
+        .with_preview_stopped(|| state.playback.next_track().map_err(|error| error.dto()))
 }
 
 #[tauri::command]
 fn previous_track(state: State<'_, AppState>) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    state.preview.cancel_preview();
-    state.playback.previous_track().map_err(|error| error.dto())
+    state
+        .preview
+        .with_preview_stopped(|| state.playback.previous_track().map_err(|error| error.dto()))
 }
 
 #[tauri::command]
@@ -1383,10 +1387,12 @@ fn set_audio_device(
     name: String,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    state
-        .playback
-        .set_audio_device(name)
-        .map_err(|error| error.dto())
+    state.preview.with_preview_stopped(|| {
+        state
+            .playback
+            .set_audio_device(name)
+            .map_err(|error| error.dto())
+    })
 }
 
 #[tauri::command]
@@ -1395,24 +1401,28 @@ fn switch_playback_source(
     source_id: crate::domain::SourceId,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    state
-        .playback
-        .switch_playback_source(TrackPlaybackRequest {
-            track_id,
-            source_id: Some(source_id),
-        })
-        .map_err(|error| error.dto())
+    state.preview.with_preview_stopped(|| {
+        state
+            .playback
+            .switch_playback_source(TrackPlaybackRequest {
+                track_id,
+                source_id: Some(source_id),
+            })
+            .map_err(|error| error.dto())
+    })
 }
 
 #[tauri::command]
 fn retry_playback_backend(
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    let _ = state.media_tools.refresh_mpv();
-    state
-        .playback
-        .retry_playback_backend()
-        .map_err(|error| error.dto())
+    state.preview.with_preview_stopped(|| {
+        let _ = state.media_tools.refresh_mpv();
+        state
+            .playback
+            .retry_playback_backend()
+            .map_err(|error| error.dto())
+    })
 }
 
 #[tauri::command]
@@ -1630,10 +1640,12 @@ fn reopen_listening_session_as_queue(
         .reopen_session(session_id)
         .map_err(|error| error.to_string())?;
     if !result.entries.is_empty() {
-        state
-            .playback
-            .reopen_history_as_queue(result.entries.clone())
-            .map_err(|error| error.to_string())?;
+        state.preview.with_preview_stopped(|| {
+            state
+                .playback
+                .reopen_history_as_queue(result.entries.clone())
+                .map_err(|error| error.to_string())
+        })?;
     }
     Ok(result)
 }
@@ -1648,10 +1660,12 @@ fn reopen_time_machine_day_as_queue(
         .reopen_day(&local_date)
         .map_err(|error| error.to_string())?;
     if !result.entries.is_empty() {
-        state
-            .playback
-            .reopen_history_as_queue(result.entries.clone())
-            .map_err(|error| error.to_string())?;
+        state.preview.with_preview_stopped(|| {
+            state
+                .playback
+                .reopen_history_as_queue(result.entries.clone())
+                .map_err(|error| error.to_string())
+        })?;
     }
     Ok(result)
 }
@@ -1729,11 +1743,12 @@ fn open_smart_mix(
     seed: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
-    state.preview.cancel_preview();
-    state
-        .playback
-        .open_smart_mix(pool, options, seed)
-        .map_err(|error| error.dto())
+    state.preview.with_preview_stopped(|| {
+        state
+            .playback
+            .open_smart_mix(pool, options, seed)
+            .map_err(|error| error.dto())
+    })
 }
 
 #[tauri::command]
@@ -1896,6 +1911,7 @@ pub fn run() {
                 app.handle().clone(),
                 database.clone(),
                 playback.clone(),
+                preview.clone(),
             );
             app.manage(windows.clone());
             *windows_slot
