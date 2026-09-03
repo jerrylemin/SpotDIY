@@ -356,6 +356,7 @@ impl PreviewService {
         if let Some(mut child) = child {
             child.stop();
         }
+        self.set_state(PreviewState::default());
     }
 
     fn spawn_reaper(&self, generation: u64) {
@@ -382,14 +383,20 @@ impl PreviewService {
                         }
                     };
                     if finished || Instant::now() >= deadline {
-                        let mut child_guard = inner
-                            .child
+                        let _audio_gate = inner
+                            .audio_gate
                             .lock()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        if inner.generation.load(Ordering::Acquire) != generation {
-                            return;
-                        }
-                        let mut child = child_guard.take();
+                        let mut child = {
+                            let mut child_guard = inner
+                                .child
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            if inner.generation.load(Ordering::Acquire) != generation {
+                                return;
+                            }
+                            child_guard.take()
+                        };
                         if let Some(child) = child.as_mut() {
                             child.stop();
                         }
@@ -455,6 +462,12 @@ mod tests {
         stopped: Arc<AtomicBool>,
     }
 
+    struct ReaperProbeProcess {
+        checked: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+        finished: mpsc::Sender<()>,
+    }
+
     impl PreviewProcess for FakePreviewProcess {
         fn try_wait(&mut self) -> Result<bool, String> {
             Ok(self.stopped.load(Ordering::Acquire))
@@ -463,6 +476,17 @@ mod tests {
         fn stop(&mut self) {
             self.stopped.store(true, Ordering::Release);
         }
+    }
+
+    impl PreviewProcess for ReaperProbeProcess {
+        fn try_wait(&mut self) -> Result<bool, String> {
+            self.checked.send(()).unwrap();
+            self.release.recv().unwrap();
+            self.finished.send(()).unwrap();
+            Ok(true)
+        }
+
+        fn stop(&mut self) {}
     }
 
     impl PreviewBackend for FakePreviewBackend {
@@ -526,6 +550,13 @@ mod tests {
         *preview.inner.child.lock().unwrap() = Some(Box::new(FakePreviewProcess {
             stopped: stopped.clone(),
         }));
+        let track_id = TrackId::new();
+        preview.set_state(PreviewState {
+            phase: PreviewPhase::Playing,
+            track_id: Some(track_id),
+            started_at_ms: Some(1),
+            error: None,
+        });
 
         let (entered_tx, entered_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
@@ -544,7 +575,9 @@ mod tests {
         let waiting_preview = preview.clone();
         let second = thread::spawn(move || {
             attempted_tx.send(()).unwrap();
-            waiting_preview.with_preview_stopped(|| {});
+            let result =
+                waiting_preview.with_preview_stopped(|| Err::<(), _>("normal transition failed"));
+            assert_eq!(result.unwrap_err(), "normal transition failed");
             completed_tx.send(()).unwrap();
         });
         attempted_rx.recv().unwrap();
@@ -554,6 +587,57 @@ mod tests {
         first.join().unwrap();
         second.join().unwrap();
         assert!(completed_rx.recv().is_ok());
+        assert_eq!(preview.state(), PreviewState::default());
+        playback.shutdown().unwrap();
+    }
+
+    #[test]
+    fn stale_preview_reaper_cannot_reset_a_new_generation() {
+        let root = tempfile::tempdir().unwrap();
+        let database = Database::open(root.path().join("preview.sqlite3")).unwrap();
+        let library = LibraryService::new(database, root.path().join("artwork")).unwrap();
+        let playback = PlaybackService::new(
+            library.clone(),
+            MediaToolManager::with_override(PathBuf::from("missing-mpv")),
+            Arc::new(|_| {}),
+        );
+        let preview = PreviewService::with_backend(
+            library,
+            playback.clone(),
+            Arc::new(FakePreviewBackend::default()),
+        );
+        let old_track_id = TrackId::new();
+        let new_track_id = TrackId::new();
+        preview.inner.generation.store(7, Ordering::Release);
+        preview.set_state(PreviewState {
+            phase: PreviewPhase::Playing,
+            track_id: Some(old_track_id),
+            started_at_ms: Some(1),
+            error: None,
+        });
+        let (checked_tx, checked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        *preview.inner.child.lock().unwrap() = Some(Box::new(ReaperProbeProcess {
+            checked: checked_tx,
+            release: release_rx,
+            finished: finished_tx,
+        }));
+
+        preview.spawn_reaper(7);
+        checked_rx.recv().unwrap();
+        preview.inner.generation.store(8, Ordering::Release);
+        preview.set_state(PreviewState {
+            phase: PreviewPhase::Playing,
+            track_id: Some(new_track_id),
+            started_at_ms: Some(2),
+            error: None,
+        });
+        release_tx.send(()).unwrap();
+        finished_rx.recv().unwrap();
+
+        assert_eq!(preview.state().track_id, Some(new_track_id));
+        assert_eq!(preview.state().phase, PreviewPhase::Playing);
         playback.shutdown().unwrap();
     }
 }

@@ -66,6 +66,7 @@ The expressions below are the published metadata returned by
 | `walkdir` | 2.5.0 | Unlicense OR MIT | [BurntSushi/walkdir](https://github.com/BurntSushi/walkdir) | native |
 | `zip` | 8.6.0 | MIT | [zip-rs/zip2](https://github.com/zip-rs/zip2) | native |
 | `windows-sys` | 0.61.2 | MIT OR Apache-2.0 | [microsoft/windows-rs](https://github.com/microsoft/windows-rs) | Windows native |
+| `windows` | 0.62.2 | MIT OR Apache-2.0 | [microsoft/windows-rs](https://github.com/microsoft/windows-rs) | Windows native helper |
 
 `spotdiy-windows-smtc` is a project-owned path dependency and has no
 third-party license expression. `tauri-build` 2.6.3 is build-time tooling and

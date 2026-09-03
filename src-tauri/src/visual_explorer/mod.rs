@@ -354,8 +354,9 @@ fn dataset_sql() -> String {
     "                  WHERE ta.track_id = t.id ORDER BY ta.artist_order, a.id)), '[]'),\n",
     "       al.title,\n",
     "       al.id,\n",
-    "       coalesce((SELECT json_group_array(tg.genre) FROM track_genres tg WHERE tg.track_id = t.id ",
-    "                  ORDER BY tg.normalized_genre, tg.genre), '[]'),\n",
+     "       coalesce((SELECT json_group_array(genre) FROM (SELECT tg.genre AS genre ",
+     "                  FROM track_genres tg WHERE tg.track_id = t.id ",
+     "                  ORDER BY tg.normalized_genre, tg.genre)), '[]'),\n",
     "       al.release_date, t.created_at,\n",
     "       (SELECT max(h.started_at) FROM play_history h WHERE h.track_id = t.id),\n",
     "       CASE WHEN EXISTS (SELECT 1 FROM likes l WHERE l.track_id = t.id) THEN 1 ELSE 0 END,\n",
@@ -547,6 +548,80 @@ mod tests {
     }
 
     #[test]
+    fn dataset_reports_capabilities_for_an_indexed_managed_local_file() {
+        let (_database, explorer) = service("local-capability");
+        let music = tempfile::tempdir().unwrap();
+        let path = music.path().join("managed.wav");
+        std::fs::write(&path, minimal_wav()).unwrap();
+        let folder = explorer
+            .library
+            .add_folders(vec![music.path().to_path_buf()])
+            .unwrap()
+            .remove(0);
+        explorer
+            .library
+            .scan_folder_now(folder.id, false, None)
+            .unwrap();
+
+        let result = explorer.dataset(Default::default()).unwrap();
+
+        assert_eq!(result.returned_tracks, 1);
+        assert!(result.tracks[0].can_playback);
+        assert!(result.tracks[0].can_preview);
+        assert!(result.tracks[0].can_reveal_local);
+    }
+
+    #[test]
+    fn dataset_keeps_provider_only_capabilities_disabled() {
+        let (database, explorer) = service("provider-capability");
+        database
+            .with_connection(|connection| {
+                connection.execute_batch(
+                    "INSERT INTO tracks (id, title, normalized_title, created_at, updated_at)
+                       VALUES ('00000000-0000-0000-0000-000000000901', 'Spotify Only', 'spotify only',
+                               '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+                     INSERT INTO track_sources
+                       (id, track_id, provider_kind, provider_item_id, can_metadata,
+                        created_at, updated_at)
+                       VALUES ('00000000-0000-0000-0000-000000000902',
+                               '00000000-0000-0000-0000-000000000901', 'spotify', 'spotify-only', 1,
+                               '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');",
+                )
+            })
+            .unwrap();
+
+        let track = explorer.dataset(Default::default()).unwrap().tracks[0].clone();
+
+        assert!(!track.can_playback);
+        assert!(!track.can_preview);
+        assert!(!track.can_reveal_local);
+    }
+
+    #[test]
+    fn dataset_orders_multiple_genres_deterministically() {
+        let (database, explorer) = service("genre-order");
+        seed(&database);
+        database
+            .with_connection(|connection| {
+                connection.execute_batch(
+                    "INSERT INTO track_genres (track_id, genre, normalized_genre) VALUES
+                       ('00000000-0000-0000-0000-000000000001', 'Rock', 'rock'),
+                       ('00000000-0000-0000-0000-000000000001', 'Ambient', 'ambient');",
+                )
+            })
+            .unwrap();
+
+        let first = explorer.dataset(Default::default()).unwrap();
+        let second = explorer.dataset(Default::default()).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first.tracks[0].genres,
+            vec!["Ambient", "Electronic", "Rock"]
+        );
+    }
+
+    #[test]
     fn dataset_reports_truncation_and_respects_hard_limit() {
         let (database, explorer) = service("truncated");
         seed(&database);
@@ -565,5 +640,23 @@ mod tests {
             ..Default::default()
         })
         .is_err());
+    }
+
+    fn minimal_wav() -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(46);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&38_u32.to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&8_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&16_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&16_u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&2_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_i16.to_le_bytes());
+        bytes
     }
 }

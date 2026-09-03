@@ -129,10 +129,7 @@ impl SmtcBridge {
 
     pub fn shutdown(&self) -> Result<(), SmtcError> {
         let _ = self.command_tx.send(Command::Shutdown);
-        let mut join = self
-            .join
-            .lock()
-            .map_err(|_| SmtcError::ThreadStart)?;
+        let mut join = self.join.lock().map_err(|_| SmtcError::ThreadStart)?;
         if let Some(handle) = join.take() {
             let _ = handle.join();
         }
@@ -151,8 +148,7 @@ fn create_controls(hwnd: isize) -> windows::core::Result<SystemMediaTransportCon
         factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>()?;
     // SAFETY: `hwnd` is copied from the live desktop Tauri main window and is
     // only consumed on this dedicated thread while the window is alive.
-    let controls: SystemMediaTransportControls =
-        unsafe { interop.GetForWindow(HWND(hwnd as _))? };
+    let controls: SystemMediaTransportControls = unsafe { interop.GetForWindow(HWND(hwnd as _))? };
     controls.SetIsEnabled(true)?;
     controls.SetIsPlayEnabled(true)?;
     controls.SetIsPauseEnabled(true)?;
