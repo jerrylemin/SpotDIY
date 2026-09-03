@@ -830,7 +830,7 @@ impl AnalyticsRecorder {
         now: Instant,
     ) -> Result<(), AnalyticsError> {
         if enabled {
-            let _ = self.finish(HistoryOutcome::Stopped, at, now)?;
+            let _ = self.finish_transition(at, now)?;
         } else if let Some(active) = self.active.as_mut() {
             let was_playing = active.playing_since.is_some();
             active.private = false;
@@ -1200,6 +1200,140 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(result.listened_ms, 0);
+    }
+
+    #[test]
+    fn enabling_private_classifies_unqualified_segment_as_skipped() {
+        let database = database("private-unqualified");
+        let modes = ListeningModeService::new();
+        let mut recorder = AnalyticsRecorder::new(database.clone(), modes);
+        let base = Instant::now();
+        let start = Utc::now();
+        recorder.begin_track(metadata(), Some(60_000), start, base);
+        recorder.set_phase(RecorderPhase::Playing, base);
+
+        recorder
+            .set_private(
+                true,
+                start + chrono::Duration::seconds(5),
+                base + Duration::from_secs(5),
+            )
+            .unwrap();
+
+        let outcome: String = database
+            .with_connection(|connection| {
+                connection.query_row("SELECT outcome FROM play_history", [], |row| row.get(0))
+            })
+            .unwrap();
+        assert_eq!(outcome, "skipped");
+    }
+
+    #[test]
+    fn enabling_private_classifies_qualified_segment_as_stopped() {
+        let database = database("private-qualified");
+        let modes = ListeningModeService::new();
+        let mut recorder = AnalyticsRecorder::new(database.clone(), modes);
+        let base = Instant::now();
+        let start = Utc::now();
+        recorder.begin_track(metadata(), Some(60_000), start, base);
+        recorder.set_phase(RecorderPhase::Playing, base);
+
+        recorder
+            .set_private(
+                true,
+                start + chrono::Duration::seconds(35),
+                base + Duration::from_secs(35),
+            )
+            .unwrap();
+
+        let row: (String, i64) = database
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT outcome, qualified_play FROM play_history",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .unwrap();
+        assert_eq!(row, ("stopped".to_owned(), 1));
+    }
+
+    #[test]
+    fn private_mode_does_not_record_a_later_interval() {
+        let database = database("private-later");
+        let modes = ListeningModeService::new();
+        let mut recorder = AnalyticsRecorder::new(database.clone(), modes.clone());
+        let base = Instant::now();
+        let start = Utc::now();
+        recorder.begin_track(metadata(), Some(60_000), start, base);
+        recorder.set_phase(RecorderPhase::Playing, base);
+        recorder
+            .set_private(
+                true,
+                start + chrono::Duration::seconds(5),
+                base + Duration::from_secs(5),
+            )
+            .unwrap();
+        modes.set_private(true).unwrap();
+        recorder.begin_track(
+            metadata(),
+            Some(60_000),
+            start,
+            base + Duration::from_secs(5),
+        );
+        recorder.set_phase(RecorderPhase::Playing, base + Duration::from_secs(5));
+        recorder
+            .finish(
+                HistoryOutcome::Completed,
+                start + chrono::Duration::seconds(15),
+                base + Duration::from_secs(15),
+            )
+            .unwrap();
+
+        let count: i64 = database
+            .with_connection(|connection| {
+                connection.query_row("SELECT COUNT(*) FROM play_history", [], |row| row.get(0))
+            })
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn disabling_private_starts_a_fresh_analytics_interval() {
+        let database = database("private-resume");
+        let modes = ListeningModeService::new();
+        modes.set_private(true).unwrap();
+        let mut recorder = AnalyticsRecorder::new(database.clone(), modes.clone());
+        let base = Instant::now();
+        let start = Utc::now();
+        recorder.begin_track(metadata(), Some(60_000), start, base);
+        recorder.set_phase(RecorderPhase::Playing, base);
+        modes.set_private(false).unwrap();
+        recorder
+            .set_private(
+                false,
+                start + chrono::Duration::seconds(5),
+                base + Duration::from_secs(5),
+            )
+            .unwrap();
+        recorder
+            .finish(
+                HistoryOutcome::Stopped,
+                start + chrono::Duration::seconds(35),
+                base + Duration::from_secs(35),
+            )
+            .unwrap();
+
+        let row: (i64, i64) = database
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT listened_ms, qualified_play FROM play_history",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .unwrap();
+        assert_eq!(row, (30_000, 1));
     }
 
     #[test]
