@@ -338,3 +338,40 @@ Build output remains external at `C:\CargoTarget\SpotDIY`; repository-local
 `src-tauri\target` is absent. The commits are ready for remote review, while
 three unrelated pre-existing worktree changes (`.gitignore` plus two old
 report deletions) remain unstaged.
+
+## Plan 15 advanced visual exploration snapshot — 2026-09-03
+
+Plan 15 is complete through `1403955`, `d73e755`, `e442767`, `977176e`,
+`aee1dad`, and `2612804`. The Plan-14 privacy-transition fix in `1403955`
+closes the active analytics interval with `finish_transition`, preserving
+qualified/stopped/skipped classification at the Private Session boundary and
+starting a fresh interval when privacy is disabled. Schema 9 remains unchanged;
+no migration 10 was added.
+
+The native `VisualExplorerService` exposes one bounded, read-only SQL dataset
+contract (default 2,000, hard maximum 5,000) with stable liked/rating/listened
+ordering, filters, aggregates, quality, and trusted artwork-cache references;
+it does not expose local media paths, raw provider URLs, credentials, or make
+network calls. Music Map and Library Galaxy use deterministic bounded layouts,
+SVG/Canvas rendering, pan/zoom/reset/search/filter/selection, and 200-item DOM
+navigators. Shared actions reuse capability policy, ContextActionMenu, a
+keyboard-safe radial menu, and dnd-kit drag targets. `PreviewService` is a
+separate local-only, TrackId-based, eight-second native process with playback
+interlock, cancellation, shutdown, and an injectable backend seam.
+
+Theme Studio provides schema v1 with 15 validated tokens, draft/import/export,
+session preview, persistent Save & Activate, clone actions, dynamic accent
+sampling bounded to 32x32 pixels, contrast fallback, and existing layout
+profiles. `/music-map`, `/library-galaxy`, and `/theme-studio` are routed and
+sidebar/palette discoverable; browser preview uses only the existing synthetic
+E2E track and keeps native-only operations unavailable.
+
+Final evidence: 430 Rust unit tests plus one real-mpv synthetic-WAV integration
+test, 88 Vitest tests across 24 files, 70 Playwright tests, frontend typecheck/
+lint/build, Rust fmt and strict all-target/all-feature Clippy, external-target
+Tauri release/NSIS packaging, and the packaged Plan 15 visual/restart smoke.
+Lint has three non-fatal Fast Refresh warnings; build has the existing dynamic
+import and large-chunk notices. Graphify reports 5,517 nodes, 12,505 edges,
+and 268 communities; CodeGraph is unavailable. Build output remains external
+at `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` remains
+absent. Three unrelated pre-existing worktree changes remain unstaged.

@@ -191,3 +191,29 @@ src/hooks/useAnalytics.ts + useSmartPlaylists.ts + useListeningModes.ts
 The native services are local-only and the frontend receives Zod-validated
 DTOs. `PlaybackService` remains the only owner allowed to open a smart mix
 into the live queue.
+
+## Plan 15 advanced visual exploration structure
+
+```text
+src-tauri/src/visual_explorer/mod.rs  --> bounded read-only dataset DTO/query
+src-tauri/src/preview/mod.rs          --> local eight-second preview lifecycle
+src-tauri/src/lib.rs                  --> visual dataset and preview IPC wiring
+
+src/features/music-map/layout.ts      --> deterministic GENRE/ARTIST/ALBUM/TRACK graph
+src/features/library-galaxy/layout.ts --> deterministic clustered Canvas positions
+src/pages/MusicMapPage.tsx            --> SVG map, filters, navigator, actions
+src/pages/LibraryGalaxyPage.tsx       --> Canvas galaxy, filters, navigator, actions
+src/features/visual-exploration/*     --> shared actions and drag/drop targets
+src/components/radial-menu/*          --> bounded radial actions and More fallback
+
+src/features/theme/ThemeStudio.tsx
+src/features/theme/theme-controller.tsx
+src/features/theme/theme-studio/dynamic-accent.ts
+src/features/layout/LayoutWorkspace.tsx
+                                      --> draft themes, session preview, accent, layout
+```
+
+The visual routes consume one typed/Zod-validated dataset and do not invent
+production data in browser preview. Native preview resolves only an indexed
+managed local source through the existing library/playback policy; it never
+joins queue, history, analytics, SMTC, or provider behavior.

@@ -268,3 +268,32 @@
   CodeGraph remains unavailable because no command/index is present.
 - `git diff --check` passes. `Test-Path .\\src-tauri\\target` is `False` and
   no runtime data, secrets, or generated verification diagnostics are retained.
+
+## Plan 15 final verification — 2026-09-03
+
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass;
+  Vitest reports 88 tests across 24 files. Lint retains three non-fatal Fast
+  Refresh warnings; build retains the existing ineffective dynamic-import and
+  large-chunk notices.
+- Browser: `pnpm exec playwright test` passes all 70 tests, including the
+  targeted `plan15-ultrawide` visual route test. It covers SVG/Canvas routes,
+  DOM navigators, radial keyboard/focus behavior, preview cancellation, Theme
+  Studio's 15 fields, layout selection, reduced motion, and overflow/no-
+  placeholder checks.
+- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`, strict
+  all-target/all-feature Clippy with `-D warnings`, and
+  `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` pass. The
+  suite reports 430 Rust unit tests plus one real-mpv synthetic-WAV integration
+  test. Focused visual dataset, preview policy/seam, and Private Session
+  transition tests are included.
+- Runtime: `pnpm tauri build` passes and produces the release executable and
+  NSIS installer under external `C:\CargoTarget\SpotDIY`. The packaged
+  `scripts/packaged-playback-smoke.ps1 -Plan15VisualExploration` run passes
+  visual routes, native dataset/path-boundary checks, real local preview,
+  Theme Studio, restart isolation, and owned-process cleanup; both launches
+  exit with code 0.
+- Safety/graphs: schema remains 9 with no migration 10; `graphify update .`
+  reports 5,517 nodes, 12,505 edges, and 268 communities; CodeGraph is
+  unavailable. `git diff --check` passes, `Test-Path .\\src-tauri\\target` is
+  `False`, and no runtime data, media, secrets, or generated diagnostics are
+  retained in the repository.

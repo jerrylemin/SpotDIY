@@ -292,3 +292,28 @@
   The final docs commit closes the record. The commits are local only while native
   and package gates remain blocked; three unrelated pre-existing worktree
   changes remain unstaged.
+
+## 2026-09-03 - Plan 15 advanced visual exploration
+
+- Repaired the Plan-14 Private Session transition in `1403955`: the active
+  interval now closes through the shared transition classifier, preserving
+  qualified/stopped/skipped outcomes and preventing later private intervals
+  from being recorded.
+- Integrated `VisualExplorerService` and typed/Zod IPC for one bounded,
+  read-only schema-9 dataset with deterministic ordering, filters, aggregates,
+  quality, truncation, and trusted artwork-cache references only. No media
+  paths, raw provider URLs, credentials, or network calls cross the boundary.
+- Integrated deterministic Music Map SVG and Library Galaxy Canvas routes with
+  pan/zoom/reset, selection, filters, bounded DOM navigators, shared actions,
+  radial More fallback, and dnd-kit/keyboard queue targets.
+- Integrated separate local `PreviewService` with TrackId resolution,
+  playback interlock, 8-second/35%-volume limits, owned-process cancellation,
+  shutdown, and injectable backend tests. Preview never mutates playback
+  history, analytics, queue, SMTC, or providers.
+- Integrated Theme Studio's schema-v1/15-token draft workflow, import/export,
+  session preview, Save & Activate, clone actions, contrast-safe 32x32 dynamic
+  accent, and existing layout profiles; added browser, native, packaged, and
+  restart coverage.
+- Implementation commits are `1403955`, `d73e755`, `e442767`, `977176e`,
+  `aee1dad`, and `2612804`. Graphify final output is 5,517 nodes, 12,505
+  edges, and 268 communities; CodeGraph is unavailable.

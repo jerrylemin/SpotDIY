@@ -483,4 +483,28 @@ below.
 - `graphify update .` passed after those code changes: 281 files, 5,329 nodes,
   12,057 edges, and 260 communities. CodeGraph remains unavailable because no
   command/index is present. No runtime SQLite, archive, media, credentials,
-  tokens, or generated test diagnostics are retained.
+   tokens, or generated test diagnostics are retained.
+
+## 2026-09-03 - Plan 15 final verification
+
+- `pnpm typecheck` and `pnpm test` passed; Vitest reports 88 tests across 24
+  files. `pnpm lint` passed with the three existing Fast Refresh warnings and
+  no errors. `pnpm build` passed with the existing non-fatal dynamic-import and
+  large-chunk notices.
+- `pnpm exec playwright test` passed: 70 tests across the existing viewport
+  projects and the targeted Plan-15 ultrawide project.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` passed;
+  strict all-target/all-feature Clippy with `-D warnings` passed; native all-
+  target tests passed with 430 unit tests and one real-mpv synthetic-WAV
+  integration test.
+- `pnpm tauri build` passed with release executable and NSIS installer at
+  external `C:\CargoTarget\SpotDIY`. The Plan-15 packaged runner passed both
+  visual/restart phases, real local preview, dataset contract, Theme Studio,
+  and owned-process cleanup; both packaged app processes exited with code 0.
+- `graphify update .` passed and rebuilt 5,517 nodes, 12,505 edges, and 268
+  communities. CodeGraph remains unavailable. `git diff --check` passed and
+  repository-local `src-tauri\\target` remains absent.
+- The Plan-14 transition repair is covered by four native regression tests;
+  visual dataset coverage includes empty/filter/order/aggregate/truncation and
+  path non-leakage cases; preview coverage includes bounded policy and an
+  injectable process seam without an 8-second test sleep.

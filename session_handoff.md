@@ -294,4 +294,33 @@ edges, and 260 communities; CodeGraph is unavailable. Build output remains at
 ## Next atomic task
 
 STOPPED AFTER PLAN 14. Awaiting external ChatGPT GitHub review. Do not start
-Plan 15.
+Plan 15. This historical handoff predates the completion record below.
+
+## Plan 15 completion handoff — 2026-09-03
+
+Plan 15 is complete through `1403955` (Plan-14 private transition repair),
+`d73e755` (visual dataset), `e442767` (Music Map/Galaxy and shared visual
+surfaces), `977176e` (bounded local preview), `aee1dad` (Theme Studio and
+dynamic accent), and `2612804` (interaction/package coverage). Preserve the
+unrelated `.gitignore` modification and the two deleted historical Plan 05
+report files; they remain unstaged and were not bundled.
+
+Implemented boundaries: schema 9 remains the latest schema; visual data is one
+bounded read-only SQL query path with no local media/provider-secret leakage;
+Music Map is SVG and Galaxy is deterministic 2D Canvas with 200-item DOM
+navigators; actions support Play Now/Next/Queue/Inbox/Inspect/Lyrics/Reveal,
+radial More, keyboard drag alternatives, and capability gating; PreviewService
+is separate from playback and limited to explicit eight-second local samples;
+Theme Studio has schema v1/15 tokens, draft preview, persistence, import/export,
+contrast-safe dynamic accent, and existing layout profiles.
+
+Final evidence: 430 Rust unit tests plus one real-mpv integration test, 88
+Vitest tests, 70 Playwright tests, frontend/native quality gates, Tauri
+release/NSIS packaging, and the packaged Plan 15 visual/restart smoke. Graphify
+reports 5,517 nodes, 12,505 edges, and 268 communities; CodeGraph is
+unavailable. Build output is external at `C:\CargoTarget\SpotDIY`, and
+repository-local `src-tauri\target` is absent.
+
+## Next atomic task
+
+STOPPED AFTER PLAN 15. Do not start Plan 16 in this task.

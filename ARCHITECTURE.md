@@ -405,3 +405,44 @@ The `/analytics` route and Playlists smart-rule surface consume these typed
 contracts. Browser preview adapters return empty analytics and reject native
 smart operations, so production UI cannot fabricate local history or
 recommendations.
+
+## Plan 15 advanced visual exploration boundary
+
+`VisualExplorerService` is the sole native producer for visual exploration
+data. It executes one parameter-bound, read-only dataset query over the
+existing schema-9 library, collection, source, genre, rating, and play-history
+tables, validates a default 2,000/hard 5,000 limit, reports truncation, and
+orders ties by stable `TrackId`. The DTO contains bounded metadata, aggregate
+listening facts, quality, provider count, and only an existing artwork-cache
+path; local media paths, raw provider URLs, credentials, and network results
+are outside the contract.
+
+Music Map derives real GENRES -> ARTISTS -> ALBUMS -> TRACKS relationships and
+renders a bounded SVG with deterministic order, pan/zoom/reset, filters,
+selection, and a 200-item Map Navigator. Library Galaxy derives deterministic
+artist/genre clusters with golden-angle placement and hashed TrackId offsets,
+renders one-shot 2D Canvas frames, and exposes the same bounded interaction
+fallback through Galaxy Navigator. Neither surface uses a continuous
+animation loop or synthetic production data.
+
+Visual track actions reuse the existing capability/action policy and
+`ContextActionMenu`. The radial menu shows at most eight visible actions and
+routes overflow to the linear More menu; the dnd-kit panel has Play Next,
+Queue, and Inbox targets plus keyboard buttons. Canceled or invalid drops do
+not mutate queue state.
+
+`PreviewService` is intentionally separate from `PlaybackService`. A
+TrackId is resolved through the managed local library, online/missing sources
+are rejected, playback phases Playing/Seeking/Loading/Recovering return the
+stable `Pause playback to preview.` error, and an owned process is capped at
+eight seconds with a 35% volume ceiling. Preview state is idle/loading/
+playing/failed, is canceled on explicit user loss of context or main playback,
+and never writes queue, history, analytics, SMTC, or provider state.
+
+Theme Studio edits a schema-v1 15-token draft, previews it only for the
+current session, and persists only after Save & Activate. Import/export uses
+the same validated theme shape; clone actions start from Dark, Light, or the
+current theme. Dynamic accent is session-only, samples no more than 32x32
+client-side artwork pixels, applies contrast checks, and falls back to the
+existing accent pair. Layout Workspace reuses the existing persisted layout
+profiles.

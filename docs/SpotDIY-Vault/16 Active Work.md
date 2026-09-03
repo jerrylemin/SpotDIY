@@ -179,4 +179,18 @@ ownership checks.
 Final native, browser, package, packaged-smoke, and isolated schema-9
 roundtrip gates pass. Graphify reports 281 files, 5,329 nodes, 12,057 edges,
 and 260 communities; CodeGraph remains unavailable. Three unrelated
-pre-existing worktree changes remain unstaged. Plan 15 is out of scope.
+pre-existing worktree changes remain unstaged. This historical snapshot
+predates Plan 15 completion.
+
+## Plan 15 completion — 2026-09-03
+
+Plan 15 is complete through `1403955`, `d73e755`, `e442767`, `977176e`,
+`aee1dad`, and `2612804`. It adds the bounded local visual dataset, Music Map,
+Library Galaxy, shared capability-aware visual actions, radial/drag fallbacks,
+separate local audio preview, Theme Studio, dynamic accent, layout workspace,
+and native/browser/packaged verification. Schema 9 remains unchanged and no
+Plan 16 work was started.
+
+Final evidence is recorded in `docs/execution/verification-log.md` and
+`docs/SpotDIY-Vault/12 Testing.md`. Preserve the three unrelated pre-existing
+worktree changes; they remain unstaged.

@@ -228,3 +228,27 @@ non-fatal notices. Graphify reports 281 files, 5,329 nodes, 12,057 edges, and
 260 communities; CodeGraph is unavailable because no command/index is present.
 Build output remains external at `C:\CargoTarget\SpotDIY`, and repository-local
 `src-tauri\target` remains absent.
+
+## Plan 15 verification
+
+Plan 15 passes 430 Rust unit tests plus one real-mpv synthetic-WAV integration
+test, 88 Vitest tests across 24 files, and 70 Playwright tests. Frontend
+typecheck/lint/build, Rust fmt, strict all-features Clippy, all-target tests,
+external Tauri release/NSIS packaging, `git diff --check`, and Graphify update
+pass. Lint retains three non-fatal Fast Refresh warnings; build retains the
+documented dynamic-import and large-chunk notices.
+
+Focused coverage includes Private Session transition classification; the empty,
+filtered, ordered, aggregate, truncated, and path-safe visual dataset; bounded
+Music Map/Galaxy layout determinism; radial More/focus behavior; drag-drop
+valid/canceled mapping; preview offset/volume/interlock and injectable process
+seam; Theme Studio token count/import/export/preview; and ultrawide reduced-
+motion route navigation with no horizontal overflow or placeholder content.
+
+The external-target release passed
+`scripts/packaged-playback-smoke.ps1 -Plan15VisualExploration`. The smoke
+scanned an isolated local fixture, exercised the native visual dataset and real
+local preview, visited Music Map/Galaxy/Theme Studio, verified restart state,
+and confirmed both packaged launches exited with zero owned mpv processes.
+Schema remains 9; no migration 10 was added. CodeGraph is unavailable and
+repository-local `src-tauri\target` remains absent.
