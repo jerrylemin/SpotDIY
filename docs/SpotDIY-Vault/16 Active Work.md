@@ -164,3 +164,45 @@ is recorded in `docs/execution/verification-log.md` and
 
 STOPPED AFTER PLAN 13.
 Awaiting external ChatGPT GitHub review before Plan 14.
+
+## Plan 14 completion — 2026-09-03
+
+Plan 14 is complete through implementation commits `f516eee`, `6a02daa`,
+`ab01f3e`, `aedd3a8`, `4527b02`, and `dbcdb2f`, plus the verification repairs
+and final documentation closure. It adds schema-9 local listening
+history/sessions, tagged genres and release dates, qualified-play recording,
+Private Session, Temporary Mode, typed smart playlists, deterministic Smart
+Shuffle, `/analytics`, Taste Timeline, Time Machine, and reopen-as-queue
+controls. Plan 13 restore staging retains its trusted component and cleanup
+ownership checks.
+
+Final native, browser, package, packaged-smoke, and isolated schema-9
+roundtrip gates pass. Graphify reports 281 files, 5,329 nodes, 12,057 edges,
+and 260 communities; CodeGraph remains unavailable. Three unrelated
+pre-existing worktree changes remain unstaged. This historical snapshot
+predates Plan 15 completion.
+
+## Plan 15 completion — 2026-09-03
+
+Plan 15 is complete through `1403955`, `d73e755`, `e442767`, `977176e`,
+`aee1dad`, and `2612804`. It adds the bounded local visual dataset, Music Map,
+Library Galaxy, shared capability-aware visual actions, radial/drag fallbacks,
+separate local audio preview, Theme Studio, dynamic accent, layout workspace,
+and native/browser/packaged verification. Schema 9 remains unchanged and no
+Plan 16 work was started.
+
+Final evidence is recorded in `docs/execution/verification-log.md` and
+`docs/SpotDIY-Vault/12 Testing.md`. Preserve the three unrelated pre-existing
+worktree changes; they remain unstaged.
+
+## Plan 16 quality and release — 2026-09-03
+
+Plan 16 is `PARTIAL` in the current checkout. Preview/main playback
+serialization, stable visual IDs, capability-aware visual actions, CI pinning,
+Fast Refresh cleanup, route splitting, axe/keyboard coverage, dependency
+notices, and deterministic frontend layout measurements are implemented.
+
+Frontend gates pass locally. Native/package/RustSec/installer gates are
+blocked by missing MSVC headers/libraries, so Plan 16 is not marked complete
+and no release artifact or commit SHA is claimed. See the final verification
+session and performance research note.

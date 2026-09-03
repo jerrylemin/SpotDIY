@@ -254,6 +254,8 @@ fn fallback_metadata(path: &Path) -> ExtractedMetadata {
         bitrate_kbps: None,
         sample_rate_hz: None,
         bit_depth: None,
+        release_date: None,
+        genres: Vec::new(),
         artwork: None,
     }
 }

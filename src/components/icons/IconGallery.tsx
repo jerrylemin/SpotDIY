@@ -1,4 +1,5 @@
-import { SpotIcon, spotIconNames } from "./SpotIcon";
+import { SpotIcon } from "./SpotIcon";
+import { spotIconNames } from "./spot-icon-data";
 
 export function IconGallery() {
   return (

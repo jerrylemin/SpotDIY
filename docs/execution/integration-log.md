@@ -265,3 +265,75 @@
 - `codegraph sync .` reported the index already current at 176 files, 5,781
   nodes, and 21,456 edges; `graphify update .` reports 4,723 nodes, 9,470
   edges, and 277 communities.
+
+## 2026-09-03 - Plan 14 smart features and local analytics
+
+- Integrated schema 9 with exactly four new tables: `track_genres`,
+  `listening_sessions`, `play_history`, and `smart_playlists`. Existing
+  albums release dates are reused; local tag extraction supplies bounded,
+  normalized genres and validated release dates.
+- Integrated `AnalyticsRecorder` with `PlaybackService` observation,
+  qualified-play batching, 30-minute session grouping, local aggregate
+  queries, heatmap, Taste Timeline, Time Machine, and reopen-as-queue actions.
+  Paused time, skipped/unqualified plays, Private Session, and Temporary Mode
+  follow the documented persistence boundaries.
+- Integrated typed smart-playlist rule validation/CRUD/preview and
+  parameter-bound allowlisted SQL, plus deterministic non-ML Smart Shuffle
+  with familiarity/variety/freshness/discovery signals and anti-repetition.
+- Integrated `/analytics`, the Playlists smart-rule surface, command-palette
+  and listening-mode controls, strict frontend DTO validation, and a Plan 14
+  packaged harness. The harness parses successfully; native/package execution
+  remains blocked by the local MSVC/SDK and browser availability.
+- Hardened Plan 13 restore staging with component-by-component trusted-root
+  checks and cleanup ownership proof; added a symlink `imports` regression.
+- Phase commits are `f516eee` (trusted staging), `6a02daa` (history and
+  sessions), `ab01f3e` (smart playlists), `aedd3a8` (shuffle and Temporary
+  Mode), `4527b02` (analytics interface), and `dbcdb2f` (packaged coverage).
+  The final docs commit closes the record. The commits are local only while native
+  and package gates remain blocked; three unrelated pre-existing worktree
+  changes remain unstaged.
+
+## 2026-09-03 - Plan 15 advanced visual exploration
+
+- Repaired the Plan-14 Private Session transition in `1403955`: the active
+  interval now closes through the shared transition classifier, preserving
+  qualified/stopped/skipped outcomes and preventing later private intervals
+  from being recorded.
+- Integrated `VisualExplorerService` and typed/Zod IPC for one bounded,
+  read-only schema-9 dataset with deterministic ordering, filters, aggregates,
+  quality, truncation, and trusted artwork-cache references only. No media
+  paths, raw provider URLs, credentials, or network calls cross the boundary.
+- Integrated deterministic Music Map SVG and Library Galaxy Canvas routes with
+  pan/zoom/reset, selection, filters, bounded DOM navigators, shared actions,
+  radial More fallback, and dnd-kit/keyboard queue targets.
+- Integrated separate local `PreviewService` with TrackId resolution,
+  playback interlock, 8-second/35%-volume limits, owned-process cancellation,
+  shutdown, and injectable backend tests. Preview never mutates playback
+  history, analytics, queue, SMTC, or providers.
+- Integrated Theme Studio's schema-v1/15-token draft workflow, import/export,
+  session preview, Save & Activate, clone actions, contrast-safe 32x32 dynamic
+  accent, and existing layout profiles; added browser, native, packaged, and
+  restart coverage.
+- Implementation commits are `1403955`, `d73e755`, `e442767`, `977176e`,
+  `aee1dad`, and `2612804`. Graphify final output is 5,517 nodes, 12,505
+  edges, and 268 communities; CodeGraph is unavailable.
+
+## 2026-09-03 - Plan 16 quality and release implementation
+
+- Closed the Plan 15 preview/main audio race with a shared PreviewService gate
+  used by Tauri transport, Windows SMTC/shortcut/tray transport, output
+  profile/device changes, source switching, backend retry, and operations that
+  replace or start playback. Queue-only mutations remain independent.
+- Added ordered artist IDs, album IDs, and native set-based visual capabilities
+  without a schema migration or N+1 frontend/provider lookup. Music Map and
+  Galaxy now keep stable identity separate from display labels.
+- Removed all three Fast Refresh warnings by moving runtime icon/theme exports
+  to non-component modules. Lazy-loaded all page routes after the measured
+  large main chunk warning; the final main chunk is 404.04 kB minified.
+- Added axe-core 4.13.0 route/keyboard coverage, immutable-SHA CI gates with
+  exact Node/pnpm pins, a deterministic 5,000-track layout benchmark, and
+  third-party dependency notices. No speculative product feature or migration
+  was added.
+- Plan 16 is committed and pushed as `5dfdd1e`; the primary checkout's
+  unrelated `.gitignore` change and two deleted Plan 05 reports were not
+  touched.

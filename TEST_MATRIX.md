@@ -246,3 +246,84 @@
   and was not touched.
 - `codegraph sync .` and `codegraph status .` - passed; the current index is
   up to date at 176 files, 5,781 nodes, and 21,456 edges.
+
+## Plan 14 final verification — 2026-09-03
+
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass;
+  Vitest reports 83 tests across 23 files. The same three pre-existing Fast
+  Refresh warnings and documented non-fatal build notices remain.
+- Browser: `pnpm exec playwright test` passes all 69 tests across the 1280,
+  1920, and 2560 viewport projects.
+- Native: Rust fmt, 420 unit tests plus one real-mpv synthetic WAV integration
+  test, and strict all-target/all-feature Clippy with `-D warnings` pass.
+  Plan 13 staging security coverage remains green.
+- Runtime: `pnpm tauri build` passes with release/NSIS output under external
+  `C:\CargoTarget\SpotDIY`. Regular playback, Plan 11, Plan 12, Plan 13, and
+  Plan 14 packaged smokes pass with clean owned-process shutdown.
+- Backup: an isolated synthetic schema-9 export/import/restart test passes;
+  the `.spotdiy` manifest remains format 1 and preserves genres, sessions,
+  history, and smart playlists while fresh Private/Temporary mode state is not
+  persisted. The temporary archive/test artifacts were deleted.
+- Graphify reports 281 files, 5,329 nodes, 12,057 edges, and 260 communities;
+  CodeGraph remains unavailable because no command/index is present.
+- `git diff --check` passes. `Test-Path .\\src-tauri\\target` is `False` and
+  no runtime data, secrets, or generated verification diagnostics are retained.
+
+## Plan 15 final verification — 2026-09-03
+
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass;
+  Vitest reports 88 tests across 24 files. Lint retains three non-fatal Fast
+  Refresh warnings; build retains the existing ineffective dynamic-import and
+  large-chunk notices.
+- Browser: `pnpm exec playwright test` passes all 70 tests, including the
+  targeted `plan15-ultrawide` visual route test. It covers SVG/Canvas routes,
+  DOM navigators, radial keyboard/focus behavior, preview cancellation, Theme
+  Studio's 15 fields, layout selection, reduced motion, and overflow/no-
+  placeholder checks.
+- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`, strict
+  all-target/all-feature Clippy with `-D warnings`, and
+  `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` pass. The
+  suite reports 430 Rust unit tests plus one real-mpv synthetic-WAV integration
+  test. Focused visual dataset, preview policy/seam, and Private Session
+  transition tests are included.
+- Runtime: `pnpm tauri build` passes and produces the release executable and
+  NSIS installer under external `C:\CargoTarget\SpotDIY`. The packaged
+  `scripts/packaged-playback-smoke.ps1 -Plan15VisualExploration` run passes
+  visual routes, native dataset/path-boundary checks, real local preview,
+  Theme Studio, restart isolation, and owned-process cleanup; both launches
+  exit with code 0.
+- Safety/graphs: schema remains 9 with no migration 10; `graphify update .`
+  reports 5,517 nodes, 12,505 edges, and 268 communities; CodeGraph is
+  unavailable. `git diff --check` passes, `Test-Path .\\src-tauri\\target` is
+  `False`, and no runtime data, media, secrets, or generated diagnostics are
+  retained in the repository.
+
+## Plan 16 final verification — 2026-09-03
+
+- Frontend: `pnpm typecheck`, `pnpm exec eslint . --max-warnings 0`,
+  `pnpm test`, and `pnpm build` pass. Vitest reports 90 tests across 25
+  files; ESLint reports zero warnings. The build has a 404.04 kB minified main
+  chunk and lazy secondary route chunks.
+- Browser/a11y: `pnpm exec playwright test` passes 76/76 across 1280, 1920,
+  2560, and the Plan 15 ultrawide project. The axe subset reports zero serious
+  or critical violations; keyboard/focus/reduced-motion paths pass.
+- Performance: the ten-run synthetic 5,000-track harness reports Music Map
+  p95 295.40 ms and Galaxy p95 64.87 ms. Packaged launch/idle/playback and
+  native VisualExplorer SQL budgets are blocked without a release executable.
+- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` passes.
+  Clippy and all-target tests are BLOCKED by missing MSVC headers/libraries
+  (`excpt.h`, `stdarg.h`, `stdint.h`, `vcruntime.h`).
+- Audit: both configured pnpm audits pass with no known vulnerabilities.
+  `cargo metadata --manifest-path src-tauri/Cargo.toml --locked` reports 596
+  packages and one workspace member. RustSec remains BLOCKED because
+  `cargo-audit 0.22.2` could not link without `msvcrt.lib`.
+- Packaging/install: `pnpm tauri build`, NSIS hash/signature, clean install,
+  uninstall, Standard/Portable install, and packaged smokes are BLOCKED by
+  the same native toolchain failure. No installer or certificate was created.
+- Safety: schema 9, archive format 1, external Cargo output, and absent
+  repository-local `src-tauri\\target` remain intact. The primary worktree
+  preserves the three unrelated pre-existing changes.
+
+`graphify update .` passes at the final code state with 5,625 nodes, 12,674
+edges, and 271 communities; the HTML visualization is skipped because the
+graph exceeds Graphify's 5,000-node safety limit. CodeGraph is unavailable.

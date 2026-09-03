@@ -9,7 +9,7 @@ const fixtureFolder = process.env.SPOTDIY_PACKAGED_FIXTURE;
 if (!cdpUrl) {
   throw new Error("SPOTDIY_PACKAGED_CDP_URL is required");
 }
-if ((mode === "flow" || mode === "plan08" || mode === "plan09" || mode === "plan11" || mode === "plan12") && !fixtureFolder) {
+if ((mode === "flow" || mode === "plan08" || mode === "plan09" || mode === "plan11" || mode === "plan12" || mode === "plan14" || mode === "plan15") && !fixtureFolder) {
   throw new Error("SPOTDIY_PACKAGED_FIXTURE is required for the playback flow");
 }
 
@@ -122,6 +122,207 @@ try {
       return snapshot.currentTrackId && snapshot.phase === "playing" && snapshot.queueLength === 2 && snapshot.currentQueueEntryId && snapshot.currentTrackId !== firstSnapshot.currentTrackId ? snapshot : false;
     });
     console.log("packaged playback flow passed");
+  } else if (mode === "plan15") {
+    await invoke("add_library_folders", { paths: [fixtureFolder] });
+    const status = await waitFor("the Plan 15 synthetic folder scan", async () => {
+      const next = await invoke("get_library_status");
+      return next.folders?.length === 1 && next.indexedTrackCount >= 2 && !next.isScanning ? next : false;
+    });
+    if (!status) {
+      throw new Error("the Plan 15 library scan did not complete");
+    }
+
+    const dataset = await invoke("get_visual_library_dataset", {
+      request: { query: null, genre: null, artist: null, likedOnly: false, limit: 2_000 },
+    });
+    const serializedDataset = JSON.stringify(dataset);
+    if (
+      dataset.totalTracks < 2 ||
+      dataset.returnedTracks !== dataset.tracks?.length ||
+      dataset.returnedTracks > 5_000 ||
+      serializedDataset.includes(fixtureFolder) ||
+      /(?:localMediaPath|mediaPath|providerUrl|credentials?)/i.test(serializedDataset)
+    ) {
+      throw new Error(`Plan 15 dataset contract failed: ${serializedDataset}`);
+    }
+
+    const libraryPage = await invoke("get_library_page", {
+      request: { page: 0, pageSize: 100, sort: "title", descending: false, folderId: null },
+    });
+    const first = [...(libraryPage.items ?? [])].sort((left, right) => left.title.localeCompare(right.title))[0];
+    if (!first?.trackId || !first.sourceId) {
+      throw new Error(`the Plan 15 fixture did not expose a playable track: ${JSON.stringify(libraryPage)}`);
+    }
+
+    await invoke("play_track", { trackId: first.trackId, sourceId: first.sourceId });
+    await waitFor("the Plan 15 fixture track to play", async () => {
+      const snapshot = await invoke("get_playback_snapshot");
+      return snapshot.phase === "playing" ? snapshot : false;
+    });
+    await invoke("toggle_play_pause");
+    await waitFor("the Plan 15 fixture track to pause", async () => (await invoke("get_playback_snapshot")).phase === "paused");
+
+    await page.getByRole("link", { name: "Music Map", exact: true }).click();
+    await page.getByRole("heading", { name: "See the connections." }).waitFor({ state: "visible" });
+    await page.locator(".music-map-svg").waitFor({ state: "visible" });
+    await page.locator(".visual-node-list-item").filter({ hasText: first.title }).first().click();
+    await page.getByText("SELECTED TRACK", { exact: true }).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "Close inspector", exact: true }).click();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await waitFor("the native Plan 15 preview", async () => {
+      const preview = await invoke("get_preview_state");
+      return preview.phase === "playing" && preview.trackId === first.trackId ? preview : false;
+    });
+    await page.getByRole("button", { name: "Cancel Preview", exact: true }).click();
+    await waitFor("the Plan 15 preview cancellation", async () => (await invoke("get_preview_state")).phase === "idle");
+
+    await page.getByRole("link", { name: "Library Galaxy", exact: true }).click();
+    await page.getByRole("heading", { name: "Library Galaxy" }).waitFor({ state: "visible" });
+    await page.locator("canvas[aria-label='Library Galaxy canvas']").waitFor({ state: "visible" });
+    await page.locator(".visual-node-list-item").filter({ hasText: first.title }).first().click();
+    await page.getByText("SELECTED TRACK", { exact: true }).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "Close inspector", exact: true }).click();
+
+    await page.getByRole("link", { name: "Theme Studio", exact: true }).click();
+    await page.getByRole("heading", { name: "Make a place to listen." }).waitFor({ state: "visible" });
+    if (await page.locator(".theme-token-field").count() !== 15) {
+      throw new Error("Plan 15 Theme Studio did not expose all 15 token fields");
+    }
+    await page.getByRole("button", { name: "Preview on App", exact: true }).click();
+    await page.locator("html[data-theme='custom']").waitFor({ state: "attached" });
+    await page.getByRole("button", { name: "Stop App Preview", exact: true }).click();
+    await page.locator("html[data-theme='dark']").waitFor({ state: "attached" });
+    console.log("packaged Plan 15 visual routes, dataset contract, local preview, and Theme Studio passed");
+  } else if (mode === "plan15-restart") {
+    const status = await waitFor("the indexed Plan 15 library after restart", async () => {
+      const next = await invoke("get_library_status");
+      return next.folders?.length === 1 && next.indexedTrackCount >= 2 && !next.isScanning ? next : false;
+    });
+    const dataset = await invoke("get_visual_library_dataset", {
+      request: { query: null, genre: null, artist: null, likedOnly: false, limit: 2_000 },
+    });
+    const preview = await invoke("get_preview_state");
+    const playback = await invoke("get_playback_snapshot");
+    if (!status || dataset.returnedTracks < 2 || preview.phase !== "idle" || playback.phase !== "idle") {
+      throw new Error(`Plan 15 restart boundary failed: ${JSON.stringify({ status, dataset, preview, playback })}`);
+    }
+    await page.getByRole("link", { name: "Music Map", exact: true }).click();
+    await page.getByRole("heading", { name: "See the connections." }).waitFor({ state: "visible" });
+    await page.getByRole("link", { name: "Library Galaxy", exact: true }).click();
+    await page.getByRole("heading", { name: "Library Galaxy" }).waitFor({ state: "visible" });
+    await page.getByRole("link", { name: "Theme Studio", exact: true }).click();
+    await page.getByRole("heading", { name: "Make a place to listen." }).waitFor({ state: "visible" });
+    console.log("packaged Plan 15 restart dataset, preview isolation, and visual-route boundary passed");
+  } else if (mode === "plan14") {
+    await invoke("add_library_folders", { paths: [fixtureFolder] });
+    const status = await waitFor("the Plan 14 synthetic folder scan", async () => {
+      const next = await invoke("get_library_status");
+      return next.folders?.length === 1 && next.indexedTrackCount >= 2 && !next.isScanning ? next : false;
+    });
+    if (!status) {
+      throw new Error("the Plan 14 library scan did not complete");
+    }
+
+    const libraryPage = await invoke("get_library_page", {
+      request: { page: 0, pageSize: 100, sort: "title", descending: false, folderId: null },
+    });
+    const tracks = [...(libraryPage.items ?? [])].sort((left, right) => left.title.localeCompare(right.title));
+    if (tracks.length < 2 || !tracks[0].trackId || !tracks[0].sourceId || !tracks[1].trackId || !tracks[1].sourceId) {
+      throw new Error(`the Plan 14 fixture did not expose two playable tracks: ${JSON.stringify(libraryPage)}`);
+    }
+    const first = tracks[0];
+    const second = tracks[1];
+    const initialOverview = await invoke("get_analytics_overview");
+
+    await invoke("play_track", { trackId: first.trackId, sourceId: first.sourceId });
+    await waitFor("the first Plan 14 track to play", async () => {
+      const snapshot = await invoke("get_playback_snapshot");
+      return snapshot.currentTrackId === first.trackId && snapshot.phase === "playing" ? snapshot : false;
+    });
+    await invoke("enqueue_track", { trackId: second.trackId, sourceId: second.sourceId });
+    await page.waitForTimeout(500);
+    await invoke("next_track");
+    await waitFor("the Plan 14 qualified track to play", async () => {
+      const snapshot = await invoke("get_playback_snapshot");
+      return snapshot.currentTrackId === second.trackId && snapshot.phase === "playing" ? snapshot : false;
+    });
+    await waitFor("the early Plan 14 skip to persist", async () => {
+      const next = await invoke("get_analytics_overview");
+      return next.skips > initialOverview.skips ? next : false;
+    });
+    await page.waitForTimeout(3_000);
+    await invoke("next_track");
+    const listened = await waitFor("the qualified Plan 14 play to persist", async () => {
+      const next = await invoke("get_analytics_overview");
+      return next.qualifiedPlays > initialOverview.qualifiedPlays && next.sessionCount === 1 ? next : false;
+    });
+    if (listened.listenedMs <= initialOverview.listenedMs || listened.skips !== initialOverview.skips + 1) {
+      throw new Error(`Plan 14 history qualification was not recorded: ${JSON.stringify({ initialOverview, listened })}`);
+    }
+
+    await invoke("set_private_session", { enabled: true });
+    const privateBefore = await invoke("get_analytics_overview");
+    await invoke("play_track", { trackId: first.trackId, sourceId: first.sourceId });
+    await waitFor("the private Plan 14 track to play", async () => {
+      const snapshot = await invoke("get_playback_snapshot");
+      return snapshot.phase === "playing" ? snapshot : false;
+    });
+    await invoke("next_track");
+    const privateAfter = await invoke("get_analytics_overview");
+    if (JSON.stringify(privateAfter) !== JSON.stringify(privateBefore)) {
+      throw new Error(`Private Session added history: ${JSON.stringify({ privateBefore, privateAfter })}`);
+    }
+    await invoke("set_private_session", { enabled: false });
+
+    await invoke("play_track", { trackId: first.trackId, sourceId: first.sourceId });
+    await waitFor("the durable Plan 14 queue track to play", async () => {
+      const snapshot = await invoke("get_playback_snapshot");
+      return snapshot.phase === "playing" ? snapshot : false;
+    });
+    await invoke("enqueue_track", { trackId: second.trackId, sourceId: second.sourceId });
+    await invoke("toggle_play_pause");
+    await waitFor("the durable Plan 14 queue to pause", async () => (await invoke("get_playback_snapshot")).phase === "paused");
+    const durableQueue = await invoke("get_queue_workspace");
+    await invoke("enter_temporary_mode");
+    await invoke("enqueue_track", { trackId: first.trackId, sourceId: first.sourceId });
+    await invoke("exit_temporary_mode");
+    const restoredQueue = await invoke("get_queue_workspace");
+    const restoredSnapshot = await invoke("get_playback_snapshot");
+    if (restoredSnapshot.phase !== "idle" || JSON.stringify(restoredQueue) !== JSON.stringify(durableQueue)) {
+      throw new Error(`Temporary Mode did not restore the durable queue: ${JSON.stringify({ durableQueue, restoredQueue, restoredSnapshot })}`);
+    }
+
+    await invoke("set_track_liked", { trackId: first.trackId, liked: true });
+    const smartPlaylist = await invoke("create_smart_playlist", {
+      input: {
+        name: "Plan 14 Smart",
+        rule: {
+          type: "group",
+          operator: "and",
+          children: [{ type: "predicate", field: "liked", operation: "true", value: null }],
+        },
+        sortMode: "title",
+        sortDirection: "asc",
+        limitCount: 10,
+      },
+    });
+    const preview = await invoke("preview_smart_playlist", { playlistId: smartPlaylist.id, page: 0, pageSize: 20 });
+    if (preview.total < 1 || !preview.items.some((item) => item.trackId === first.trackId)) {
+      throw new Error(`Plan 14 smart preview did not use local collection state: ${JSON.stringify(preview)}`);
+    }
+    const mix = await invoke("open_smart_mix", {
+      pool: { smartPlaylist: smartPlaylist.id },
+      options: { familiarity: 50, variety: 70, freshness: 50, count: 1, recentTrackIds: [] },
+      seed: 42,
+    });
+    if (mix.phase !== "idle" || mix.currentTrackId !== null || mix.queueLength !== 1) {
+      throw new Error(`Plan 14 smart mix did not replace the queue without autoplay: ${JSON.stringify(mix)}`);
+    }
+
+    await page.getByRole("link", { name: "Analytics", exact: true }).click();
+    await page.getByText("On repeat", { exact: true }).waitFor({ state: "visible" });
+    await page.getByText("Weekly rhythm", { exact: true }).waitFor({ state: "visible" });
+    console.log("packaged Plan 14 history, privacy, temporary queue, smart mix, and analytics flow passed");
   } else if (mode === "plan12") {
     const settings = await invoke("get_settings_snapshot");
     if (
@@ -535,6 +736,32 @@ try {
       throw new Error(`the Plan 09 queue state was not retained before restart: ${JSON.stringify({ snapshot: { currentTrackId: snapshot.currentTrackId, queueLength: snapshot.queueLength, positionMs: snapshot.positionMs }, currentQueueTrackId: queue.current?.trackId, laterCount: queue.later?.length })}`);
     }
     console.log("packaged Plan 09 lyrics, bookmark, A/B loop, preset, and queue flow passed");
+  } else if (mode === "plan14-restart") {
+    const status = await waitFor("the indexed Plan 14 library after restart", async () => {
+      const next = await invoke("get_library_status");
+      return next.folders?.length === 1 && next.indexedTrackCount >= 2 && !next.isScanning ? next : false;
+    });
+    const overview = await invoke("get_analytics_overview");
+    const modeState = await invoke("get_listening_mode_state");
+    const smartPlaylists = await invoke("list_smart_playlists");
+    const smartPlaylist = smartPlaylists.find((item) => item.name === "Plan 14 Smart");
+    if (!status || overview.sessionCount !== 1 || overview.qualifiedPlays < 1 || overview.skips < 1) {
+      throw new Error(`Plan 14 analytics did not survive restart: ${JSON.stringify({ status, overview })}`);
+    }
+    if (modeState.privateSession || modeState.temporary || !smartPlaylist) {
+      throw new Error(`Plan 14 session-only state or smart playlist restart boundary failed: ${JSON.stringify({ modeState, smartPlaylists })}`);
+    }
+    const preview = await invoke("preview_smart_playlist", { playlistId: smartPlaylist.id, page: 0, pageSize: 20 });
+    if (preview.total < 1) {
+      throw new Error(`Plan 14 smart playlist did not survive restart: ${JSON.stringify(preview)}`);
+    }
+    const snapshot = await invoke("get_playback_snapshot");
+    if (snapshot.phase !== "idle" || snapshot.currentTrackId !== null || snapshot.queueLength !== 1) {
+      throw new Error(`the Plan 14 smart mix restarted with autoplay or changed queue state: ${JSON.stringify(snapshot)}`);
+    }
+    await page.getByRole("link", { name: "Analytics", exact: true }).click();
+    await page.getByText("On repeat", { exact: true }).waitFor({ state: "visible" });
+    console.log("packaged Plan 14 restart analytics, smart playlist, private-state, and no-autoplay boundary passed");
   } else if (mode === "plan12-restart") {
     const settings = await invoke("get_settings_snapshot");
     if (settings.windowsIntegration?.smtcEnabled !== true || settings.windowsIntegration?.globalShortcutsEnabled !== true) {

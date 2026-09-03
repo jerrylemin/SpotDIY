@@ -14,6 +14,7 @@ use crate::playback::{
     OutputProfile, OutputProfileApplyError, OutputProfileApplyErrorCode, PlaybackPhase,
     PlaybackService, PlaybackSnapshot,
 };
+use crate::preview::PreviewService;
 use crate::settings::{
     default_global_shortcuts, validate_global_shortcuts, GlobalShortcutAction,
     GlobalShortcutBinding, SettingValue, SettingsRepository, WindowsIntegrationSettings,
@@ -93,6 +94,7 @@ struct WindowsIntegrationInner {
     app: AppHandle,
     database: Database,
     playback: PlaybackService,
+    preview: PreviewService,
     overlays: overlays::OverlayManager,
     state: Mutex<WindowsIntegrationState>,
     tray: Mutex<Option<TrayIcon>>,
@@ -120,7 +122,12 @@ struct SmtcKey {
 }
 
 impl WindowsIntegrationService {
-    pub fn new(app: AppHandle, database: Database, playback: PlaybackService) -> Self {
+    pub fn new(
+        app: AppHandle,
+        database: Database,
+        playback: PlaybackService,
+        preview: PreviewService,
+    ) -> Self {
         let settings = SettingsRepository::new(&database)
             .get_snapshot()
             .unwrap_or_default();
@@ -130,6 +137,7 @@ impl WindowsIntegrationService {
                 app,
                 database,
                 playback,
+                preview,
                 overlays,
                 state: Mutex::new(WindowsIntegrationState {
                     settings: settings.windows_integration,
@@ -187,18 +195,18 @@ impl WindowsIntegrationService {
             smtc::MediaCommand::Play
                 if !matches!(phase, PlaybackPhase::Playing | PlaybackPhase::Seeking) =>
             {
-                let _ = self.inner.playback.toggle_play_pause();
+                let _ = self.dispatch(WindowsAction::PlayPause);
             }
             smtc::MediaCommand::Pause
                 if matches!(phase, PlaybackPhase::Playing | PlaybackPhase::Seeking) =>
             {
-                let _ = self.inner.playback.toggle_play_pause();
+                let _ = self.dispatch(WindowsAction::PlayPause);
             }
             smtc::MediaCommand::Next => {
-                let _ = self.inner.playback.next_track();
+                let _ = self.dispatch(WindowsAction::Next);
             }
             smtc::MediaCommand::Previous => {
-                let _ = self.inner.playback.previous_track();
+                let _ = self.dispatch(WindowsAction::Previous);
             }
             smtc::MediaCommand::Play | smtc::MediaCommand::Pause => {}
         }
@@ -230,20 +238,20 @@ impl WindowsIntegrationService {
         match action {
             WindowsAction::PlayPause => self
                 .inner
-                .playback
-                .toggle_play_pause()
+                .preview
+                .with_preview_stopped(|| self.inner.playback.toggle_play_pause())
                 .map(|_| ())
                 .map_err(|error| error.to_string()),
             WindowsAction::Previous => self
                 .inner
-                .playback
-                .previous_track()
+                .preview
+                .with_preview_stopped(|| self.inner.playback.previous_track())
                 .map(|_| ())
                 .map_err(|error| error.to_string()),
             WindowsAction::Next => self
                 .inner
-                .playback
-                .next_track()
+                .preview
+                .with_preview_stopped(|| self.inner.playback.next_track())
                 .map(|_| ())
                 .map_err(|error| error.to_string()),
             WindowsAction::VolumeUp => {
@@ -550,11 +558,13 @@ impl WindowsIntegrationService {
                 detail: format!("output profile {id} was not found"),
                 rollback_succeeded: true,
             })?;
-        let result = self.inner.playback.apply_output_profile(profile);
-        if let Ok(snapshot) = result.as_ref() {
-            self.on_playback_snapshot(snapshot);
-        }
-        result
+        self.inner.preview.with_preview_stopped(|| {
+            let result = self.inner.playback.apply_output_profile(profile);
+            if let Ok(snapshot) = result.as_ref() {
+                self.on_playback_snapshot(snapshot);
+            }
+            result
+        })
     }
 
     pub fn shutdown(&self) {

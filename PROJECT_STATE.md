@@ -306,3 +306,99 @@ nodes, 9,470 edges, and 277 communities. Build output remains external
 at `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` remains
 absent. The requested Gmail completion message `Plan 13 finished` was sent to
 `jerryle.minh.3@gmail.com`.
+
+## Plan 14 implementation snapshot — 2026-09-03
+
+Plan 14 is implemented through `f516eee`, `6a02daa`, `ab01f3e`, `aedd3a8`,
+`4527b02`, and `dbcdb2f`; the final docs commit closes the record. Migration 9
+advances SQLite to schema 9 and adds exactly `track_genres`,
+`listening_sessions`, `play_history`, and `smart_playlists`. Library metadata
+normalizes bounded genres and validated release dates without guessing from
+paths. `AnalyticsService` and `AnalyticsRecorder` keep history local, count
+only qualified play time, group sessions with a 30-minute gap, and exclude
+Private Session and Temporary Mode activity. `PlaybackService` remains the
+sole queue owner; Temporary Mode checkpoints and restores the durable queue.
+
+Typed, parameter-bound smart-playlist rules, deterministic non-ML Smart
+Shuffle, anti-repetition, discovery controls, Analytics, Smart Playlist, and
+listening-mode surfaces are wired through the native-only boundary. The Plan
+13 restore staging helper now validates every existing component with
+`symlink_metadata`, rejects symlink/reparse/non-directory components, proves
+trusted ownership before cleanup, and has a Unix symlink regression test.
+
+Frontend typecheck, lint, Vitest, and production build pass; Rust formatting,
+all-target tests, strict all-features Clippy, and the real mpv integration
+smoke pass. Playwright passes all 69 viewport tests. The external-target Tauri
+release/NSIS build and regular/Plan 11/Plan 12/Plan 13/Plan 14 packaged smokes
+pass. An isolated format-1/schema-9 `.spotdiy` export/import/restart roundtrip
+preserves genres, sessions, history, and smart playlists while fresh
+Private/Temporary mode state is not persisted. Graphify reports 281 files,
+5,329 nodes, 12,057 edges, and 260 communities; CodeGraph is unavailable.
+Build output remains external at `C:\CargoTarget\SpotDIY`; repository-local
+`src-tauri\target` is absent. The commits are ready for remote review, while
+three unrelated pre-existing worktree changes (`.gitignore` plus two old
+report deletions) remain unstaged.
+
+## Plan 15 advanced visual exploration snapshot — 2026-09-03
+
+Plan 15 is complete through `1403955`, `d73e755`, `e442767`, `977176e`,
+`aee1dad`, and `2612804`. The Plan-14 privacy-transition fix in `1403955`
+closes the active analytics interval with `finish_transition`, preserving
+qualified/stopped/skipped classification at the Private Session boundary and
+starting a fresh interval when privacy is disabled. Schema 9 remains unchanged;
+no migration 10 was added.
+
+The native `VisualExplorerService` exposes one bounded, read-only SQL dataset
+contract (default 2,000, hard maximum 5,000) with stable liked/rating/listened
+ordering, filters, aggregates, quality, and trusted artwork-cache references;
+it does not expose local media paths, raw provider URLs, credentials, or make
+network calls. Music Map and Library Galaxy use deterministic bounded layouts,
+SVG/Canvas rendering, pan/zoom/reset/search/filter/selection, and 200-item DOM
+navigators. Shared actions reuse capability policy, ContextActionMenu, a
+keyboard-safe radial menu, and dnd-kit drag targets. `PreviewService` is a
+separate local-only, TrackId-based, eight-second native process with playback
+interlock, cancellation, shutdown, and an injectable backend seam.
+
+Theme Studio provides schema v1 with 15 validated tokens, draft/import/export,
+session preview, persistent Save & Activate, clone actions, dynamic accent
+sampling bounded to 32x32 pixels, contrast fallback, and existing layout
+profiles. `/music-map`, `/library-galaxy`, and `/theme-studio` are routed and
+sidebar/palette discoverable; browser preview uses only the existing synthetic
+E2E track and keeps native-only operations unavailable.
+
+Final evidence: 430 Rust unit tests plus one real-mpv synthetic-WAV integration
+test, 88 Vitest tests across 24 files, 70 Playwright tests, frontend typecheck/
+lint/build, Rust fmt and strict all-target/all-feature Clippy, external-target
+Tauri release/NSIS packaging, and the packaged Plan 15 visual/restart smoke.
+Lint has three non-fatal Fast Refresh warnings; build has the existing dynamic
+import and large-chunk notices. Graphify reports 5,517 nodes, 12,505 edges,
+and 268 communities; CodeGraph is unavailable. Build output remains external
+at `C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` remains
+absent. Three unrelated pre-existing worktree changes remain unstaged.
+
+## Plan 16 quality and release snapshot — 2026-09-03
+
+Plan 16 is partially implemented and committed/pushed as `5dfdd1e`.
+The confirmed Plan 15 blockers are closed in source: PreviewService now owns a
+shared audio gate for preview/main transport serialization; visual DTOs carry
+ordered artist and album IDs; Music Map/Galaxy use stable IDs; and visual
+actions use native capability booleans with truthful disabled reasons.
+
+The release workflow pins full GitHub Action SHAs, Node 24.11.1, pnpm 11.22.0,
+frozen installs, external Cargo output, frontend/native/audit/package jobs,
+and NSIS-only artifact upload. All routes are lazy-loaded, the three Fast
+Refresh warnings are removed, and axe-core 4.13.0 coverage exercises all
+representative routes plus keyboard/focus/reduced-motion paths.
+
+Local frontend evidence is green: typecheck, ESLint with zero warnings, 90
+Vitest tests, the targeted six-test accessibility matrix at three widths, and
+the production build. The deterministic 5,000-track layout harness reports
+Music Map p95 295.40 ms and Galaxy p95 64.87 ms. Native compilation,
+RustSec, Tauri packaging, installer/clean-install checks, and packaged
+acceptance are blocked by missing MSVC headers/libraries on this host, so no
+release artifact or completion claim is recorded. See
+`docs/SpotDIY-Vault/Sessions/final-verification.md` and
+`docs/SpotDIY-Vault/Research/performance-baseline.md`.
+Graphify refreshed the final code state to 5,625 nodes, 12,674 edges, and 271
+communities; its HTML visualization was skipped at the 5,000-node safety
+limit. CodeGraph remains unavailable.

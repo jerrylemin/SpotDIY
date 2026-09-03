@@ -11,7 +11,18 @@ const navItems: NavItem[] = [
   { id: "lyrics", label: "Lyrics & notes", shortLabel: "Lyrics", icon: "lyrics" },
   { id: "playlists", label: "Playlists", shortLabel: "Playlists", icon: "playlist" },
   { id: "downloads", label: "Downloads", shortLabel: "Downloads", icon: "download" },
+  { id: "analytics", label: "Analytics", shortLabel: "Analytics", icon: "analytics" },
 ];
+
+const exploreItems: NavItem[] = [
+  { id: "music-map", label: "Music Map", shortLabel: "Map", icon: "spark" },
+  { id: "library-galaxy", label: "Library Galaxy", shortLabel: "Galaxy", icon: "expand" },
+  { id: "theme-studio", label: "Theme Studio", shortLabel: "Theme", icon: "theme" },
+];
+
+function navPath(item: NavItem): "/" | `/${Exclude<NavItem["id"], "home">}` {
+  return item.id === "home" ? "/" : `/${item.id}` as `/${Exclude<NavItem["id"], "home">}`;
+}
 
 export function Sidebar() {
   const libraryStatus = useLibraryStatus();
@@ -34,7 +45,19 @@ export function Sidebar() {
             activeProps={{ className: "nav-item nav-item-active" }}
             className="nav-item"
             key={item.id}
-            to={item.id === "home" ? "/" : `/${item.id}`}
+            to={navPath(item)}
+          >
+            <SpotIcon name={item.icon} size={19} />
+            <span>{item.label}</span>
+          </Link>
+        ))}
+        <span className="nav-section-label nav-section-label-explore">Explore</span>
+        {exploreItems.map((item) => (
+          <Link
+            activeProps={{ className: "nav-item nav-item-active" }}
+            className="nav-item"
+            key={item.id}
+            to={navPath(item)}
           >
             <SpotIcon name={item.icon} size={19} />
             <span>{item.label}</span>

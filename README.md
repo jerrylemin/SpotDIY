@@ -1,45 +1,56 @@
 # SpotDIY
 
-SpotDIY is a local-first Windows music operating environment. It is designed to bring local files, YouTube, SoundCloud, and Spotify catalog metadata into one source-aware workspace without requiring a SpotDIY account.
+SpotDIY is a local-first Windows music operating environment. It combines a
+managed local library with metadata search across Local, YouTube, SoundCloud,
+and Spotify catalog sources, while keeping Spotify metadata-only and user data
+on the machine.
 
-The repository currently contains the first buildable foundation milestone:
+## Implemented product
 
-- Tauri 2 + React + TypeScript strict + Vite desktop shell.
-- Rust source-capability contract and Zod-validated native IPC.
-- Custom SpotDIY mark and SVG icon language.
-- Home, Search, Library, Playlists, Downloads, Settings, command palette, and empty-state player surfaces.
-- Windows-oriented CI, frontend tests, Rust tests, formatting, and lint gates.
+- Local indexing, metadata/artwork, playback through an owned external mpv
+  process, source fusion, resolver policy, downloads, and provider search.
+- Durable playlists, Inbox, likes, ratings, tags, persistent queue, lyrics,
+  bookmarks, A/B loop controls, history, analytics, smart playlists, and
+  deterministic Smart Shuffle.
+- Windows tray, global shortcuts, SMTC, overlays, output profiles, backup and
+  Standard/Portable storage modes.
+- Music Map, Library Galaxy, local preview, Theme Studio, dynamic accent, and
+  persisted layout profiles.
 
-The product is intentionally being built in vertical slices. Library indexing, playback, provider adapters, downloads, lyrics, persistence, and advanced workspaces are tracked in [`feature_progress.md`](feature_progress.md) and the approved design spec.
+## Boundaries
+
+SpotDIY has no account creation, mandatory cloud database, or application
+telemetry. Provider calls are made only when a selected source needs them.
+Spotify is catalog metadata only; SpotDIY does not provide Spotify audio or
+circumvent its protection. Visual exploration is local/read-only, and preview
+is limited to indexed local audio without queue, history, or analytics writes.
 
 ## Run locally
 
-Requirements and exact Windows commands live in [`setup_and_run.md`](setup_and_run.md).
+Exact Windows prerequisites and verification commands are in
+[`setup_and_run.md`](setup_and_run.md).
 
 ```powershell
-pnpm install
-pnpm tauri dev
+pnpm install --frozen-lockfile
+pnpm dev       # browser preview
+pnpm tauri dev # native Tauri window
 ```
 
-For browser-only UI work:
+## Release-candidate status
 
-```powershell
-pnpm dev
-```
-
-## Product boundaries
-
-SpotDIY has no account creation or mandatory cloud database. User data is intended to live locally. Spotify is a catalog metadata source only; SpotDIY does not rip or circumvent Spotify audio protection. Playable equivalents are resolved from local, YouTube, or SoundCloud sources when available.
-
-Provider requests are made only when the selected source requires them. Telemetry is off by default.
-
-## Current source status
-
-The shell exposes the intended provider capabilities and honest setup states. Source adapters are the next implementation slice; production screens must never substitute fake provider results for real adapter responses.
+The Plan 16 quality work is currently `PARTIAL`: frontend, browser/a11y,
+JavaScript audit, visual identity/capability fixes, and synthetic layout
+measurements pass. Native compilation, RustSec, packaging, installer checks,
+and packaged acceptance are blocked on the current host's incomplete MSVC
+installation. Evidence is in
+[`docs/SpotDIY-Vault/Sessions/final-verification.md`](docs/SpotDIY-Vault/Sessions/final-verification.md).
 
 ## Documentation
 
-- [`docs/superpowers/specs/2026-08-30-spotdiy-design.md`](docs/superpowers/specs/2026-08-30-spotdiy-design.md) — approved product and technical design.
-- [`docs/superpowers/plans/`](docs/superpowers/plans/) — independently testable implementation plans.
-- [`docs/SpotDIY-Vault/00 Home.md`](docs/SpotDIY-Vault/00%20Home.md) — repository knowledge vault.
-- [`docs/execution/`](docs/execution/) — milestone, agent, integration, and verification ledger.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — system boundaries and ownership.
+- [`feature_progress.md`](feature_progress.md) — delivery status.
+- [`setup_and_run.md`](setup_and_run.md) — Windows setup and release commands.
+- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — dependency/license index.
+- [`docs/superpowers/specs/2026-08-30-spotdiy-design.md`](docs/superpowers/specs/2026-08-30-spotdiy-design.md) — approved design.
+- [`docs/SpotDIY-Vault/`](docs/SpotDIY-Vault/) — project knowledge vault.
+- [`docs/execution/`](docs/execution/) — milestone, integration, and verification ledger.

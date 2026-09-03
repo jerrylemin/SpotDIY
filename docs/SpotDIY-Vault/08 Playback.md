@@ -150,3 +150,35 @@ Playback snapshots feed the Windows SMTC projection with bounded track metadata,
 artwork, duration, position, and typed transport state. SMTC commands return to
 the same `PlaybackService` transport methods; no media path, mpv protocol detail,
 or native handle crosses the frontend boundary.
+
+## Plan 14 history, sessions, and smart queue boundary
+
+`PlaybackService` remains the sole owner of queue and transport state. It sends
+playback transitions to `AnalyticsRecorder`, which measures monotonic playing
+time only, qualifies a play at 30 seconds (or at the validated track-duration
+halfway point for short tracks), records explicit completed/skipped/stopped/
+interrupted outcomes, and groups activity into sessions separated by 30
+minutes. Pauses, recovery gaps, Private Session, and Temporary Mode do not
+become persisted listening activity.
+
+Temporary Mode keeps a memory-only queue checkpoint and restores the durable
+queue on exit without autoplay. Private Session is memory-only and cannot be
+disabled while Temporary Mode is active. Smart mixes are compiled and queued
+by `SmartPlaylistService`/`SmartShuffleService` through `PlaybackService`; the
+existing boolean shuffle policy is not replaced.
+
+## Plan 15 local preview boundary
+
+`PreviewService` is a separate native service, not another `PlaybackService`
+mode. It accepts only a `TrackId`, resolves an indexed managed local source
+through the existing library resolver, rejects online/missing/unavailable
+sources, and starts one owned quiet audio process for at most eight seconds.
+Preview starts at `min(duration * .3, 30s)` and caps volume at 35% of the main
+volume. Main Playing, Seeking, Loading, and Recovering phases return the stable
+`Pause playback to preview.` error.
+
+Preview state is idle/loading/playing/failed and is lazy, cancellable, and
+shutdown-safe. Loss of hover/focus, route or track selection, explicit cancel,
+main playback, or app shutdown stops the owned process. Preview has no queue,
+history, analytics, session, SMTC, provider, or playback-position side effects;
+the backend seam is injectable for bounded native tests.

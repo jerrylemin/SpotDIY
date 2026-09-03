@@ -171,3 +171,71 @@ other mode hint and Portable startup does not fall back to AppData.
 database replacement, media creation, and rollback remain native and
 restart-gated. The frontend sees validated DTOs only and never supplies
 arbitrary export/import paths.
+
+## Plan 14 smart features and analytics structure
+
+```text
+src-tauri/src/analytics/mod.rs  --> recorder, sessions, history, aggregates,
+                                   heatmap, timeline, time machine, reopen
+src-tauri/src/sessions/mod.rs   --> in-memory Private/Temporary mode state
+src-tauri/src/smart/mod.rs      --> typed rules, SQL compiler, CRUD, preview,
+                                   deterministic Smart Shuffle
+src-tauri/src/playback/mod.rs  --> queue ownership, mode transitions, history hooks
+src-tauri/migrations/0009_smart_analytics.sql
+
+src/pages/AnalyticsPage.tsx + src/components/analytics/*
+src/components/smart/SmartPlaylistPanel.tsx
+src/hooks/useAnalytics.ts + useSmartPlaylists.ts + useListeningModes.ts
+```
+
+The native services are local-only and the frontend receives Zod-validated
+DTOs. `PlaybackService` remains the only owner allowed to open a smart mix
+into the live queue.
+
+## Plan 15 advanced visual exploration structure
+
+```text
+src-tauri/src/visual_explorer/mod.rs  --> bounded read-only dataset DTO/query
+src-tauri/src/preview/mod.rs          --> local eight-second preview lifecycle
+src-tauri/src/lib.rs                  --> visual dataset and preview IPC wiring
+
+src/features/music-map/layout.ts      --> deterministic GENRE/ARTIST/ALBUM/TRACK graph
+src/features/library-galaxy/layout.ts --> deterministic clustered Canvas positions
+src/pages/MusicMapPage.tsx            --> SVG map, filters, navigator, actions
+src/pages/LibraryGalaxyPage.tsx       --> Canvas galaxy, filters, navigator, actions
+src/features/visual-exploration/*     --> shared actions and drag/drop targets
+src/components/radial-menu/*          --> bounded radial actions and More fallback
+
+src/features/theme/ThemeStudio.tsx
+src/features/theme/theme-controller.tsx
+src/features/theme/theme-studio/dynamic-accent.ts
+src/features/layout/LayoutWorkspace.tsx
+                                      --> draft themes, session preview, accent, layout
+```
+
+The visual routes consume one typed/Zod-validated dataset and do not invent
+production data in browser preview. Native preview resolves only an indexed
+managed local source through the existing library/playback policy; it never
+joins queue, history, analytics, SMTC, or provider behavior.
+
+## Plan 16 quality and release structure
+
+```text
+src-tauri/src/preview/mod.rs           --> shared preview/main audio gate
+src-tauri/src/windows/mod.rs           --> gated SMTC, shortcut, tray, profile paths
+src-tauri/src/visual_explorer/mod.rs   --> stable IDs and set-based capabilities
+
+src/routes.tsx                         --> lazy secondary route components
+src/components/icons/spot-icon-data.ts
+src/features/theme/theme-controller-model.ts
+                                          --> non-component Fast Refresh exports
+scripts/performance-baseline.test.ts  --> deterministic layout benchmark
+tests/playwright/accessibility.spec.ts --> axe and keyboard release gate
+.github/workflows/ci.yml               --> pinned frontend/Rust/audit/package jobs
+THIRD_PARTY_NOTICES.md                 --> dependency/license index
+```
+
+The release evidence and known host blockers are recorded in
+`docs/SpotDIY-Vault/Sessions/final-verification.md`; native/package checks do
+not get represented as passing until a complete MSVC host produces a clean
+release worktree and installer.

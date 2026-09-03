@@ -78,3 +78,23 @@ Lyrics is a synchronized cue surface, and Gaming is a minimal HUD. They share
 the `OverlayFrame` shell and semantic tokens, expose an explicit close control,
 and consume the same playback/lyrics snapshots as the main app. The native
 window labels and exact dimensions are owned by Rust, not inferred from CSS.
+
+## Plan 15 visual and theme surfaces
+
+Music Map and Library Galaxy are first-class routes under Explore and are also
+available from the command palette. Music Map uses a deterministic SVG graph;
+Galaxy uses deterministic 2D Canvas clusters. Both provide filters,
+pan/zoom/reset, selection, hover/readout behavior, a 200-item DOM keyboard
+navigator, and real local-library empty/error/truncation states. The visual
+action surface reuses `ContextActionMenu`, exposes a bounded radial menu with a
+linear More fallback, restores focus after Escape, and offers keyboard buttons
+for every drag target.
+
+Theme Studio edits a schema-v1 `SpotThemeDefinition` with exactly 15 semantic
+tokens. Draft edits stay local until Save & Activate; Preview on App is
+session-only, import validates without persisting, export emits the current
+draft, and clone starts from Dark, Light, or the current theme. Dynamic Accent
+is an opt-in session feature that samples at most 32x32 artwork pixels in the
+client, checks contrast against the active background/surface pair, and keeps
+the existing accent when sampling is empty or unsafe. Layout Workspace reuses
+Comfortable, Compact, and Dense profiles.

@@ -31,3 +31,17 @@ Analytics never leaves the machine and smart features operate on local authorita
 ## Commit boundary
 
 `feat: add local smart listening features and analytics`
+
+## Delivery evidence — 2026-09-03
+
+The implementation is present in the current checkout: schema 9's four new
+tables, local qualified history/session recording, genre/release-date
+metadata, Private Session, Temporary Mode, typed parameter-bound smart rules,
+deterministic Smart Shuffle, analytics queries/UI, and Plan 13 trusted staging
+hardening. Frontend typecheck/lint/test/build and Rust fmt pass; packaged
+script syntax passes. Rust test/Clippy, Playwright, Tauri packaging, and
+release-based smoke/roundtrip gates remain unverified because the local
+MSVC/SDK and Chromium runtime are incomplete. Phase commits are `f516eee`,
+`6a02daa`, `ab01f3e`, `aedd3a8`, `4527b02`, and `dbcdb2f`; the final docs commit
+closes the record. These commits are local only until the blocked native and
+package gates can run.

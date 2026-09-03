@@ -12,9 +12,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use chrono::Utc;
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::watch;
 
+use crate::analytics::{
+    AnalyticsRecorder, HistoryOutcome, PlaybackMetadata, RecorderPhase, ReopenQueueEntry,
+};
 use crate::bookmarks::{validate_loop, AbLoopPreset, BookmarkError, BookmarkService};
 use crate::db::repository::TrackRepository;
 use crate::domain::{
@@ -23,6 +27,8 @@ use crate::domain::{
 };
 use crate::library::{LibraryError, LibraryService};
 use crate::media_tools::MediaToolManager;
+use crate::sessions::{ListeningModeChange, ListeningModeService};
+use crate::smart::{SmartPlaylistService, SmartShuffleOptions, SmartShufflePool};
 use crate::sources::{
     SourceResolution, SourceResolutionCandidate, SourceResolutionReason, SourceResolver,
     SourceResolverError,
@@ -99,12 +105,26 @@ impl PlaybackService {
         sink: SnapshotSink,
         queue_sink: QueueSink,
     ) -> Self {
+        let modes = ListeningModeService::new();
+        Self::new_with_queue_sink_and_modes(library, manager, sink, queue_sink, modes)
+    }
+
+    pub fn new_with_queue_sink_and_modes(
+        library: LibraryService,
+        manager: MediaToolManager,
+        sink: SnapshotSink,
+        queue_sink: QueueSink,
+        modes: ListeningModeService,
+    ) -> Self {
         let backend_manager = manager.clone();
+        let recorder = AnalyticsRecorder::new(library.database().clone(), modes.clone());
         Self::new_with_backend_and_queue_sink(
             library,
             move |generation| MpvBackend::start(backend_manager.clone(), generation),
             sink,
             queue_sink,
+            recorder,
+            modes,
         )
     }
 
@@ -116,7 +136,16 @@ impl PlaybackService {
     where
         F: Fn(u64) -> PlaybackBackendSession + Send + Sync + 'static,
     {
-        Self::new_with_backend_and_queue_sink(library, backend_factory, sink, Arc::new(|_| {}))
+        let modes = ListeningModeService::new();
+        let recorder = AnalyticsRecorder::new(library.database().clone(), modes.clone());
+        Self::new_with_backend_and_queue_sink(
+            library,
+            backend_factory,
+            sink,
+            Arc::new(|_| {}),
+            recorder,
+            modes,
+        )
     }
 
     fn new_with_backend_and_queue_sink<F>(
@@ -124,6 +153,8 @@ impl PlaybackService {
         backend_factory: F,
         sink: SnapshotSink,
         queue_sink: QueueSink,
+        recorder: AnalyticsRecorder,
+        modes: ListeningModeService,
     ) -> Self
     where
         F: Fn(u64) -> PlaybackBackendSession + Send + Sync + 'static,
@@ -137,8 +168,16 @@ impl PlaybackService {
         let controller_thread = thread::Builder::new()
             .name("spotdiy-playback-controller".to_owned())
             .spawn(move || {
-                let mut controller =
-                    Controller::new(library, resolver, factory, sink, queue_sink, snapshot_tx);
+                let mut controller = Controller::new(
+                    library,
+                    resolver,
+                    factory,
+                    sink,
+                    queue_sink,
+                    snapshot_tx,
+                    recorder,
+                    modes,
+                );
                 controller.initialize();
                 let _ = ready_tx.send(());
                 controller.run(command_rx);
@@ -315,6 +354,39 @@ impl PlaybackService {
 
     pub fn clear_playback_queue(&self) -> Result<PlaybackSnapshot, PlaybackError> {
         self.snapshot_command(|reply| Command::ClearQueue { reply })
+    }
+
+    pub fn set_private_session(&self, enabled: bool) -> Result<ListeningModeChange, PlaybackError> {
+        self.command(|reply| Command::SetPrivate { enabled, reply }, false)
+    }
+
+    pub fn enter_temporary_mode(&self) -> Result<ListeningModeChange, PlaybackError> {
+        self.command(|reply| Command::EnterTemporary { reply }, false)
+    }
+
+    pub fn exit_temporary_mode(&self) -> Result<ListeningModeChange, PlaybackError> {
+        self.command(|reply| Command::ExitTemporary { reply }, false)
+    }
+
+    pub fn open_smart_mix(
+        &self,
+        pool: SmartShufflePool,
+        options: SmartShuffleOptions,
+        seed: Option<u64>,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.snapshot_command(|reply| Command::OpenSmartMix {
+            pool,
+            options,
+            seed,
+            reply,
+        })
+    }
+
+    pub fn reopen_history_as_queue(
+        &self,
+        entries: Vec<ReopenQueueEntry>,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.snapshot_command(|reply| Command::ReopenHistoryQueue { entries, reply })
     }
 
     pub fn play_playlist(
@@ -713,6 +785,26 @@ enum Command {
     ClearQueue {
         reply: SnapshotReply,
     },
+    SetPrivate {
+        enabled: bool,
+        reply: ModeReply,
+    },
+    EnterTemporary {
+        reply: ModeReply,
+    },
+    ExitTemporary {
+        reply: ModeReply,
+    },
+    OpenSmartMix {
+        pool: SmartShufflePool,
+        options: SmartShuffleOptions,
+        seed: Option<u64>,
+        reply: SnapshotReply,
+    },
+    ReopenHistoryQueue {
+        entries: Vec<ReopenQueueEntry>,
+        reply: SnapshotReply,
+    },
     PlayPlaylist {
         playlist_id: PlaylistId,
         item_ids: Vec<PlaylistItemId>,
@@ -790,6 +882,7 @@ type PresetReply = Sender<Result<AbLoopPreset, PlaybackError>>;
 type PresetListReply = Sender<Result<Vec<AbLoopPreset>, PlaybackError>>;
 type UnitReply = Sender<Result<(), PlaybackError>>;
 type OutputProfileReply = Sender<Result<PlaybackSnapshot, OutputProfileApplyError>>;
+type ModeReply = Sender<Result<ListeningModeChange, PlaybackError>>;
 
 struct ResolvedPlayback {
     track_id: TrackId,
@@ -801,6 +894,7 @@ struct ResolvedPlayback {
     artwork_path: Option<PathBuf>,
     sources: Vec<PlaybackSourceOption>,
     duration_ms: Option<u64>,
+    provider_kind: ProviderKind,
 }
 
 #[derive(Clone)]
@@ -865,6 +959,11 @@ struct Controller {
     terminal_failure_generation: Option<u64>,
     sink: SnapshotSink,
     queue_sink: QueueSink,
+    analytics: AnalyticsRecorder,
+    modes: ListeningModeService,
+    smart_playlists: SmartPlaylistService,
+    temporary_checkpoint: Option<crate::queue::PersistedQueue>,
+    temporary_private_before: bool,
     snapshot_tx: watch::Sender<PlaybackSnapshot>,
     snapshot: PlaybackSnapshot,
     queue: TransientQueue,
@@ -884,6 +983,7 @@ struct Controller {
 }
 
 impl Controller {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         library: LibraryService,
         resolver: SourceResolver,
@@ -891,11 +991,14 @@ impl Controller {
         sink: SnapshotSink,
         queue_sink: QueueSink,
         snapshot_tx: watch::Sender<PlaybackSnapshot>,
+        analytics: AnalyticsRecorder,
+        modes: ListeningModeService,
     ) -> Self {
         let backend_generation = 1;
         let PlaybackBackendSession { backend, events } = backend_factory(backend_generation);
         let queue_repository = QueueRepository::new(library.database().clone());
         let bookmark_service = BookmarkService::new(library.database().clone());
+        let smart_playlists = SmartPlaylistService::new(library.database().clone());
         Self {
             library,
             resolver,
@@ -907,6 +1010,11 @@ impl Controller {
             terminal_failure_generation: None,
             sink,
             queue_sink,
+            analytics,
+            modes,
+            smart_playlists,
+            temporary_checkpoint: None,
+            temporary_private_before: false,
             snapshot_tx,
             snapshot: PlaybackSnapshot::default(),
             queue: TransientQueue::new(),
@@ -1113,6 +1221,31 @@ impl Controller {
             }
             Command::ClearQueue { reply } => {
                 let result = self.clear_queue();
+                let _ = reply.send(result);
+            }
+            Command::SetPrivate { enabled, reply } => {
+                let result = self.set_private_session(enabled);
+                let _ = reply.send(result);
+            }
+            Command::EnterTemporary { reply } => {
+                let result = self.enter_temporary_mode();
+                let _ = reply.send(result);
+            }
+            Command::ExitTemporary { reply } => {
+                let result = self.exit_temporary_mode();
+                let _ = reply.send(result);
+            }
+            Command::OpenSmartMix {
+                pool,
+                options,
+                seed,
+                reply,
+            } => {
+                let result = self.open_smart_mix(pool, options, seed);
+                let _ = reply.send(result);
+            }
+            Command::ReopenHistoryQueue { entries, reply } => {
+                let result = self.reopen_history_queue(entries);
                 let _ = reply.send(result);
             }
             Command::PlayPlaylist {
@@ -1364,6 +1497,8 @@ impl Controller {
                 self.backend.send(BackendCommand::SetPaused(true))?;
                 self.snapshot.phase = PlaybackPhase::Paused;
                 self.desired_paused = true;
+                self.analytics
+                    .set_phase(RecorderPhase::Paused, Instant::now());
                 self.persist_position(true)?;
                 self.publish_queue();
             }
@@ -1371,6 +1506,8 @@ impl Controller {
                 self.backend.send(BackendCommand::SetPaused(false))?;
                 self.snapshot.phase = PlaybackPhase::Playing;
                 self.desired_paused = false;
+                self.analytics
+                    .set_phase(RecorderPhase::Playing, Instant::now());
             }
             PlaybackPhase::Ended if self.snapshot.current_track_id.is_some() => {
                 self.backend.send(BackendCommand::SeekAbsoluteMs(0))?;
@@ -1378,6 +1515,16 @@ impl Controller {
                 self.snapshot.position_ms = 0;
                 self.snapshot.phase = PlaybackPhase::Playing;
                 self.desired_paused = false;
+                if let Some(metadata) = self.current_playback_metadata() {
+                    self.analytics.begin_track(
+                        metadata,
+                        self.snapshot.duration_ms,
+                        Utc::now(),
+                        Instant::now(),
+                    );
+                }
+                self.analytics
+                    .set_phase(RecorderPhase::Playing, Instant::now());
                 self.persist_position(true)?;
             }
             PlaybackPhase::ShuttingDown => return Err(shutting_down_error()),
@@ -1772,6 +1919,10 @@ impl Controller {
     }
 
     fn clear_queue(&mut self) -> Result<PlaybackSnapshot, PlaybackError> {
+        let _ = self
+            .analytics
+            .finish_transition(Utc::now(), Instant::now())
+            .map_err(analytics_error_to_playback)?;
         self.recovery = None;
         self.pending_load = None;
         self.clear_ab_loop_backend()?;
@@ -1791,10 +1942,238 @@ impl Controller {
         Ok(self.snapshot.clone())
     }
 
+    fn set_private_session(&mut self, enabled: bool) -> Result<ListeningModeChange, PlaybackError> {
+        let current = self.modes.state();
+        if current.private_session == enabled {
+            return Ok(ListeningModeChange {
+                state: current,
+                reason: if enabled {
+                    crate::sessions::ListeningModeReason::PrivateEnabled
+                } else {
+                    crate::sessions::ListeningModeReason::PrivateDisabled
+                },
+            });
+        }
+        if current.temporary && !enabled {
+            return Err(mode_error_to_playback(
+                crate::sessions::ListeningModeError {
+                    code: crate::sessions::ListeningModeErrorCode::PrivateLocked,
+                    detail: "Private Session cannot be disabled while Temporary Mode is active"
+                        .to_owned(),
+                },
+            ));
+        }
+        let now = Instant::now();
+        let wall = Utc::now();
+        if enabled {
+            self.analytics
+                .set_private(true, wall, now)
+                .map_err(analytics_error_to_playback)?;
+            self.modes.set_private(true).map_err(mode_error_to_playback)
+        } else {
+            let change = self
+                .modes
+                .set_private(false)
+                .map_err(mode_error_to_playback)?;
+            if let Some(metadata) = self.current_playback_metadata() {
+                self.analytics
+                    .begin_track(metadata, self.snapshot.duration_ms, wall, now);
+                self.analytics.set_phase(
+                    if self.snapshot.phase == PlaybackPhase::Playing {
+                        RecorderPhase::Playing
+                    } else {
+                        RecorderPhase::Paused
+                    },
+                    now,
+                );
+            }
+            Ok(change)
+        }
+    }
+
+    fn enter_temporary_mode(&mut self) -> Result<ListeningModeChange, PlaybackError> {
+        let state = self.modes.state();
+        if state.temporary {
+            return Err(invalid_state_error("Temporary Mode is already active"));
+        }
+        self.analytics
+            .finish_transition(Utc::now(), Instant::now())
+            .map_err(analytics_error_to_playback)?;
+        self.persist_position(true)?;
+        self.persist_queue_state(false)?;
+        let checkpoint = self.persisted_queue();
+        let change = self
+            .modes
+            .enter_temporary()
+            .map_err(mode_error_to_playback)?;
+        self.temporary_checkpoint = Some(checkpoint);
+        self.temporary_private_before = state.private_session;
+        Ok(change)
+    }
+
+    fn exit_temporary_mode(&mut self) -> Result<ListeningModeChange, PlaybackError> {
+        if !self.modes.state().temporary {
+            return Err(invalid_state_error("Temporary Mode is not active"));
+        }
+        if self.snapshot.current_track_id.is_some() && self.backend.health().connected {
+            self.backend.send(BackendCommand::Stop)?;
+        }
+        self.pending_load = None;
+        self.recovery = None;
+        self.analytics
+            .finish_transition(Utc::now(), Instant::now())
+            .map_err(analytics_error_to_playback)?;
+        let checkpoint = self
+            .temporary_checkpoint
+            .take()
+            .ok_or_else(|| invalid_state_error("Temporary Mode has no durable checkpoint"))?;
+        let change = self
+            .modes
+            .exit_temporary(self.temporary_private_before)
+            .map_err(mode_error_to_playback)?;
+        self.queue.restore(
+            checkpoint.entries,
+            checkpoint.current_entry_id,
+            &checkpoint.history_order,
+            &checkpoint.traversal_order,
+            checkpoint.shuffle_enabled,
+        );
+        self.queue_revision = checkpoint.revision;
+        self.snapshot.repeat_mode = checkpoint.repeat_mode;
+        self.snapshot.position_ms = checkpoint.current_position_ms;
+        self.clear_current_metadata();
+        self.snapshot.position_ms = checkpoint.current_position_ms;
+        if let Some(entry) = self.queue.current_entry().cloned() {
+            self.snapshot.current_queue_entry_id = Some(entry.id);
+            if let Ok(resolved) = self.resolve_for_play(&TrackPlaybackRequest {
+                track_id: entry.track_id,
+                source_id: entry.requested_source_id,
+            }) {
+                self.apply_resolved(&resolved);
+                self.snapshot.position_ms = checkpoint.current_position_ms;
+            } else {
+                self.snapshot.current_track_id = Some(entry.track_id);
+                self.snapshot.current_source_id = entry.requested_source_id;
+            }
+        }
+        self.snapshot.phase = PlaybackPhase::Idle;
+        self.snapshot.recovering = false;
+        self.snapshot.error = None;
+        self.desired_paused = true;
+        self.persist_queue_state(false)?;
+        self.publish();
+        self.publish_queue();
+        Ok(change)
+    }
+
+    fn open_smart_mix(
+        &mut self,
+        pool: SmartShufflePool,
+        options: SmartShuffleOptions,
+        seed: Option<u64>,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.reject_during_recovery()?;
+        let track_ids = self
+            .smart_playlists
+            .generate_smart_mix(pool, options, seed)
+            .map_err(smart_error_to_playback)?;
+        if track_ids.is_empty() {
+            return Err(invalid_state_error("the smart mix has no playable tracks"));
+        }
+        let entries = track_ids
+            .into_iter()
+            .map(|track_id| (track_id, None))
+            .collect::<Vec<_>>();
+        self.replace_queue_without_current(entries, true)
+    }
+
+    fn reopen_history_queue(
+        &mut self,
+        entries: Vec<ReopenQueueEntry>,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        self.reject_during_recovery()?;
+        if entries.is_empty() {
+            return Err(invalid_state_error("no playable listening history remains"));
+        }
+        let entries = entries
+            .into_iter()
+            .map(|entry| (entry.track_id, entry.requested_source_id))
+            .collect();
+        self.replace_queue_without_current(entries, true)
+    }
+
+    fn replace_queue_without_current(
+        &mut self,
+        entries: Vec<(TrackId, Option<SourceId>)>,
+        stop_current: bool,
+    ) -> Result<PlaybackSnapshot, PlaybackError> {
+        let _ = self
+            .analytics
+            .finish_transition(Utc::now(), Instant::now())
+            .map_err(analytics_error_to_playback)?;
+        if stop_current
+            && self.snapshot.current_track_id.is_some()
+            && self.backend.health().connected
+        {
+            self.backend.send(BackendCommand::Stop)?;
+        }
+        self.pending_load = None;
+        self.recovery = None;
+        let queue_entries = entries
+            .into_iter()
+            .map(|(track_id, source_id)| QueueEntry::new(track_id, source_id))
+            .collect::<Vec<_>>();
+        let traversal_order = queue_entries
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>();
+        self.queue
+            .restore(queue_entries, None, &[], &traversal_order, false);
+        self.snapshot.repeat_mode = RepeatMode::Off;
+        self.clear_current_metadata();
+        self.snapshot.phase = PlaybackPhase::Idle;
+        self.snapshot.recovering = false;
+        self.snapshot.error = None;
+        self.desired_paused = true;
+        self.persist_queue_state(true)?;
+        self.publish();
+        self.publish_queue();
+        Ok(self.snapshot.clone())
+    }
+
+    fn current_playback_metadata(&self) -> Option<PlaybackMetadata> {
+        let track_id = self.snapshot.current_track_id?;
+        let track = TrackRepository::new(self.library.database())
+            .get(track_id)
+            .ok()??;
+        let provider_kind = self
+            .snapshot
+            .current_source_id
+            .and_then(|source_id| track.sources.iter().find(|source| source.id == source_id))
+            .map(|source| source.provider_kind);
+        Some(PlaybackMetadata {
+            track_id: Some(track_id),
+            source_id: self.snapshot.current_source_id,
+            title: track.title,
+            artists: track
+                .artists
+                .into_iter()
+                .map(|artist| artist.name)
+                .collect(),
+            album: track.album.map(|album| album.title),
+            provider_kind,
+        })
+    }
+
     fn shutdown(&mut self) -> Result<PlaybackSnapshot, PlaybackError> {
         self.shutting_down = true;
         self.recovery = None;
         self.pending_load = None;
+        let history_error = self
+            .analytics
+            .finish_interrupted(Utc::now(), Instant::now())
+            .map(|_| ())
+            .map_err(analytics_error_to_playback);
         let persistence_error = self
             .persist_position(true)
             .and_then(|()| self.persist_queue_state(false).map(|_| ()));
@@ -1813,6 +2192,7 @@ impl Controller {
         self.publish();
         let result = self.backend.shutdown();
         self.publish();
+        history_error?;
         persistence_error?;
         result.map(|()| self.snapshot.clone())
     }
@@ -1900,6 +2280,14 @@ impl Controller {
                         PlaybackPhase::Playing
                     };
                     self.desired_paused = paused;
+                    self.analytics.set_phase(
+                        if paused {
+                            RecorderPhase::Paused
+                        } else {
+                            RecorderPhase::Playing
+                        },
+                        Instant::now(),
+                    );
                     if paused {
                         if let Err(error) = self.persist_position(true) {
                             self.set_error(error);
@@ -2015,6 +2403,16 @@ impl Controller {
     }
 
     fn handle_eof(&mut self) {
+        if let Err(error) = self
+            .analytics
+            .finish(HistoryOutcome::Completed, Utc::now(), Instant::now())
+            .map(|_| ())
+            .map_err(analytics_error_to_playback)
+        {
+            self.set_error(error);
+            self.publish();
+            return;
+        }
         let result = self.advance_queue(self.snapshot.repeat_mode, true);
         if let Err(error) = result {
             self.snapshot.phase = PlaybackPhase::Failed;
@@ -2036,6 +2434,9 @@ impl Controller {
             return Ok(self.snapshot.clone());
         }
         let Some(index) = self.queue.next_index(repeat_mode) else {
+            self.analytics
+                .finish_transition(Utc::now(), Instant::now())
+                .map_err(analytics_error_to_playback)?;
             if self.queue.entries().is_empty() {
                 return Err(queue_empty_error());
             }
@@ -2067,6 +2468,14 @@ impl Controller {
         desired_paused: bool,
         purpose: LoadPurpose,
     ) -> Result<PlaybackSnapshot, PlaybackError> {
+        if matches!(&purpose, LoadPurpose::Normal)
+            && self.snapshot.current_track_id.is_some()
+            && self.snapshot.current_track_id != Some(resolved.track_id)
+        {
+            self.analytics
+                .finish_transition(Utc::now(), Instant::now())
+                .map_err(analytics_error_to_playback)?;
+        }
         if self.snapshot.current_track_id != Some(resolved.track_id) {
             self.clear_ab_loop_backend()?;
             self.snapshot.ab_loop = crate::playback::types::AbLoopState::default();
@@ -2156,6 +2565,40 @@ impl Controller {
         };
         self.desired_paused = pending.desired_paused;
         self.snapshot.recovering = false;
+        let is_normal_load = matches!(&pending.purpose, LoadPurpose::Normal);
+        if is_normal_load {
+            if self.analytics.has_active() {
+                if let Err(error) = self
+                    .analytics
+                    .finish_transition(Utc::now(), Instant::now())
+                    .map_err(analytics_error_to_playback)
+                {
+                    self.set_error(error);
+                    return;
+                }
+            }
+            self.analytics.begin_track(
+                PlaybackMetadata {
+                    track_id: Some(pending.resolved.track_id),
+                    source_id: Some(pending.resolved.source_id),
+                    title: pending.resolved.title.clone(),
+                    artists: pending.resolved.artists.clone(),
+                    album: pending.resolved.album.clone(),
+                    provider_kind: Some(pending.resolved.provider_kind),
+                },
+                duration_ms,
+                Utc::now(),
+                Instant::now(),
+            );
+        }
+        self.analytics.set_phase(
+            if pending.desired_paused {
+                RecorderPhase::Paused
+            } else {
+                RecorderPhase::Playing
+            },
+            Instant::now(),
+        );
         match pending.purpose {
             LoadPurpose::SwitchTarget { .. } => {
                 let _ = self
@@ -2344,6 +2787,8 @@ impl Controller {
         if self.shutting_down || self.recovery.is_some() {
             return;
         }
+        self.analytics
+            .set_phase(RecorderPhase::Paused, Instant::now());
         self.next_recovery_token = self.next_recovery_token.wrapping_add(1).max(1);
         let token = self.next_recovery_token;
         let restore = self.current_restore().ok();
@@ -2422,6 +2867,9 @@ impl Controller {
         }
         plan.waiting_for_backend = false;
         if plan.attempts >= MAX_RECOVERY_ATTEMPTS {
+            let _ = self
+                .analytics
+                .finish(HistoryOutcome::Interrupted, Utc::now(), Instant::now());
             self.recovery = None;
             self.snapshot.phase = PlaybackPhase::Failed;
             self.snapshot.recovering = false;
@@ -2632,6 +3080,7 @@ impl Controller {
             artwork_path,
             sources,
             duration_ms: source.duration_ms.or(track.duration_ms),
+            provider_kind: source.provider_kind,
         }
     }
 
@@ -2698,6 +3147,9 @@ impl Controller {
     }
 
     fn persist_queue_state(&mut self, increment_revision: bool) -> Result<(), PlaybackError> {
+        if self.modes.state().temporary {
+            return Ok(());
+        }
         if increment_revision {
             self.queue_revision = self
                 .queue_revision
@@ -2714,6 +3166,9 @@ impl Controller {
     }
 
     fn persist_position(&mut self, force: bool) -> Result<(), PlaybackError> {
+        if self.modes.state().temporary {
+            return Ok(());
+        }
         if !force
             && (!self.position_dirty
                 || self.last_position_checkpoint.elapsed() < Duration::from_secs(1))
@@ -2839,6 +3294,11 @@ impl Controller {
     }
 
     fn save_queue_snapshot(&mut self, name: String) -> Result<QueueSnapshot, PlaybackError> {
+        if self.modes.state().temporary {
+            return Err(invalid_state_error(
+                "queue snapshots cannot be saved in Temporary Mode",
+            ));
+        }
         self.persist_position(true)?;
         let state = self.persisted_queue();
         self.queue_repository
@@ -3068,6 +3528,30 @@ fn bookmark_error_to_playback(error: BookmarkError) -> PlaybackError {
         | BookmarkError::InvalidStoredValue => PlaybackErrorCode::PersistenceFailed,
     };
     PlaybackError::new(code, error.to_string(), false)
+}
+
+fn analytics_error_to_playback(error: crate::analytics::AnalyticsError) -> PlaybackError {
+    PlaybackError::new(
+        PlaybackErrorCode::PersistenceFailed,
+        error.to_string(),
+        true,
+    )
+}
+
+fn smart_error_to_playback(error: crate::smart::SmartPlaylistError) -> PlaybackError {
+    let retryable = matches!(
+        error,
+        crate::smart::SmartPlaylistError::Database(_) | crate::smart::SmartPlaylistError::Sqlite(_)
+    );
+    PlaybackError::new(
+        PlaybackErrorCode::PersistenceFailed,
+        error.to_string(),
+        retryable,
+    )
+}
+
+fn mode_error_to_playback(error: crate::sessions::ListeningModeError) -> PlaybackError {
+    PlaybackError::new(PlaybackErrorCode::RequestTimeout, error.to_string(), false)
 }
 
 fn persistence_error_message(detail: impl Into<String>) -> PlaybackError {
@@ -3770,6 +4254,15 @@ mod tests {
         source_id
     }
 
+    fn history_count(library: &TestLibrary) -> i64 {
+        library
+            .database
+            .with_connection(|connection| {
+                connection.query_row("SELECT COUNT(*) FROM play_history", [], |row| row.get(0))
+            })
+            .unwrap()
+    }
+
     fn service_with(
         library: &TestLibrary,
     ) -> (
@@ -4355,6 +4848,113 @@ mod tests {
                 && snapshot.current_track_id == Some(library.tracks[0].track_id)
         });
         service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn repeat_one_and_same_track_replay_create_separate_history_events() {
+        let library = test_library(1);
+        let (service, control, _) = service_with(&library);
+        control.auto_file_loaded(true, Some(1_000));
+        service.play_track(library.tracks[0].clone()).unwrap();
+        wait_until_playing(&service);
+        service.set_repeat_mode(RepeatMode::One).unwrap();
+
+        let before_first_eof = service.snapshot().revision;
+        control.push_event(BackendEvent::EndFile(EndFileReason::Eof));
+        wait_for_snapshot(&service, |snapshot| {
+            snapshot.revision > before_first_eof && history_count(&library) >= 1
+        });
+        assert_eq!(history_count(&library), 1);
+
+        let before_second_eof = service.snapshot().revision;
+        control.push_event(BackendEvent::EndFile(EndFileReason::Eof));
+        wait_for_snapshot(&service, |snapshot| {
+            snapshot.revision > before_second_eof && history_count(&library) >= 2
+        });
+        assert_eq!(history_count(&library), 2);
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn next_at_the_end_finalizes_an_unqualified_track_as_skipped() {
+        let library = test_library(1);
+        let (service, control, _) = service_with(&library);
+        control.auto_file_loaded(true, Some(60_000));
+        service.play_track(library.tracks[0].clone()).unwrap();
+        wait_until_playing(&service);
+
+        let ended = service.next_track().unwrap();
+        assert_eq!(ended.phase, PlaybackPhase::Ended);
+        assert_eq!(history_count(&library), 1);
+        let outcome: String = library
+            .database
+            .with_connection(|connection| {
+                connection.query_row("SELECT outcome FROM play_history", [], |row| row.get(0))
+            })
+            .unwrap();
+        assert_eq!(outcome, "skipped");
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn source_switch_and_backend_recovery_keep_one_history_event_for_a_track() {
+        let library = test_library(1);
+        let alternate =
+            add_local_source(&library, library.tracks[0].track_id, "alternate.wav", 2_000);
+        let (service, control, _) = service_with(&library);
+        control.auto_file_loaded(true, Some(10_000));
+        service.play_track(library.tracks[0].clone()).unwrap();
+        wait_until_playing(&service);
+
+        control.auto_file_loaded(true, Some(2_000));
+        service
+            .switch_playback_source(TrackPlaybackRequest {
+                track_id: library.tracks[0].track_id,
+                source_id: Some(alternate),
+            })
+            .unwrap();
+        wait_for_snapshot(&service, |snapshot| {
+            snapshot.phase == PlaybackPhase::Playing
+                && snapshot.current_source_id == Some(alternate)
+        });
+
+        let before_recovery = service.snapshot();
+        control.push_event(BackendEvent::Disconnected);
+        wait_for_snapshot(&service, |snapshot| {
+            snapshot.revision > before_recovery.revision
+                && snapshot.phase == PlaybackPhase::Playing
+                && snapshot.error.is_none()
+        });
+        service.shutdown().unwrap();
+        assert_eq!(history_count(&library), 1);
+    }
+
+    #[test]
+    fn temporary_listening_restores_the_durable_queue_and_discards_temporary_activity() {
+        let library = test_library(2);
+        let (service, control, _) = service_with(&library);
+        control.auto_file_loaded(true, Some(10_000));
+        service.play_track(library.tracks[0].clone()).unwrap();
+        wait_until_playing(&service);
+        service.enqueue_track(library.tracks[1].clone()).unwrap();
+        let durable = service.snapshot();
+
+        let entered = service.enter_temporary_mode().unwrap();
+        assert!(entered.state.temporary);
+        control.auto_file_loaded(true, Some(10_000));
+        service.play_track(library.tracks[1].clone()).unwrap();
+        wait_until_playing(&service);
+        assert_eq!(history_count(&library), 1);
+
+        let exited = service.exit_temporary_mode().unwrap();
+        assert!(!exited.state.temporary);
+        let restored = service.snapshot();
+        assert_eq!(restored.phase, PlaybackPhase::Idle);
+        assert_eq!(restored.current_track_id, durable.current_track_id);
+        assert_eq!(restored.queue_length, durable.queue_length);
+        assert_eq!(history_count(&library), 1);
+        service.shutdown().unwrap();
+        assert_eq!(history_count(&library), 1);
     }
 
     #[test]

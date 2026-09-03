@@ -446,3 +446,105 @@ below.
   no runtime data or secrets are retained in the repository.
 - `codegraph sync .` and `codegraph status .` - passed; the index is up to date
   at 176 files, 5,781 nodes, and 21,456 edges.
+
+## 2026-09-03 - Plan 14 final verification
+
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` passed. Vitest
+  reports 83 tests across 23 files. Lint retains three pre-existing Fast
+  Refresh warnings; frontend build notices remain non-fatal.
+- `pnpm exec playwright test` passed: 69 tests across the 1280, 1920, and
+  2560 viewport projects.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` passed.
+  `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` passed:
+  420 Rust unit tests plus one real-mpv synthetic WAV integration test.
+  Strict all-target/all-feature Clippy with `-D warnings` passed.
+- `pnpm tauri build` passed and produced the release executable and NSIS
+  installer under external `C:\CargoTarget\SpotDIY`; repository-local
+  `src-tauri\target` remains absent.
+- The rebuilt release passed the regular playback/restart smoke, Plan 11
+  shell/inspector smoke, Plan 12 Windows integration smoke (schema 8-to-9,
+  tray, SMTC, shortcut, overlay, click-through, and output-profile checks),
+  Plan 13 Standard/Portable storage smoke, and Plan 14 history/privacy/
+  temporary/smart/analytics smoke. All reported clean owned-process shutdown.
+- An isolated synthetic schema-9 roundtrip passed in a temporary Rust test:
+  the exported `.spotdiy` manifest remained format 1, schema 9, and metadata,
+  genres, sessions, history, and smart playlists survived staged import and
+  restart apply. A fresh mode service had Private Session and Temporary Mode
+  disabled. The temporary test and archive were deleted afterward.
+- Plan 13 staging security regressions passed in the final Rust suite, covering
+  symlink/reparse/path ownership rejection and safe cleanup. The real mpv
+  smoke used the verified `.tools\mpv\v0.41.0\mpv.exe` binary.
+- The initial native blocker was an uninitialized Visual Studio Developer
+  Shell environment, not a missing installation; the x64 DevShell was loaded
+  and no repository code was changed for that repair. Chromium was installed
+  with `pnpm exec playwright install chromium`. The only source fixes were a
+  Clippy-required settings match guard and the Plan 12 smoke's stale schema-8
+  assertion, both verified by the final gate.
+- `graphify update .` passed after those code changes: 281 files, 5,329 nodes,
+  12,057 edges, and 260 communities. CodeGraph remains unavailable because no
+  command/index is present. No runtime SQLite, archive, media, credentials,
+   tokens, or generated test diagnostics are retained.
+
+## 2026-09-03 - Plan 15 final verification
+
+- `pnpm typecheck` and `pnpm test` passed; Vitest reports 88 tests across 24
+  files. `pnpm lint` passed with the three existing Fast Refresh warnings and
+  no errors. `pnpm build` passed with the existing non-fatal dynamic-import and
+  large-chunk notices.
+- `pnpm exec playwright test` passed: 70 tests across the existing viewport
+  projects and the targeted Plan-15 ultrawide project.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` passed;
+  strict all-target/all-feature Clippy with `-D warnings` passed; native all-
+  target tests passed with 430 unit tests and one real-mpv synthetic-WAV
+  integration test.
+- `pnpm tauri build` passed with release executable and NSIS installer at
+  external `C:\CargoTarget\SpotDIY`. The Plan-15 packaged runner passed both
+  visual/restart phases, real local preview, dataset contract, Theme Studio,
+  and owned-process cleanup; both packaged app processes exited with code 0.
+- `graphify update .` passed and rebuilt 5,517 nodes, 12,505 edges, and 268
+  communities. CodeGraph remains unavailable. `git diff --check` passed and
+  repository-local `src-tauri\\target` remains absent.
+- The Plan-14 transition repair is covered by four native regression tests;
+  visual dataset coverage includes empty/filter/order/aggregate/truncation and
+  path non-leakage cases; preview coverage includes bounded policy and an
+  injectable process seam without an 8-second test sleep.
+
+## 2026-09-03 - Plan 16 final verification
+
+- `pnpm typecheck` - passed. `pnpm exec eslint . --max-warnings 0` - passed
+  with zero warnings. `pnpm test` - passed: 90 tests across 25 files.
+  `pnpm build` - passed: 751 modules transformed, 404.04 kB minified main
+  chunk / 123.89 kB gzip, and lazy route chunks with no ineffective dynamic
+  import warning.
+- `pnpm exec playwright test` - passed: 76/76 across the 1280, 1920, 2560,
+  and Plan 15 ultrawide projects. The Plan 16 accessibility subset passed all
+  six tests with zero serious/critical axe violations and passed keyboard,
+  focus-restoration, Escape, and reduced-motion paths.
+- The isolated `scripts/performance-baseline.test.ts` run passed after the
+  harness timeout was raised from Vitest's default 5 seconds to 30 seconds.
+  Ten measured runs after one warm-up reported Music Map p95 295.40 ms and
+  Galaxy p95 64.87 ms for 5,000 synthetic tracks.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` - passed after
+  the final native edit. `cargo clippy --manifest-path src-tauri/Cargo.toml
+  --all-targets --all-features -- -D warnings` and
+  `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` - BLOCKED
+  at `vswhom-sys`, `libsqlite3-sys`, and `aws-lc-sys` because the selected
+  Visual Studio MSVC installation lacks `excpt.h`, `stdarg.h`, `stdint.h`,
+  `vcruntime.h`, and the corresponding runtime libraries.
+- `pnpm audit --audit-level high` and `pnpm audit --prod --audit-level
+  moderate` - passed with no known vulnerabilities. `cargo metadata
+  --manifest-path src-tauri/Cargo.toml --locked --format-version 1` - passed,
+  reporting 596 packages and one workspace member. `cargo audit` is BLOCKED:
+  the pinned `cargo-audit 0.22.2` install failed at native linking because
+  `msvcrt.lib` is unavailable.
+- `pnpm tauri build`, installer hash/signature, clean install/uninstall, and
+  packaged acceptance are BLOCKED because no native release executable can be
+  produced. Live download is `SKIPPED — no approved legal live-download
+  fixture`; live provider checks were not required. No tag, GitHub Release,
+  certificate, or Gmail message was created.
+- The primary worktree still contains only the Plan 16 changes plus the three
+  unrelated pre-existing changes; `git diff --check` and the external-target
+  policy remain final checks before commit approval. `graphify update .` -
+  passed, refreshing 5,625 nodes, 12,674 edges, and 271 communities; the HTML
+  visualization was skipped at Graphify's 5,000-node safety limit. CodeGraph is
+  unavailable.

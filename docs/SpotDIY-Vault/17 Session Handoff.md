@@ -202,3 +202,57 @@ to `jerryle.minh.3@gmail.com`.
 
 STOPPED AFTER PLAN 13.
 Awaiting external ChatGPT GitHub review before Plan 14.
+
+## Plan 14 completion handoff — 2026-09-03
+
+The current checkout is based on the expected Plan 13 baseline
+`ef6d7e9c…` and contains local Plan 14 phase commits, but the worktree is not
+clean: `.gitignore` and two old Plan 05 report files have unrelated
+pre-existing changes. Preserve those changes; do not reset, clean, or bundle
+them into Plan 14 commits.
+
+Implemented boundaries: schema 9's four tables; local-only qualified history
+and 30-minute sessions; in-memory Private/Temporary modes; PlaybackService-
+owned queue restoration; parameter-bound smart rule CRUD/preview; deterministic
+non-ML Smart Shuffle; Analytics and Smart Playlist UI; and trusted Plan 13
+restore staging with symlink/reparse rejection and cleanup ownership proof.
+
+Final evidence: 420 Rust unit tests plus real mpv, 83 Vitest tests across 23
+files, 69 Playwright tests, frontend/native quality gates, Tauri release/NSIS
+packaging, regular/Plan 11/Plan 12/Plan 13/Plan 14 packaged smokes, Plan 13
+staging security coverage, and an isolated format-1/schema-9 export/import/
+restart roundtrip preserving analytics and smart data. Fresh Private/Temporary
+mode state is not persisted. Graphify reports 281 files, 5,329 nodes, 12,057
+edges, and 260 communities; CodeGraph is unavailable. Build output remains at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
+
+## Next atomic task
+
+STOPPED AFTER PLAN 14. Awaiting external ChatGPT GitHub review. Do not start
+Plan 15. This historical handoff predates the completion record below.
+
+## Plan 15 completion handoff — 2026-09-03
+
+Plan 15 is complete in `1403955`, `d73e755`, `e442767`, `977176e`, `aee1dad`,
+and `2612804`. The repository intentionally retains the unrelated `.gitignore`
+modification and two deleted old Plan 05 report files; do not restore, stage,
+or delete them.
+
+The visual dataset is native, read-only, parameter-bound, schema-9-backed, and
+bounded to 5,000 tracks. Music Map is SVG, Galaxy is deterministic Canvas, and
+both have real data, bounded DOM navigators, filters, selection, pan/zoom,
+shared action policy, radial More, and keyboard/drag fallbacks. Preview is an
+explicit local-only eight-second service with playback interlock and no
+analytics/queue/SMTC side effects. Theme Studio has 15 schema-v1 tokens,
+session preview, Save & Activate, import/export, clone, contrast-safe dynamic
+accent, and existing layout profiles.
+
+Verification: 430 Rust unit tests plus real mpv, 88 Vitest tests, 70
+Playwright tests, frontend/native gates, Tauri release/NSIS build, and the
+packaged Plan 15 visual/restart smoke. Graphify reports 5,517 nodes, 12,505
+edges, and 268 communities; CodeGraph is unavailable. Build output remains at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
+
+## Next atomic task
+
+STOPPED AFTER PLAN 15. Do not start Plan 16 in this task.

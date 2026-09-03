@@ -7,6 +7,7 @@ import {
   enqueueTrack,
   getAudioDevices,
   getPlaybackSnapshot,
+  openSmartMix,
   nextTrack,
   playTrack,
   playTrackNext,
@@ -26,7 +27,7 @@ import {
   IpcError,
 } from "../services/ipc";
 import { usePlayerStore } from "../stores/player-store";
-import type { RepeatMode, SourceId, TrackId } from "../types/domain";
+import type { RepeatMode, SmartShuffleOptions, SmartShufflePool, SourceId, TrackId } from "../types/domain";
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof IpcError && error.message) {
@@ -277,6 +278,10 @@ export function usePlayback() {
       "SpotDIY could not update shuffle mode.",
     ), [runSnapshotAction]),
     toggleShuffle,
+    openSmartMix: useCallback((pool: SmartShufflePool, options: SmartShuffleOptions, seed?: number) => runSnapshotAction(
+      () => openSmartMix(pool, options, seed),
+      "SpotDIY could not open that smart mix.",
+    ), [runSnapshotAction]),
     setAudioDevice: useCallback((name: string) => runSnapshotAction(
       () => setAudioDevice(name),
       "SpotDIY could not switch the audio device.",

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { usePlayback } from "../../hooks/usePlayback";
+import { useListeningModes } from "../../hooks/useListeningModes";
 import { useWindowsIntegration } from "../../hooks/useWindowsIntegration";
 import { useUiStore } from "../../stores/ui-store";
 import { SpotIcon, type SpotIconName } from "../icons/SpotIcon";
@@ -11,7 +12,7 @@ interface Command {
   label: string;
   hint: string;
   icon: SpotIconName;
-  path?: "/" | "/search" | "/library" | "/lyrics" | "/playlists" | "/downloads" | "/settings";
+  path?: "/" | "/search" | "/library" | "/lyrics" | "/playlists" | "/downloads" | "/analytics" | "/settings" | "/music-map" | "/library-galaxy" | "/theme-studio";
   action?: () => void;
   disabled?: boolean;
 }
@@ -22,6 +23,7 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const playback = usePlayback();
   const windows = useWindowsIntegration();
+  const modes = useListeningModes();
   const playerMode = useUiStore((state) => state.playerMode);
   const setPlayerMode = useUiStore((state) => state.setPlayerMode);
   const setQueueDrawerOpen = useUiStore((state) => state.setQueueDrawerOpen);
@@ -32,6 +34,7 @@ export function CommandPalette() {
   const [selected, setSelected] = useState(0);
 
   const queueReady = playback.snapshot.currentTrackId !== null || playback.snapshot.queueLength > 0;
+  const listeningMode = modes.state.data ?? { privateSession: false, temporary: false };
   const transportCommands = useMemo<Command[]>(() => [
     {
       id: "play-pause",
@@ -86,7 +89,27 @@ export function CommandPalette() {
     { id: "lyrics", label: "Open lyrics", hint: "Follow lyrics and track notes", icon: "lyrics", path: "/lyrics" },
     { id: "playlists", label: "Open playlists", hint: "Curate and organize listening", icon: "playlist", path: "/playlists" },
     { id: "downloads", label: "Open downloads", hint: "View offline tasks and files", icon: "download", path: "/downloads" },
+    { id: "analytics", label: "Open analytics", hint: "Review local listening history and patterns", icon: "analytics", path: "/analytics" },
+    { id: "music-map", label: "Open Music Map", hint: "Explore genre, artist, album, and track relationships", icon: "spark", path: "/music-map" },
+    { id: "library-galaxy", label: "Open Library Galaxy", hint: "Plot your local library in a bounded Canvas workspace", icon: "expand", path: "/library-galaxy" },
+    { id: "theme-studio", label: "Open Theme Studio", hint: "Draft themes and preview your workspace", icon: "theme", path: "/theme-studio" },
     { id: "settings", label: "Open settings", hint: "Storage, sources, and appearance", icon: "settings", path: "/settings" },
+    {
+      id: "private-session",
+      label: listeningMode.privateSession ? "Disable Private Session" : "Enable Private Session",
+      hint: listeningMode.temporary ? "Temporary Listening keeps Private Session enabled" : "Keep history, sessions, and analytics local but unwritten",
+      icon: "info",
+      disabled: listeningMode.temporary || modes.privateSession.isPending,
+      action: () => modes.privateSession.mutate(!listeningMode.privateSession),
+    },
+    {
+      id: "temporary-listening",
+      label: listeningMode.temporary ? "Exit Temporary Listening" : "Enter Temporary Listening",
+      hint: listeningMode.temporary ? "Restore the durable queue without autoplay" : "Pause durable writes and restore the queue when you leave",
+      icon: "spark",
+      disabled: listeningMode.temporary ? modes.temporaryExit.isPending : modes.temporaryEnter.isPending,
+      action: () => (listeningMode.temporary ? modes.temporaryExit.mutate() : modes.temporaryEnter.mutate()),
+    },
     {
       id: "queue",
       label: "Open queue",
@@ -132,7 +155,7 @@ export function CommandPalette() {
     },
     ...transportCommands,
     ...overlayCommands,
-  ], [openTrackInspector, overlayCommands, playback.snapshot.currentTrackId, playerMode, setPlayerMode, setQueueDrawerOpen, transportCommands]);
+  ], [listeningMode.privateSession, listeningMode.temporary, modes, openTrackInspector, overlayCommands, playback.snapshot.currentTrackId, playerMode, setPlayerMode, setQueueDrawerOpen, transportCommands]);
 
   const filteredCommands = useMemo(
     () => commands.filter((command) => `${command.label} ${command.hint}`.toLowerCase().includes(query.toLowerCase())),

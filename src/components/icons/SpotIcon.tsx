@@ -1,46 +1,7 @@
 import type { SVGProps } from "react";
+import type { SpotIconName } from "./spot-icon-data";
 
-export type SpotIconName =
-  | "home"
-  | "search"
-  | "library"
-  | "lyrics"
-  | "playlist"
-  | "download"
-  | "settings"
-  | "play"
-  | "pause"
-  | "previous"
-  | "next"
-  | "queue"
-  | "command"
-  | "folder"
-  | "spark"
-  | "chevron"
-  | "close"
-  | "arrow"
-  | "refresh"
-  | "trash"
-  | "file"
-  | "alert"
-  | "more"
-  | "check"
-  | "info"
-  | "pin"
-  | "bookmark"
-  | "edit"
-  | "theme"
-  | "layout"
-  | "sun"
-  | "moon"
-  | "system"
-  | "expand"
-  | "collapse"
-  | "volume"
-  | "mute"
-  | "shuffle"
-  | "repeat"
-  | "device";
+export type { SpotIconName } from "./spot-icon-data";
 
 interface SpotIconProps extends SVGProps<SVGSVGElement> {
   name: SpotIconName;
@@ -54,6 +15,7 @@ const paths: Record<SpotIconName, string> = {
   lyrics: "M7 4.5h10A1.5 1.5 0 0 1 18.5 6v12A1.5 1.5 0 0 1 17 19.5H7A1.5 1.5 0 0 1 5.5 18V6A1.5 1.5 0 0 1 7 4.5ZM8.5 8h7M8.5 12h7M8.5 16h4",
   playlist: "M5 6h9M5 11h9M5 16h5m8-8v8m0 0-3-3m3 3 3-3",
   download: "M12 4v10m0 0 3.5-3.5M12 14 8.5 10.5M5 18.5h14",
+  analytics: "M5 19V9m7 10V5m7 14v-7",
   settings: "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0-4v2m0 11v2M5.6 6.6 7 8m10-1.4-1.4 1.4M5.6 18.4 7 17m10 1.4-1.4-1.4M4 12h2m12 0h2",
   play: "m9 6 9 6-9 6z",
   pause: "M8 6v12M16 6v12",
@@ -89,8 +51,6 @@ const paths: Record<SpotIconName, string> = {
   repeat: "M17 17H7a3 3 0 0 1-3-3V9m0 0 3 3M4 9l-3 3M7 7h10a3 3 0 0 1 3 3v5m0 0-3-3m3 3 3-3",
   device: "M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5v7A1.5 1.5 0 0 1 17.5 15H13l-2 4-2-4H6.5A1.5 1.5 0 0 1 5 13.5z",
 };
-
-export const spotIconNames = Object.keys(paths) as SpotIconName[];
 
 export function SpotIcon({ name, size = 20, strokeWidth = 1.8, ...props }: SpotIconProps) {
   return (

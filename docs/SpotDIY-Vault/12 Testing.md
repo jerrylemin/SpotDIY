@@ -210,3 +210,61 @@ restart smoke all pass with clean shutdown. The Plan 13 packaged harness does
 not automate OS-native save/open/folder dialogs; those production dialog
 boundaries remain covered by native command wiring and the archive/restore
 unit suite. Live provider, LRCLIB, and download smoke remain optional.
+
+## Plan 14 verification
+
+Plan 14 passes 420 Rust unit tests plus one real-mpv synthetic WAV integration
+test, 83 Vitest tests across 23 files, 69 Playwright tests across the 1280,
+1920, and 2560 viewport projects, frontend typecheck/lint/build, Rust fmt,
+strict all-target/all-feature Clippy, the external-target Tauri release/NSIS
+build, and the regular/Plan 11/Plan 12/Plan 13/Plan 14 packaged smokes.
+
+The isolated schema-9 `.spotdiy` export/import/restart check passes with
+format-version 1, preserved genres/sessions/history/smart playlists, and
+fresh Private/Temporary mode state disabled. Plan 13 staging symlink/reparse,
+path-ownership, and cleanup security regressions remain green. Lint retains
+the three pre-existing Fast Refresh warnings and the build retains documented
+non-fatal notices. Graphify reports 281 files, 5,329 nodes, 12,057 edges, and
+260 communities; CodeGraph is unavailable because no command/index is present.
+Build output remains external at `C:\CargoTarget\SpotDIY`, and repository-local
+`src-tauri\target` remains absent.
+
+## Plan 15 verification
+
+Plan 15 passes 430 Rust unit tests plus one real-mpv synthetic-WAV integration
+test, 88 Vitest tests across 24 files, and 70 Playwright tests. Frontend
+typecheck/lint/build, Rust fmt, strict all-features Clippy, all-target tests,
+external Tauri release/NSIS packaging, `git diff --check`, and Graphify update
+pass. Lint retains three non-fatal Fast Refresh warnings; build retains the
+documented dynamic-import and large-chunk notices.
+
+Focused coverage includes Private Session transition classification; the empty,
+filtered, ordered, aggregate, truncated, and path-safe visual dataset; bounded
+Music Map/Galaxy layout determinism; radial More/focus behavior; drag-drop
+valid/canceled mapping; preview offset/volume/interlock and injectable process
+seam; Theme Studio token count/import/export/preview; and ultrawide reduced-
+motion route navigation with no horizontal overflow or placeholder content.
+
+The external-target release passed
+`scripts/packaged-playback-smoke.ps1 -Plan15VisualExploration`. The smoke
+scanned an isolated local fixture, exercised the native visual dataset and real
+local preview, visited Music Map/Galaxy/Theme Studio, verified restart state,
+and confirmed both packaged launches exited with zero owned mpv processes.
+Schema remains 9; no migration 10 was added. CodeGraph is unavailable and
+repository-local `src-tauri\target` remains absent.
+
+## Plan 16 verification — 2026-09-03
+
+Frontend typecheck, zero-warning ESLint, 90 Vitest tests, production build,
+and the deterministic 5,000-track layout benchmark pass. The latest isolated
+benchmark reports Music Map p95 295.40 ms and Galaxy p95 64.87 ms. The targeted axe
+matrix passes all representative routes with zero serious/critical findings
+at 1280, 1920, and 2560 widths; the keyboard suite covers shell navigation,
+context/radial actions, inspector, queue, visual navigators, Theme Studio,
+focus restoration, Escape, and reduced motion.
+
+Native `cargo fmt` passed after the final native edit. Rechecking native
+compile, Clippy, all-target tests, RustSec, Tauri packaging, and packaged
+smokes is blocked by the local MSVC installation's missing headers/libraries.
+The exact failure, performance evidence, dependency inventory, and truthful
+skips are in `docs/SpotDIY-Vault/Sessions/final-verification.md`.

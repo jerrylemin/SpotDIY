@@ -1,39 +1,25 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 import {
   getSettingsSnapshot,
   IpcError,
+  isTauriRuntime,
   setSetting,
 } from "../../services/ipc";
+import { usePlayback } from "../../hooks/usePlayback";
 import type { LayoutProfile, SettingValue, SettingsSnapshot, Theme } from "../../types/domain";
 import { DARK_THEME } from "./theme-presets";
+import { SETTINGS_QUERY_KEY, resolveTheme, ThemeContext, type ResolvedTheme, type ThemeContextValue } from "./theme-controller-model";
 import {
   parseThemeDefinition,
   serializeThemeDefinition,
   themeCssVariables,
   type SpotThemeDefinition,
 } from "./theme-schema";
+import { sampleAccentFromPixels } from "./theme-studio/dynamic-accent";
 
-export const SETTINGS_QUERY_KEY = ["settings"] as const;
-
-export type ResolvedTheme = "dark" | "light";
-
-interface ThemeContextValue {
-  settings: SettingsSnapshot | undefined;
-  isLoading: boolean;
-  theme: Theme;
-  resolvedTheme: ResolvedTheme;
-  resolvedSystemTheme: ResolvedTheme;
-  error: string | null;
-  setTheme: (theme: Theme) => Promise<SettingsSnapshot>;
-  setLayoutProfile: (profile: LayoutProfile) => Promise<SettingsSnapshot>;
-  importCustomTheme: (theme: unknown) => Promise<SettingsSnapshot>;
-  exportCustomTheme: () => string | null;
-  resetCustomTheme: () => Promise<SettingsSnapshot>;
-}
-
-const ThemeContext = createContext<ThemeContextValue | null>(null);
 const customVariableNames = Object.keys(themeCssVariables(DARK_THEME));
 
 function systemTheme(): ResolvedTheme {
@@ -52,17 +38,22 @@ function errorMessage(error: unknown): string {
   return "SpotDIY could not update appearance settings.";
 }
 
-function applyRootAppearance(settings: SettingsSnapshot | undefined, resolvedSystemTheme: ResolvedTheme) {
+function applyRootAppearance(
+  settings: SettingsSnapshot | undefined,
+  resolvedSystemTheme: ResolvedTheme,
+  previewTheme: SpotThemeDefinition | null,
+  dynamicAccent: { accent: string; accentContrast: string } | null,
+) {
   if (typeof document === "undefined") {
     return;
   }
 
   const root = document.documentElement;
-  const selectedTheme = settings?.theme ?? "dark";
+  const selectedTheme = previewTheme ? "custom" : settings?.theme ?? "dark";
   const layoutProfile = settings?.layoutProfile ?? "comfortable";
-  const customTheme = selectedTheme === "custom" && settings?.customTheme
+  const customTheme = previewTheme ?? (selectedTheme === "custom" && settings?.customTheme
     ? parseThemeDefinition(settings.customTheme)
-    : null;
+    : null);
   const resolvedTheme = customTheme?.baseMode ?? (selectedTheme === "system" ? resolvedSystemTheme : selectedTheme === "light" ? "light" : "dark");
 
   root.dataset.layout = layoutProfile;
@@ -79,20 +70,10 @@ function applyRootAppearance(settings: SettingsSnapshot | undefined, resolvedSys
   } else {
     root.dataset.theme = resolvedTheme;
   }
-}
-
-export function resolveTheme(theme: Theme, system: ResolvedTheme, customTheme?: SpotThemeDefinition | null): ResolvedTheme {
-  if (theme === "system") {
-    return system;
+  if (dynamicAccent) {
+    root.style.setProperty("--color-accent", dynamicAccent.accent);
+    root.style.setProperty("--color-accent-contrast", dynamicAccent.accentContrast);
   }
-  if (theme === "custom") {
-    try {
-      return customTheme ? parseThemeDefinition(customTheme).baseMode : "dark";
-    } catch {
-      return "dark";
-    }
-  }
-  return theme;
 }
 
 export function ThemeController({ children }: { children: ReactNode }) {
@@ -105,6 +86,10 @@ export function ThemeController({ children }: { children: ReactNode }) {
   });
   const [resolvedSystemTheme, setResolvedSystemTheme] = useState<ResolvedTheme>(systemTheme);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [previewTheme, setPreviewTheme] = useState<SpotThemeDefinition | null>(null);
+  const [dynamicAccentEnabled, setDynamicAccentEnabled] = useState(false);
+  const [dynamicAccent, setDynamicAccent] = useState<{ accent: string; accentContrast: string } | null>(null);
+  const playback = usePlayback();
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -120,8 +105,45 @@ export function ThemeController({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    const artworkPath = playback.snapshot.artworkPath;
+    if (!dynamicAccentEnabled || !artworkPath || !isTauriRuntime() || typeof Image === "undefined") {
+      setDynamicAccent(null);
+      return undefined;
+    }
+    const image = new Image();
+    image.onload = () => {
+      if (!active) return;
+      const canvas = document.createElement("canvas");
+      canvas.width = 32;
+      canvas.height = 32;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return;
+      try {
+        context.drawImage(image, 0, 0, 32, 32);
+        const root = document.documentElement;
+        const styles = getComputedStyle(root);
+        setDynamicAccent(sampleAccentFromPixels(
+          context.getImageData(0, 0, 32, 32).data,
+          styles.getPropertyValue("--color-bg").trim(),
+          styles.getPropertyValue("--color-surface").trim(),
+        ));
+      } catch {
+        setDynamicAccent(null);
+      }
+    };
+    image.onerror = () => { if (active) setDynamicAccent(null); };
+    image.src = convertFileSrc(artworkPath);
+    return () => {
+      active = false;
+      image.onload = null;
+      image.onerror = null;
+    };
+  }, [dynamicAccentEnabled, playback.snapshot.artworkPath, previewTheme, resolvedSystemTheme, settingsQuery.data]);
+
+  useEffect(() => {
     try {
-      applyRootAppearance(settingsQuery.data, resolvedSystemTheme);
+      applyRootAppearance(settingsQuery.data, resolvedSystemTheme, previewTheme, dynamicAccent);
     } catch (error) {
       const root = document.documentElement;
       root.dataset.theme = "dark";
@@ -131,7 +153,7 @@ export function ThemeController({ children }: { children: ReactNode }) {
       }
       setActionError(errorMessage(error));
     }
-  }, [resolvedSystemTheme, settingsQuery.data]);
+  }, [dynamicAccent, previewTheme, resolvedSystemTheme, settingsQuery.data]);
 
   const updateSetting = useCallback(async (setting: SettingValue) => {
     setActionError(null);
@@ -165,6 +187,12 @@ export function ThemeController({ children }: { children: ReactNode }) {
     }
     return updateSetting({ key: "customTheme", value: null });
   }, [settingsQuery.data?.theme, updateSetting]);
+  const previewThemeForSession = useCallback((theme: SpotThemeDefinition | null) => setPreviewTheme(theme), []);
+  const stopThemePreview = useCallback(() => setPreviewTheme(null), []);
+  const setDynamicAccentForSession = useCallback((enabled: boolean) => {
+    setDynamicAccentEnabled(enabled);
+    if (!enabled) setDynamicAccent(null);
+  }, []);
 
   const theme = settingsQuery.data?.theme ?? "dark";
   const customTheme = settingsQuery.data?.customTheme;
@@ -184,15 +212,11 @@ export function ThemeController({ children }: { children: ReactNode }) {
     importCustomTheme,
     exportCustomTheme,
     resetCustomTheme,
-  }), [actionError, exportCustomTheme, importCustomTheme, resolvedSystemTheme, resolvedTheme, resetCustomTheme, setLayoutProfile, setTheme, settingsQuery.data, settingsQuery.error, settingsQuery.isLoading, theme, validationError]);
+    previewTheme: previewThemeForSession,
+    stopThemePreview,
+    dynamicAccentEnabled,
+    setDynamicAccent: setDynamicAccentForSession,
+  }), [actionError, dynamicAccentEnabled, exportCustomTheme, importCustomTheme, previewThemeForSession, resolvedSystemTheme, resolvedTheme, resetCustomTheme, setDynamicAccentForSession, setLayoutProfile, setTheme, settingsQuery.data, settingsQuery.error, settingsQuery.isLoading, stopThemePreview, theme, validationError]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
-}
-
-export function useTheme() {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error("useTheme must be used within ThemeController");
-  }
-  return context;
 }

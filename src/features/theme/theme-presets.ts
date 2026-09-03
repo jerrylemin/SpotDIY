@@ -11,7 +11,7 @@ export const DARK_THEME: SpotThemeDefinition = {
     surfaceSoft: "#22232A",
     text: "#F3F1EC",
     textMuted: "#A8A7AE",
-    textSubtle: "#807F87",
+    textSubtle: "#85848C",
     border: "#2E2F36",
     borderStrong: "#4B4C55",
     accent: "#D7FF60",

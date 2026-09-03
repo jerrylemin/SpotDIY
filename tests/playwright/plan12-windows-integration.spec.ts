@@ -44,6 +44,7 @@ test.describe("Plan 12 Windows integration browser contract", () => {
 
   test("keeps native-only command palette actions unavailable in browser preview", async ({ page }) => {
     await page.goto("/");
+    await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
     await page.keyboard.press("Control+KeyK");
     const palette = page.locator('[aria-label="Command palette"]');
     await expect(palette).toBeVisible();

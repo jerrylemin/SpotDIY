@@ -15,6 +15,9 @@ export type QueueSnapshotId = string & { readonly __brand: "QueueSnapshotId" };
 export type QueueSnapshotEntryId = string & { readonly __brand: "QueueSnapshotEntryId" };
 export type BookmarkId = string & { readonly __brand: "BookmarkId" };
 export type AbLoopPresetId = string & { readonly __brand: "AbLoopPresetId" };
+export type ListeningSessionId = string & { readonly __brand: "ListeningSessionId" };
+export type PlayHistoryId = string & { readonly __brand: "PlayHistoryId" };
+export type SmartPlaylistId = string & { readonly __brand: "SmartPlaylistId" };
 
 export type RouteId =
   | "home"
@@ -23,7 +26,11 @@ export type RouteId =
   | "playlists"
   | "downloads"
   | "lyrics"
-  | "settings";
+  | "analytics"
+  | "settings"
+  | "music-map"
+  | "library-galaxy"
+  | "theme-studio";
 
 export interface SourceCapabilities {
   search: boolean;
@@ -179,6 +186,159 @@ export interface AbLoopPreset {
   bMs: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export type HistoryOutcome = "completed" | "skipped" | "stopped" | "interrupted";
+
+export interface HistoryEntry {
+  id: PlayHistoryId;
+  sessionId: ListeningSessionId | null;
+  trackId: TrackId | null;
+  sourceId: SourceId | null;
+  titleSnapshot: string;
+  artists: string[];
+  albumSnapshot: string | null;
+  providerKind: ProviderKind | null;
+  startedAt: string;
+  endedAt: string;
+  localDate: string;
+  localHour: number;
+  localWeekday: number;
+  listenedMs: number;
+  durationMs: number | null;
+  outcome: HistoryOutcome;
+  qualifiedPlay: boolean;
+  createdAt: string;
+}
+
+export interface ListeningSession {
+  id: ListeningSessionId;
+  startedAt: string;
+  endedAt: string;
+  label: string | null;
+  eventCount: number;
+  listenedMs: number;
+}
+
+export interface AnalyticsOverview {
+  listenedMs: number;
+  qualifiedPlays: number;
+  skips: number;
+  uniqueTracks: number;
+  uniqueArtists: number;
+  sessionCount: number;
+}
+
+export interface ListeningHeatmapCell {
+  weekday: number;
+  hour: number;
+  listenedMs: number;
+}
+
+export interface TopTrack {
+  trackId: TrackId | null;
+  title: string;
+  artists: string[];
+  listenedMs: number;
+  qualifiedPlays: number;
+  playCount: number;
+}
+
+export interface TopArtist {
+  name: string;
+  listenedMs: number;
+  qualifiedPlays: number;
+  playCount: number;
+}
+
+export interface TasteTimelineMonth {
+  month: string;
+  listenedMs: number;
+  qualifiedPlays: number;
+  topTracks: string[];
+  topArtists: string[];
+}
+
+export interface Paged<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ReopenQueueEntry {
+  trackId: TrackId;
+  requestedSourceId: SourceId | null;
+}
+
+export interface ReopenQueueResult {
+  entries: ReopenQueueEntry[];
+  droppedCount: number;
+}
+
+export type SmartSortMode = "title" | "artist" | "dateAdded" | "lastPlayed" | "playCount" | "rating" | "duration" | "audioQuality";
+export type SmartSortDirection = "asc" | "desc";
+export type SmartField = "artist" | "album" | "genre" | "year" | "dateAdded" | "lastPlayed" | "playCount" | "skipCount" | "rating" | "liked" | "downloaded" | "provider" | "audioQuality" | "duration" | "tag";
+export type SmartOperation = "contains" | "equals" | "before" | "after" | "between" | "never" | "greaterThanOrEqual" | "lessThanOrEqual" | "absent" | "true" | "false" | "has" | "lacks" | "is";
+export type SmartScalar = string | number;
+export type SmartValue = string | number | boolean | { from: SmartScalar; to: SmartScalar };
+export type SmartRule =
+  | { type: "group"; operator: "and" | "or"; children: SmartRule[] }
+  | { type: "predicate"; field: SmartField; operation: SmartOperation; value: SmartValue | null };
+
+export interface SmartPlaylist {
+  id: SmartPlaylistId;
+  name: string;
+  rule: SmartRule;
+  sortMode: SmartSortMode;
+  sortDirection: SmartSortDirection;
+  limitCount: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SmartPlaylistInput {
+  name: string;
+  rule: SmartRule;
+  sortMode: SmartSortMode;
+  sortDirection: SmartSortDirection;
+  limitCount: number | null;
+}
+
+export type AudioQuality = "lossless" | "lossy" | "unknown";
+export interface SmartTrack {
+  trackId: TrackId;
+  title: string;
+  artists: string[];
+  album: string | null;
+  durationMs: number | null;
+  dateAdded: string;
+  lastPlayed: string | null;
+  playCount: number;
+  rating: number | null;
+  audioQuality: AudioQuality;
+}
+
+export type SmartPlaylistPreview = Paged<SmartTrack>;
+
+export type SmartShufflePool = "library" | "liked" | { smartPlaylist: SmartPlaylistId };
+export interface SmartShuffleOptions {
+  familiarity: number;
+  variety: number;
+  freshness: number;
+  count: number;
+  recentTrackIds?: TrackId[];
+}
+
+export interface ListeningModeState {
+  privateSession: boolean;
+  temporary: boolean;
+}
+
+export type ListeningModeReason = "privateEnabled" | "privateDisabled" | "temporaryEntered" | "temporaryExited" | "privateLockedByTemporary";
+export interface ListeningModeChange {
+  state: ListeningModeState;
+  reason: ListeningModeReason;
 }
 
 export type Theme = "dark" | "light" | "system" | "custom";
@@ -689,6 +849,56 @@ export interface LibraryPage {
   descending: boolean;
 }
 
+export type VisualAudioQuality = "lossless" | "lossy" | "unknown";
+
+export interface VisualTrackPoint {
+  trackId: TrackId;
+  title: string;
+  primaryArtist: string;
+  artists: string[];
+  artistIds: string[];
+  album: string | null;
+  albumId: string | null;
+  genres: string[];
+  year: number | null;
+  dateAdded: string;
+  lastPlayed: string | null;
+  liked: boolean;
+  rating: number | null;
+  qualifiedPlays: number;
+  listenedMs: number;
+  audioQuality: VisualAudioQuality;
+  providerCount: number;
+  artworkPath: string | null;
+  canPlayback: boolean;
+  canPreview: boolean;
+  canRevealLocal: boolean;
+}
+
+export interface VisualDatasetRequest {
+  query: string | null;
+  genre: string | null;
+  artist: string | null;
+  likedOnly: boolean;
+  limit: number;
+}
+
+export interface VisualLibraryDataset {
+  totalTracks: number;
+  returnedTracks: number;
+  truncated: boolean;
+  tracks: VisualTrackPoint[];
+}
+
+export type PreviewPhase = "idle" | "loading" | "playing" | "failed";
+
+export interface PreviewState {
+  phase: PreviewPhase;
+  trackId: TrackId | null;
+  startedAtMs: number | null;
+  error: string | null;
+}
+
 export type PlaylistKind = "normal" | "inbox" | "branch";
 export type BranchStatus = "open" | "merged";
 
@@ -1020,5 +1230,5 @@ export interface NavItem {
   id: RouteId;
   label: string;
   shortLabel: string;
-  icon: "home" | "search" | "library" | "playlist" | "download" | "lyrics" | "settings";
+  icon: "home" | "search" | "library" | "playlist" | "download" | "analytics" | "lyrics" | "settings" | "spark" | "expand" | "theme";
 }

@@ -31,3 +31,19 @@ Every advanced surface has a real route, data contract, empty/error state, and r
 ## Commit boundary
 
 `feat: add advanced visual exploration workspaces`
+
+## Delivery record — 2026-09-03
+
+Implemented through `1403955` (Plan-14 transition repair), `d73e755`,
+`e442767`, `977176e`, `aee1dad`, and `2612804`. The implementation keeps
+schema 9, adds no migration 10, and uses one bounded native visual dataset;
+deterministic SVG/Canvas surfaces; capability-aware radial/drag actions; a
+separate eight-second local preview; and Theme Studio with 15 validated
+tokens, session preview, persistent activation, import/export, clone, dynamic
+accent, and layout profiles.
+
+Verification passed: 430 Rust unit tests plus real mpv, 88 Vitest tests, 70
+Playwright tests, frontend/native quality gates, Tauri release/NSIS packaging,
+and `scripts/packaged-playback-smoke.ps1 -Plan15VisualExploration`. The packaged
+smoke verified the native dataset, real local preview, all three visual routes,
+restart isolation, and owned-process cleanup.

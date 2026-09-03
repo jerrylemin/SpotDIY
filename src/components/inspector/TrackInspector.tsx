@@ -7,6 +7,7 @@ import {
   IpcError,
   isTauriRuntime,
   openProviderResult,
+  queueSearchResultDownload,
   queueSourceDownload,
   revealLocalFile,
 } from "../../services/ipc";
@@ -329,7 +330,7 @@ export function SearchResultInspector({ manageEscape = false, onClose, result }:
           <div className="inspector-source-actions">
             <button className="button button-primary button-small" disabled={!result.canonicalUrl || busy} onClick={() => { if (result.canonicalUrl) void run(() => openProviderResult(result.provider, result.canonicalUrl!)); }} title={result.canonicalUrl ? "Open the validated provider source" : "No validated provider URL is available."} type="button">{result.provider === "spotify" ? "Open on Spotify" : "Open source"}</button>
             <select aria-label="Download mode" disabled={!nativeDownload || busy} onChange={(event) => setDownloadMode(event.target.value as DownloadMode)} title={nativeDownload ? "Choose the managed download format" : "Downloads require the native SpotDIY app"} value={downloadMode}><option value="audio">Audio</option><option value="video">Video</option></select>
-            <button className="button button-quiet button-small" disabled={!nativeDownload || busy} onClick={() => void run(() => import("../../services/ipc").then(({ queueSearchResultDownload }) => queueSearchResultDownload(result, downloadMode)))} title={nativeDownload ? "Queue a managed provider download" : canDownload ? "Downloads require the native SpotDIY desktop runtime." : "This provider does not advertise downloads."} type="button"><SpotIcon name="download" size={13} /> Download</button>
+            <button className="button button-quiet button-small" disabled={!nativeDownload || busy} onClick={() => void run(() => queueSearchResultDownload(result, downloadMode))} title={nativeDownload ? "Queue a managed provider download" : canDownload ? "Downloads require the native SpotDIY desktop runtime." : "This provider does not advertise downloads."} type="button"><SpotIcon name="download" size={13} /> Download</button>
           </div>
           <div className="inspector-disabled-explanation">Online playback is not implemented for search results. Spotify remains metadata-only, and Spotify downloads are not supported.</div>
         </div>
