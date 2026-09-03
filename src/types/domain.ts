@@ -27,7 +27,10 @@ export type RouteId =
   | "downloads"
   | "lyrics"
   | "analytics"
-  | "settings";
+  | "settings"
+  | "music-map"
+  | "library-galaxy"
+  | "theme-studio";
 
 export interface SourceCapabilities {
   search: boolean;
@@ -846,6 +849,51 @@ export interface LibraryPage {
   descending: boolean;
 }
 
+export type VisualAudioQuality = "lossless" | "lossy" | "unknown";
+
+export interface VisualTrackPoint {
+  trackId: TrackId;
+  title: string;
+  primaryArtist: string;
+  artists: string[];
+  album: string | null;
+  genres: string[];
+  year: number | null;
+  dateAdded: string;
+  lastPlayed: string | null;
+  liked: boolean;
+  rating: number | null;
+  qualifiedPlays: number;
+  listenedMs: number;
+  audioQuality: VisualAudioQuality;
+  providerCount: number;
+  artworkPath: string | null;
+}
+
+export interface VisualDatasetRequest {
+  query: string | null;
+  genre: string | null;
+  artist: string | null;
+  likedOnly: boolean;
+  limit: number;
+}
+
+export interface VisualLibraryDataset {
+  totalTracks: number;
+  returnedTracks: number;
+  truncated: boolean;
+  tracks: VisualTrackPoint[];
+}
+
+export type PreviewPhase = "idle" | "loading" | "playing" | "failed";
+
+export interface PreviewState {
+  phase: PreviewPhase;
+  trackId: TrackId | null;
+  startedAtMs: number | null;
+  error: string | null;
+}
+
 export type PlaylistKind = "normal" | "inbox" | "branch";
 export type BranchStatus = "open" | "merged";
 
@@ -1177,5 +1225,5 @@ export interface NavItem {
   id: RouteId;
   label: string;
   shortLabel: string;
-  icon: "home" | "search" | "library" | "playlist" | "download" | "analytics" | "lyrics" | "settings";
+  icon: "home" | "search" | "library" | "playlist" | "download" | "analytics" | "lyrics" | "settings" | "spark" | "expand" | "theme";
 }

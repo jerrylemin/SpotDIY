@@ -108,6 +108,10 @@ import type {
   TasteTimelineMonth,
   TopArtist,
   TopTrack,
+  PreviewState,
+  VisualDatasetRequest,
+  VisualLibraryDataset,
+  VisualTrackPoint,
 } from "../types/domain";
 import { spotThemeDefinitionSchema } from "../features/theme/theme-schema";
 
@@ -528,6 +532,38 @@ const libraryPageSchema = z.object({
   sort: z.enum(["title", "artist", "dateAdded", "dateModified"]),
   descending: z.boolean(),
 });
+const visualDatasetRequestSchema = z.object({
+  query: z.string().trim().max(256).nullable(),
+  genre: z.string().trim().max(80).nullable(),
+  artist: z.string().trim().max(160).nullable(),
+  likedOnly: z.boolean(),
+  limit: z.number().int().min(1).max(5_000),
+}).strict();
+const visualAudioQualitySchema = z.enum(["lossless", "lossy", "unknown"]);
+const visualTrackSchema = z.object({
+  trackId: z.string().min(1).transform((value) => value as TrackId),
+  title: z.string(),
+  primaryArtist: z.string(),
+  artists: z.array(z.string()),
+  album: z.string().nullable(),
+  genres: z.array(z.string()),
+  year: z.number().int().min(0).max(9999).nullable(),
+  dateAdded: z.string(),
+  lastPlayed: z.string().nullable(),
+  liked: z.boolean(),
+  rating: z.number().int().min(1).max(5).nullable(),
+  qualifiedPlays: z.number().int().nonnegative(),
+  listenedMs: z.number().int().nonnegative(),
+  audioQuality: visualAudioQualitySchema,
+  providerCount: z.number().int().nonnegative(),
+  artworkPath: z.string().nullable(),
+}).strict();
+const visualLibraryDatasetSchema = z.object({
+  totalTracks: z.number().int().nonnegative(),
+  returnedTracks: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+  tracks: z.array(visualTrackSchema),
+}).strict();
 const trackIdSchema = z.string().transform((value) => value as TrackId);
 const sourceIdSchema = z.string().transform((value) => value as SourceId);
 const bookmarkIdSchema = z.string().min(1).transform((value) => value as BookmarkId);
@@ -763,6 +799,18 @@ const playbackPhaseSchema = z.enum([
   "failed",
   "shuttingDown",
 ]);
+const previewPhaseSchema = z.enum(["idle", "loading", "playing", "failed"]);
+const previewStateSchema = z.object({
+  phase: previewPhaseSchema,
+  trackId: trackIdSchema.nullable(),
+  startedAtMs: z.number().int().nonnegative().nullable(),
+  error: z.string().nullable(),
+}).strict().transform((value): PreviewState => ({
+  phase: value.phase,
+  trackId: value.trackId,
+  startedAtMs: value.startedAtMs,
+  error: value.error,
+}));
 const repeatModeSchema = z.enum(["off", "one", "all"]);
 const queueSectionSchema = z.enum(["up_next", "later", "autoplay"]);
 const queueSnapshotIdSchema = z.string().min(1).transform((value) => value as QueueSnapshotId);
@@ -1386,6 +1434,24 @@ const e2eLibraryTracks: LibraryTrack[] = [
 ];
 
 const e2eTrackMap = new Map(e2eLibraryTracks.map((track) => [track.trackId, track]));
+const e2eVisualTracks: VisualTrackPoint[] = e2eLibraryTracks.map((track, index) => ({
+  trackId: track.trackId,
+  title: track.title,
+  primaryArtist: track.artists[0] ?? "Unknown artist",
+  artists: track.artists,
+  album: track.album,
+  genres: [index === 0 ? "Electronic" : "Ambient"],
+  year: 2026,
+  dateAdded: track.createdAt,
+  lastPlayed: index === 0 ? "2026-08-31T00:05:00Z" : null,
+  liked: index === 0,
+  rating: index === 0 ? 5 : null,
+  qualifiedPlays: index === 0 ? 2 : 0,
+  listenedMs: index === 0 ? 120_000 : 0,
+  audioQuality: track.codec?.toLowerCase() === "flac" ? "lossless" : "unknown",
+  providerCount: 1,
+  artworkPath: track.artworkPath,
+}));
 const e2eDevices: PlaybackAudioDevice[] = [
   { name: "auto", description: "Default output", selected: true },
   { name: "headphones", description: "USB Headphones", selected: false },
@@ -1430,6 +1496,22 @@ let browserListeningModeState: ListeningModeState = {
   temporary: false,
 };
 let browserTemporaryPrivateBefore = false;
+let browserPreviewState: PreviewState = {
+  phase: "idle",
+  trackId: null,
+  startedAtMs: null,
+  error: null,
+};
+let browserPreviewTimer: number | null = null;
+
+function clearBrowserPreview(): PreviewState {
+  if (browserPreviewTimer !== null && typeof window !== "undefined") {
+    window.clearTimeout(browserPreviewTimer);
+  }
+  browserPreviewTimer = null;
+  browserPreviewState = { phase: "idle", trackId: null, startedAtMs: null, error: null };
+  return browserPreviewState;
+}
 
 function e2ePlaybackScenario(): "default" | "toolMissing" | "recovering" | "failed" {
   if (typeof window === "undefined") {
@@ -2137,6 +2219,41 @@ function bumpBrowserWindowsIntegrationRevision(): WindowsIntegrationSnapshot {
   return browserWindowsIntegrationSnapshot();
 }
 
+function visualTrackMatches(track: VisualTrackPoint, request: VisualDatasetRequest): boolean {
+  const query = request.query?.trim().toLowerCase();
+  const genre = request.genre?.trim().toLowerCase();
+  const artist = request.artist?.trim().toLowerCase();
+  const haystack = [track.title, track.primaryArtist, ...track.artists, track.album ?? "", ...track.genres]
+    .join(" ")
+    .toLowerCase();
+  return (!query || haystack.includes(query))
+    && (!genre || track.genres.some((value) => value.toLowerCase() === genre))
+    && (!artist || track.artists.some((value) => value.toLowerCase() === artist))
+    && (!request.likedOnly || track.liked);
+}
+
+function compareVisualTracks(left: VisualTrackPoint, right: VisualTrackPoint): number {
+  return Number(right.liked) - Number(left.liked)
+    || (right.rating === null ? -1 : left.rating === null ? 1 : right.rating - left.rating)
+    || right.listenedMs - left.listenedMs
+    || (right.lastPlayed ?? "").localeCompare(left.lastPlayed ?? "")
+    || right.dateAdded.localeCompare(left.dateAdded)
+    || left.trackId.localeCompare(right.trackId);
+}
+
+function browserPreviewVisualDataset(request: VisualDatasetRequest): VisualLibraryDataset {
+  if (!isPlaybackE2EAdapterEnabled()) {
+    return { totalTracks: 0, returnedTracks: 0, truncated: false, tracks: [] };
+  }
+  const tracks = e2eVisualTracks.filter((track) => visualTrackMatches(track, request)).sort(compareVisualTracks);
+  const bounded = tracks.slice(0, request.limit);
+  return {
+    totalTracks: tracks.length,
+    returnedTracks: bounded.length,
+    truncated: tracks.length > request.limit,
+    tracks: bounded,
+  };
+}
 
 function browserPreviewLibraryStatus(): LibraryStatus {
   if (isPlaybackE2EAdapterEnabled()) {
@@ -3461,6 +3578,19 @@ export async function getLibraryPage(request: LibraryPageRequest): Promise<Libra
   }
 }
 
+export async function getVisualLibraryDataset(request: VisualDatasetRequest): Promise<VisualLibraryDataset> {
+  try {
+    const parsedRequest = visualDatasetRequestSchema.parse(request) as VisualDatasetRequest;
+    if (!isTauriRuntime()) {
+      return visualLibraryDatasetSchema.parse(browserPreviewVisualDataset(parsedRequest)) as VisualLibraryDataset;
+    }
+    return visualLibraryDatasetSchema.parse(await invoke<unknown>("get_visual_library_dataset", { request: parsedRequest })) as VisualLibraryDataset;
+  } catch (error) {
+    if (error instanceof IpcError) throw error;
+    throw new IpcError("SpotDIY could not read the visual library dataset.", error);
+  }
+}
+
 async function invokePlaylist<T>(
   command: string,
   args: Record<string, unknown> | undefined,
@@ -3976,6 +4106,64 @@ function e2eAppendTrack(request: TrackPlaybackRequest, insertNext: boolean): Pla
   return e2eQueueSnapshot();
 }
 
+export function parsePreviewState(value: unknown): PreviewState {
+  return previewStateSchema.parse(value);
+}
+
+export async function getPreviewState(): Promise<PreviewState> {
+  if (isPlaybackE2EAdapterEnabled()) {
+    return parsePreviewState(browserPreviewState);
+  }
+  if (!isTauriRuntime()) {
+    return parsePreviewState({ phase: "idle", trackId: null, startedAtMs: null, error: null });
+  }
+  try {
+    return parsePreviewState(await invoke<unknown>("get_preview_state"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not read the preview state.", error);
+  }
+}
+
+export async function startPreview(trackId: TrackId): Promise<PreviewState> {
+  const parsedTrackId = trackIdSchema.parse(trackId);
+  if (isPlaybackE2EAdapterEnabled()) {
+    if (!e2eTrackMap.has(parsedTrackId)) {
+      throw new IpcError("That local track is not available in the browser preview.");
+    }
+    clearBrowserPreview();
+    browserPreviewState = {
+      phase: "playing",
+      trackId: parsedTrackId,
+      startedAtMs: Date.now(),
+      error: null,
+    };
+    browserPreviewTimer = window.setTimeout(() => { clearBrowserPreview(); }, 8_000);
+    return parsePreviewState(browserPreviewState);
+  }
+  if (!isTauriRuntime()) {
+    throw new IpcError("Local preview requires the native SpotDIY runtime.");
+  }
+  try {
+    return parsePreviewState(await invoke<unknown>("start_preview", { trackId: parsedTrackId }));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not start the local preview.", error);
+  }
+}
+
+export async function cancelPreview(): Promise<PreviewState> {
+  if (isPlaybackE2EAdapterEnabled()) {
+    return parsePreviewState(clearBrowserPreview());
+  }
+  if (!isTauriRuntime()) {
+    return parsePreviewState({ phase: "idle", trackId: null, startedAtMs: null, error: null });
+  }
+  try {
+    return parsePreviewState(await invoke<unknown>("cancel_preview"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not cancel the local preview.", error);
+  }
+}
+
 export async function getPlaybackSnapshot(): Promise<PlaybackSnapshot> {
   if (isPlaybackE2EAdapterEnabled()) {
     return e2ePlaybackSnapshot();
@@ -3998,6 +4186,7 @@ export async function getPlaybackSnapshot(): Promise<PlaybackSnapshot> {
 export async function playTrack(request: TrackPlaybackRequest): Promise<PlaybackSnapshot> {
   try {
     const parsedRequest = trackPlaybackRequestSchema.parse(request);
+    if (isPlaybackE2EAdapterEnabled()) clearBrowserPreview();
     if (isPlaybackE2EAdapterEnabled()) {
       const track = resolveE2EPlaybackRequest(parsedRequest);
       e2eAdapterState.canonicalQueue = [parsedRequest];
@@ -4025,6 +4214,7 @@ export async function playTrack(request: TrackPlaybackRequest): Promise<Playback
 export async function enqueueTrack(request: TrackPlaybackRequest): Promise<PlaybackSnapshot> {
   try {
     const parsedRequest = trackPlaybackRequestSchema.parse(request);
+    if (isPlaybackE2EAdapterEnabled()) clearBrowserPreview();
     if (isPlaybackE2EAdapterEnabled()) {
       return e2eAppendTrack(parsedRequest, false);
     }
@@ -4046,6 +4236,7 @@ export async function enqueueTrack(request: TrackPlaybackRequest): Promise<Playb
 export async function playTrackNext(request: TrackPlaybackRequest): Promise<PlaybackSnapshot> {
   try {
     const parsedRequest = trackPlaybackRequestSchema.parse(request);
+    if (isPlaybackE2EAdapterEnabled()) clearBrowserPreview();
     if (isPlaybackE2EAdapterEnabled()) {
       return e2eAppendTrack(parsedRequest, true);
     }
