@@ -9,7 +9,7 @@ const fixtureFolder = process.env.SPOTDIY_PACKAGED_FIXTURE;
 if (!cdpUrl) {
   throw new Error("SPOTDIY_PACKAGED_CDP_URL is required");
 }
-if ((mode === "flow" || mode === "plan08" || mode === "plan09" || mode === "plan11" || mode === "plan12" || mode === "plan14") && !fixtureFolder) {
+if ((mode === "flow" || mode === "plan08" || mode === "plan09" || mode === "plan11" || mode === "plan12" || mode === "plan14" || mode === "plan15") && !fixtureFolder) {
   throw new Error("SPOTDIY_PACKAGED_FIXTURE is required for the playback flow");
 }
 
@@ -122,6 +122,97 @@ try {
       return snapshot.currentTrackId && snapshot.phase === "playing" && snapshot.queueLength === 2 && snapshot.currentQueueEntryId && snapshot.currentTrackId !== firstSnapshot.currentTrackId ? snapshot : false;
     });
     console.log("packaged playback flow passed");
+  } else if (mode === "plan15") {
+    await invoke("add_library_folders", { paths: [fixtureFolder] });
+    const status = await waitFor("the Plan 15 synthetic folder scan", async () => {
+      const next = await invoke("get_library_status");
+      return next.folders?.length === 1 && next.indexedTrackCount >= 2 && !next.isScanning ? next : false;
+    });
+    if (!status) {
+      throw new Error("the Plan 15 library scan did not complete");
+    }
+
+    const dataset = await invoke("get_visual_library_dataset", {
+      request: { query: null, genre: null, artist: null, likedOnly: false, limit: 2_000 },
+    });
+    const serializedDataset = JSON.stringify(dataset);
+    if (
+      dataset.totalTracks < 2 ||
+      dataset.returnedTracks !== dataset.tracks?.length ||
+      dataset.returnedTracks > 5_000 ||
+      serializedDataset.includes(fixtureFolder) ||
+      /(?:localMediaPath|mediaPath|providerUrl|credentials?)/i.test(serializedDataset)
+    ) {
+      throw new Error(`Plan 15 dataset contract failed: ${serializedDataset}`);
+    }
+
+    const libraryPage = await invoke("get_library_page", {
+      request: { page: 0, pageSize: 100, sort: "title", descending: false, folderId: null },
+    });
+    const first = [...(libraryPage.items ?? [])].sort((left, right) => left.title.localeCompare(right.title))[0];
+    if (!first?.trackId || !first.sourceId) {
+      throw new Error(`the Plan 15 fixture did not expose a playable track: ${JSON.stringify(libraryPage)}`);
+    }
+
+    await invoke("play_track", { trackId: first.trackId, sourceId: first.sourceId });
+    await waitFor("the Plan 15 fixture track to play", async () => {
+      const snapshot = await invoke("get_playback_snapshot");
+      return snapshot.phase === "playing" ? snapshot : false;
+    });
+    await invoke("toggle_play_pause");
+    await waitFor("the Plan 15 fixture track to pause", async () => (await invoke("get_playback_snapshot")).phase === "paused");
+
+    await page.getByRole("link", { name: "Music Map", exact: true }).click();
+    await page.getByRole("heading", { name: "See the connections." }).waitFor({ state: "visible" });
+    await page.locator(".music-map-svg").waitFor({ state: "visible" });
+    await page.locator(".visual-node-list-item").filter({ hasText: first.title }).first().click();
+    await page.getByText("SELECTED TRACK", { exact: true }).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "Close inspector", exact: true }).click();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await waitFor("the native Plan 15 preview", async () => {
+      const preview = await invoke("get_preview_state");
+      return preview.phase === "playing" && preview.trackId === first.trackId ? preview : false;
+    });
+    await page.getByRole("button", { name: "Cancel Preview", exact: true }).click();
+    await waitFor("the Plan 15 preview cancellation", async () => (await invoke("get_preview_state")).phase === "idle");
+
+    await page.getByRole("link", { name: "Library Galaxy", exact: true }).click();
+    await page.getByRole("heading", { name: "Library Galaxy" }).waitFor({ state: "visible" });
+    await page.locator("canvas[aria-label='Library Galaxy canvas']").waitFor({ state: "visible" });
+    await page.locator(".visual-node-list-item").filter({ hasText: first.title }).first().click();
+    await page.getByText("SELECTED TRACK", { exact: true }).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "Close inspector", exact: true }).click();
+
+    await page.getByRole("link", { name: "Theme Studio", exact: true }).click();
+    await page.getByRole("heading", { name: "Make a place to listen." }).waitFor({ state: "visible" });
+    if (await page.locator(".theme-token-field").count() !== 15) {
+      throw new Error("Plan 15 Theme Studio did not expose all 15 token fields");
+    }
+    await page.getByRole("button", { name: "Preview on App", exact: true }).click();
+    await page.locator("html[data-theme='custom']").waitFor({ state: "attached" });
+    await page.getByRole("button", { name: "Stop App Preview", exact: true }).click();
+    await page.locator("html[data-theme='dark']").waitFor({ state: "attached" });
+    console.log("packaged Plan 15 visual routes, dataset contract, local preview, and Theme Studio passed");
+  } else if (mode === "plan15-restart") {
+    const status = await waitFor("the indexed Plan 15 library after restart", async () => {
+      const next = await invoke("get_library_status");
+      return next.folders?.length === 1 && next.indexedTrackCount >= 2 && !next.isScanning ? next : false;
+    });
+    const dataset = await invoke("get_visual_library_dataset", {
+      request: { query: null, genre: null, artist: null, likedOnly: false, limit: 2_000 },
+    });
+    const preview = await invoke("get_preview_state");
+    const playback = await invoke("get_playback_snapshot");
+    if (!status || dataset.returnedTracks < 2 || preview.phase !== "idle" || playback.phase !== "idle") {
+      throw new Error(`Plan 15 restart boundary failed: ${JSON.stringify({ status, dataset, preview, playback })}`);
+    }
+    await page.getByRole("link", { name: "Music Map", exact: true }).click();
+    await page.getByRole("heading", { name: "See the connections." }).waitFor({ state: "visible" });
+    await page.getByRole("link", { name: "Library Galaxy", exact: true }).click();
+    await page.getByRole("heading", { name: "Library Galaxy" }).waitFor({ state: "visible" });
+    await page.getByRole("link", { name: "Theme Studio", exact: true }).click();
+    await page.getByRole("heading", { name: "Make a place to listen." }).waitFor({ state: "visible" });
+    console.log("packaged Plan 15 restart dataset, preview isolation, and visual-route boundary passed");
   } else if (mode === "plan14") {
     await invoke("add_library_folders", { paths: [fixtureFolder] });
     const status = await waitFor("the Plan 14 synthetic folder scan", async () => {

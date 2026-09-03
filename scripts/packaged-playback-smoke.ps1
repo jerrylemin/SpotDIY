@@ -5,7 +5,8 @@ param(
     [switch]$Plan09Lyrics,
     [switch]$Plan11Shell,
     [switch]$Plan12Windows,
-    [switch]$Plan14SmartAnalytics
+    [switch]$Plan14SmartAnalytics,
+    [switch]$Plan15VisualExploration
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,14 +16,14 @@ if ($env:SPOTDIY_PACKAGED_SMOKE -ne "1") {
     exit 0
 }
 
-if (@($Plan08Persistence, $Plan09Lyrics, $Plan11Shell, $Plan12Windows, $Plan14SmartAnalytics).Where({ $_ }).Count -gt 1) {
+if (@($Plan08Persistence, $Plan09Lyrics, $Plan11Shell, $Plan12Windows, $Plan14SmartAnalytics, $Plan15VisualExploration).Where({ $_ }).Count -gt 1) {
     throw "choose one packaged smoke mode"
 }
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
-$smokeLabel = if ($Plan14SmartAnalytics) { "Plan14" } elseif ($Plan12Windows) { "Plan12" } elseif ($Plan11Shell) { "Plan11" } elseif ($Plan09Lyrics) { "Plan09" } elseif ($Plan08Persistence) { "Plan08" } else { "Plan04" }
-$flowMode = if ($Plan14SmartAnalytics) { "plan14" } elseif ($Plan12Windows) { "plan12" } elseif ($Plan11Shell) { "plan11" } elseif ($Plan09Lyrics) { "plan09" } elseif ($Plan08Persistence) { "plan08" } else { "flow" }
-$restartMode = if ($Plan14SmartAnalytics) { "plan14-restart" } elseif ($Plan12Windows) { "plan12-restart" } elseif ($Plan11Shell) { "plan11-restart" } elseif ($Plan09Lyrics) { "plan09-restart" } elseif ($Plan08Persistence) { "plan08-restart" } else { "restart" }
+$smokeLabel = if ($Plan15VisualExploration) { "Plan15" } elseif ($Plan14SmartAnalytics) { "Plan14" } elseif ($Plan12Windows) { "Plan12" } elseif ($Plan11Shell) { "Plan11" } elseif ($Plan09Lyrics) { "Plan09" } elseif ($Plan08Persistence) { "Plan08" } else { "Plan04" }
+$flowMode = if ($Plan15VisualExploration) { "plan15" } elseif ($Plan14SmartAnalytics) { "plan14" } elseif ($Plan12Windows) { "plan12" } elseif ($Plan11Shell) { "plan11" } elseif ($Plan09Lyrics) { "plan09" } elseif ($Plan08Persistence) { "plan08" } else { "flow" }
+$restartMode = if ($Plan15VisualExploration) { "plan15-restart" } elseif ($Plan14SmartAnalytics) { "plan14-restart" } elseif ($Plan12Windows) { "plan12-restart" } elseif ($Plan11Shell) { "plan11-restart" } elseif ($Plan09Lyrics) { "plan09-restart" } elseif ($Plan08Persistence) { "plan08-restart" } else { "restart" }
 $targetRoot = $env:CARGO_TARGET_DIR
 if ([string]::IsNullOrWhiteSpace($targetRoot)) {
     throw "CARGO_TARGET_DIR must point outside the repository before packaged verification"
@@ -358,7 +359,9 @@ try {
 
     Close-PackagedApp "second packaged app" $secondApp
     Wait-ForProcessExit $secondApp ($TimeoutSeconds * 1000)
-    if ($Plan14SmartAnalytics) {
+    if ($Plan15VisualExploration) {
+        Write-Output "PASS: packaged Plan 15 visual exploration, native dataset contract, local preview, Theme Studio, restart, and owned-process cleanup"
+    } elseif ($Plan14SmartAnalytics) {
         Write-Output "PASS: packaged Plan 14 schema migration, local history, sessions, private/temporary boundaries, smart playlist preview/mix, restart persistence, and owned-process cleanup"
     } elseif ($Plan12Windows) {
         Write-Output "PASS: packaged Plan 12 schema 8-to-9 migration, tray, SMTC status, shortcuts, overlays, click-through recovery, output profiles, restart persistence, and owned-process cleanup"

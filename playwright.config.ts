@@ -25,15 +25,23 @@ export default defineConfig({
   projects: [
     {
       name: "visual-1280",
+      testIgnore: /plan15-visual-exploration\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 720 } },
     },
     {
       name: "visual-1920",
+      testIgnore: /plan15-visual-exploration\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], viewport: { width: 1920, height: 1080 } },
     },
     {
       name: "visual-2560",
+      testIgnore: /plan15-visual-exploration\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], viewport: { width: 2560, height: 1440 } },
+    },
+    {
+      name: "plan15-ultrawide",
+      testMatch: /plan15-visual-exploration\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], viewport: { width: 3440, height: 1440 } },
     },
   ],
 });
