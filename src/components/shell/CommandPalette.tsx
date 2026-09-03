@@ -12,7 +12,7 @@ interface Command {
   label: string;
   hint: string;
   icon: SpotIconName;
-  path?: "/" | "/search" | "/library" | "/lyrics" | "/playlists" | "/downloads" | "/analytics" | "/settings";
+  path?: "/" | "/search" | "/library" | "/lyrics" | "/playlists" | "/downloads" | "/analytics" | "/settings" | "/music-map" | "/library-galaxy" | "/theme-studio";
   action?: () => void;
   disabled?: boolean;
 }
@@ -90,6 +90,9 @@ export function CommandPalette() {
     { id: "playlists", label: "Open playlists", hint: "Curate and organize listening", icon: "playlist", path: "/playlists" },
     { id: "downloads", label: "Open downloads", hint: "View offline tasks and files", icon: "download", path: "/downloads" },
     { id: "analytics", label: "Open analytics", hint: "Review local listening history and patterns", icon: "analytics", path: "/analytics" },
+    { id: "music-map", label: "Open Music Map", hint: "Explore genre, artist, album, and track relationships", icon: "spark", path: "/music-map" },
+    { id: "library-galaxy", label: "Open Library Galaxy", hint: "Plot your local library in a bounded Canvas workspace", icon: "expand", path: "/library-galaxy" },
+    { id: "theme-studio", label: "Open Theme Studio", hint: "Draft themes and preview your workspace", icon: "theme", path: "/theme-studio" },
     { id: "settings", label: "Open settings", hint: "Storage, sources, and appearance", icon: "settings", path: "/settings" },
     {
       id: "private-session",
