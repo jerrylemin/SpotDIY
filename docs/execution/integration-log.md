@@ -334,6 +334,6 @@
   exact Node/pnpm pins, a deterministic 5,000-track layout benchmark, and
   third-party dependency notices. No speculative product feature or migration
   was added.
-- Current implementation remains uncommitted pending explicit approval; the
-  primary checkout's unrelated `.gitignore` change and two deleted Plan 05
-  reports were not touched.
+- Plan 16 is committed and pushed as `5dfdd1e`; the primary checkout's
+  unrelated `.gitignore` change and two deleted Plan 05 reports were not
+  touched.

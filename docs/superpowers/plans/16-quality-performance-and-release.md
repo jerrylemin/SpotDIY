@@ -50,4 +50,4 @@ pass, but native compilation, RustSec, Tauri packaging, clean install, and
 packaged acceptance are blocked by missing MSVC headers/libraries. The primary
 worktree intentionally retains the three unrelated pre-existing changes.
 No migration 10, updater, tag, GitHub Release, root LICENSE, or reviewer loop
-was added. Commit/push remains pending explicit approval.
+was added. Plan 16 is committed and pushed as `5dfdd1e`.

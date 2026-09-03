@@ -340,13 +340,13 @@ targeted accessibility tests (6 at each of 1280/1920/2560 projects), JS audit,
 production build, and layout benchmark. Native compile, RustSec, Tauri
 packaging, installer/clean-install, and packaged acceptance are blocked by
 missing MSVC headers/libraries (`msvcrt.lib`) on this host. No installer,
-commit, push, tag, release, or Gmail message exists from this session.
+tag, release, or Gmail message exists from this session; Plan 16 is committed
+and pushed as `5dfdd1e`.
 
 `graphify update .` completed at the final code state with 5,625 nodes, 12,674
 edges, and 271 communities; Graphify skipped the HTML visualization because
 the graph exceeded its 5,000-node safety limit. CodeGraph remains unavailable.
 
 Required next step: repair the Visual Studio x64 MSVC installation, create a
-clean detached release worktree from the implementation commit, rerun native
-and package gates, then obtain explicit approval before staging/committing and
-pushing `main`. Do not start Plan 17.
+clean detached release worktree from the implementation commit, and rerun
+native and package gates. Do not start Plan 17.

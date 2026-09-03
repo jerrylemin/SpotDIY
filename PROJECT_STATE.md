@@ -378,7 +378,7 @@ absent. Three unrelated pre-existing worktree changes remain unstaged.
 
 ## Plan 16 quality and release snapshot — 2026-09-03
 
-Plan 16 is partially implemented in the working tree and remains uncommitted.
+Plan 16 is partially implemented and committed/pushed as `5dfdd1e`.
 The confirmed Plan 15 blockers are closed in source: PreviewService now owns a
 shared audio gate for preview/main transport serialization; visual DTOs carry
 ordered artist and album IDs; Music Map/Galaxy use stable IDs; and visual

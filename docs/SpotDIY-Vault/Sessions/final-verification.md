@@ -108,10 +108,9 @@ unchanged; this file records only work and evidence from Plan 16.
 
 ## Commit and delivery
 
-No Plan 16 commit SHA exists yet. The implementation is intentionally
-uncommitted until the user approves staging/commit/push. No tag or GitHub
-Release was created. Gmail is not an available connector in this session, so
-the requested completion email was not sent.
+Plan 16 is committed and pushed as `5dfdd1e`. No tag or GitHub Release was
+created. Gmail is not an available connector in this session, so the requested
+completion email was not sent.
 
 ## Graphs and handoff
 
@@ -119,6 +118,6 @@ the requested completion email was not sent.
   12,674 edges, and 271 communities. The HTML visualization was skipped by
   Graphify's 5,000-node safety limit. CodeGraph is unavailable because no
   command/index is present.
-- After the safe work is complete, the next step is to repair the MSVC
-  installation, rerun the native/package gates in a clean detached worktree,
-  then obtain commit/push approval and external GitHub review.
+- The next step is to repair the MSVC installation and rerun the
+  native/package gates in a clean detached worktree; only then can a release
+  be considered.
