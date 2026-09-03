@@ -165,19 +165,18 @@ is recorded in `docs/execution/verification-log.md` and
 STOPPED AFTER PLAN 13.
 Awaiting external ChatGPT GitHub review before Plan 14.
 
-## Plan 14 active work — 2026-09-03
+## Plan 14 completion — 2026-09-03
 
-Plan 14 is implemented locally through `f516eee`, `6a02daa`, `ab01f3e`,
-`aedd3a8`, `4527b02`, and `dbcdb2f`, with documentation closure in the final
-docs commit.
-It adds
-schema-9 local listening history/sessions, tagged genres and release dates,
-qualified-play recording, Private Session, Temporary Mode, typed smart
-playlists, deterministic Smart Shuffle, `/analytics`, Taste Timeline,
-Time Machine, and reopen-as-queue controls. Plan 13 restore staging now uses
-trusted component creation and cleanup ownership checks.
+Plan 14 is complete through implementation commits `f516eee`, `6a02daa`,
+`ab01f3e`, `aedd3a8`, `4527b02`, and `dbcdb2f`, plus the verification repairs
+and final documentation closure. It adds schema-9 local listening
+history/sessions, tagged genres and release dates, qualified-play recording,
+Private Session, Temporary Mode, typed smart playlists, deterministic Smart
+Shuffle, `/analytics`, Taste Timeline, Time Machine, and reopen-as-queue
+controls. Plan 13 restore staging retains its trusted component and cleanup
+ownership checks.
 
-Frontend checks and Rust formatting pass. Native compilation, Playwright, and
-release/package smokes are environment-blocked, so this remains `IN PROGRESS`.
-Three unrelated pre-existing worktree changes remain unstaged. Do not start
-Plan 15.
+Final native, browser, package, packaged-smoke, and isolated schema-9
+roundtrip gates pass. Graphify reports 281 files, 5,329 nodes, 12,057 edges,
+and 260 communities; CodeGraph remains unavailable. Three unrelated
+pre-existing worktree changes remain unstaged. Plan 15 is out of scope.

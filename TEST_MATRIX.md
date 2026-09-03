@@ -247,22 +247,24 @@
 - `codegraph sync .` and `codegraph status .` - passed; the current index is
   up to date at 176 files, 5,781 nodes, and 21,456 edges.
 
-## Plan 14 verification status — 2026-09-03
+## Plan 14 final verification — 2026-09-03
 
-- Frontend: `pnpm typecheck` passed; `pnpm lint` passed with the same three
-  pre-existing Fast Refresh warnings; `pnpm test` passed with 83 tests across
-  23 files; and `pnpm build` passed with the existing non-fatal Browserslist,
-  Tailwind, dynamic-import, and large-chunk notices.
-- Native/source checks: `cargo fmt --manifest-path src-tauri/Cargo.toml --
-  --check`, `node --check scripts/packaged-playback-smoke.mjs`, and the
-  PowerShell parser check passed. Focused Rust coverage is present for schema
-  8-to-9 migration, metadata, qualification/session grouping, privacy,
-  Temporary Mode, smart rules/shuffle, and trusted staging, but native test
-  and Clippy execution is blocked by the installed MSVC/SDK (`msvcrt.lib`
-  and `excpt.h` are unavailable).
-- Browser/runtime: `pnpm exec playwright test` is blocked because the required
-  Chromium headless shell is not installed. `pnpm tauri build` and all
-  packaged smokes are blocked by the same native toolchain, so the Plan 14
-  packaged schema/history/private/temporary/smart/analytics run and the
-  `.spotdiy` schema-9 roundtrip are not claimed.
-- `git diff --check` passed. `Test-Path .\\src-tauri\\target` is `False`.
+- Frontend: `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` pass;
+  Vitest reports 83 tests across 23 files. The same three pre-existing Fast
+  Refresh warnings and documented non-fatal build notices remain.
+- Browser: `pnpm exec playwright test` passes all 69 tests across the 1280,
+  1920, and 2560 viewport projects.
+- Native: Rust fmt, 420 unit tests plus one real-mpv synthetic WAV integration
+  test, and strict all-target/all-feature Clippy with `-D warnings` pass.
+  Plan 13 staging security coverage remains green.
+- Runtime: `pnpm tauri build` passes with release/NSIS output under external
+  `C:\CargoTarget\SpotDIY`. Regular playback, Plan 11, Plan 12, Plan 13, and
+  Plan 14 packaged smokes pass with clean owned-process shutdown.
+- Backup: an isolated synthetic schema-9 export/import/restart test passes;
+  the `.spotdiy` manifest remains format 1 and preserves genres, sessions,
+  history, and smart playlists while fresh Private/Temporary mode state is not
+  persisted. The temporary archive/test artifacts were deleted.
+- Graphify reports 281 files, 5,329 nodes, 12,057 edges, and 260 communities;
+  CodeGraph remains unavailable because no command/index is present.
+- `git diff --check` passes. `Test-Path .\\src-tauri\\target` is `False` and
+  no runtime data, secrets, or generated verification diagnostics are retained.

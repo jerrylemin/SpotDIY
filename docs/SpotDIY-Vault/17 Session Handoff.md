@@ -203,7 +203,7 @@ to `jerryle.minh.3@gmail.com`.
 STOPPED AFTER PLAN 13.
 Awaiting external ChatGPT GitHub review before Plan 14.
 
-## Plan 14 handoff — 2026-09-03
+## Plan 14 completion handoff — 2026-09-03
 
 The current checkout is based on the expected Plan 13 baseline
 `ef6d7e9c…` and contains local Plan 14 phase commits, but the worktree is not
@@ -217,15 +217,16 @@ owned queue restoration; parameter-bound smart rule CRUD/preview; deterministic
 non-ML Smart Shuffle; Analytics and Smart Playlist UI; and trusted Plan 13
 restore staging with symlink/reparse rejection and cleanup ownership proof.
 
-Evidence: frontend typecheck/lint/test/build and Rust fmt pass; the Plan 14
-packaged scripts parse; Rust test/Clippy/Tauri packaging are blocked by the
-local MSVC/SDK; Playwright is blocked by the missing Chromium shell. Graphify
-was refreshed to 279 files, 5,298 nodes, 12,027 edges, and 260 communities.
-Phase commits are `f516eee`, `6a02daa`, `ab01f3e`, `aedd3a8`, `4527b02`, and
-`dbcdb2f`; the final docs commit contains the closure record.
+Final evidence: 420 Rust unit tests plus real mpv, 83 Vitest tests across 23
+files, 69 Playwright tests, frontend/native quality gates, Tauri release/NSIS
+packaging, regular/Plan 11/Plan 12/Plan 13/Plan 14 packaged smokes, Plan 13
+staging security coverage, and an isolated format-1/schema-9 export/import/
+restart roundtrip preserving analytics and smart data. Fresh Private/Temporary
+mode state is not persisted. Graphify reports 281 files, 5,329 nodes, 12,057
+edges, and 260 communities; CodeGraph is unavailable. Build output remains at
+`C:\CargoTarget\SpotDIY`; repository-local `src-tauri\target` is absent.
 
 ## Next atomic task
 
-Resume native/package verification from a clean, matching baseline. Keep Plan
-15 out of scope. The requested `Plan 14 finished` email was sent to
-`jerryle.minh.3@gmail.com`.
+STOPPED AFTER PLAN 14. Awaiting external ChatGPT GitHub review. Do not start
+Plan 15.

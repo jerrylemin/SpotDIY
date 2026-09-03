@@ -326,14 +326,15 @@ listening-mode surfaces are wired through the native-only boundary. The Plan
 `symlink_metadata`, rejects symlink/reparse/non-directory components, proves
 trusted ownership before cleanup, and has a Unix symlink regression test.
 
-Frontend typecheck, lint, Vitest, and production build pass; Rust formatting
-passes. Rust test/Clippy and Tauri packaging are not runnable on this machine:
-the installed MSVC/Windows SDK lacks usable `msvcrt.lib`/`excpt.h`. Playwright
-is blocked by the missing Chromium headless shell. The Plan 14 packaged
-harness parses successfully but has not run without a release executable.
-Graphify was refreshed after the code changes: 279 files, 5,298 nodes,
-12,027 edges, and 260 communities. The commits are local only: native/package
-gates remain blocked, and three unrelated pre-existing worktree changes
-(`.gitignore` plus two old report deletions) remain unstaged.
-The requested Gmail completion message `Plan 14 finished` was sent to
-`jerryle.minh.3@gmail.com`.
+Frontend typecheck, lint, Vitest, and production build pass; Rust formatting,
+all-target tests, strict all-features Clippy, and the real mpv integration
+smoke pass. Playwright passes all 69 viewport tests. The external-target Tauri
+release/NSIS build and regular/Plan 11/Plan 12/Plan 13/Plan 14 packaged smokes
+pass. An isolated format-1/schema-9 `.spotdiy` export/import/restart roundtrip
+preserves genres, sessions, history, and smart playlists while fresh
+Private/Temporary mode state is not persisted. Graphify reports 281 files,
+5,329 nodes, 12,057 edges, and 260 communities; CodeGraph is unavailable.
+Build output remains external at `C:\CargoTarget\SpotDIY`; repository-local
+`src-tauri\target` is absent. The commits are ready for remote review, while
+three unrelated pre-existing worktree changes (`.gitignore` plus two old
+report deletions) remain unstaged.

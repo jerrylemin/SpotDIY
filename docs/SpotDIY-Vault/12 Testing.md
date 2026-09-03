@@ -211,16 +211,20 @@ not automate OS-native save/open/folder dialogs; those production dialog
 boundaries remain covered by native command wiring and the archive/restore
 unit suite. Live provider, LRCLIB, and download smoke remain optional.
 
-## Plan 14 verification status
+## Plan 14 verification
 
-The frontend gates pass with 83 Vitest tests across 23 files, typecheck, lint,
-and production build; the same three Fast Refresh warnings remain. Rust fmt
-and `git diff --check` pass. Focused native tests cover schema 8-to-9,
-metadata normalization, qualified play and session grouping, privacy and
-Temporary Mode, smart rule compilation/shuffle, and trusted restore staging.
+Plan 14 passes 420 Rust unit tests plus one real-mpv synthetic WAV integration
+test, 83 Vitest tests across 23 files, 69 Playwright tests across the 1280,
+1920, and 2560 viewport projects, frontend typecheck/lint/build, Rust fmt,
+strict all-target/all-feature Clippy, the external-target Tauri release/NSIS
+build, and the regular/Plan 11/Plan 12/Plan 13/Plan 14 packaged smokes.
 
-Native tests/Clippy/Tauri packaging are not reported as passing because the
-machine's MSVC/Windows SDK is missing usable `msvcrt.lib`/`excpt.h`; Playwright
-is blocked by its missing Chromium headless shell. The Plan 14 packaged smoke
-script parses, but release smoke and the `.spotdiy` schema-9 roundtrip await a
-working native build. Graphify was refreshed after implementation.
+The isolated schema-9 `.spotdiy` export/import/restart check passes with
+format-version 1, preserved genres/sessions/history/smart playlists, and
+fresh Private/Temporary mode state disabled. Plan 13 staging symlink/reparse,
+path-ownership, and cleanup security regressions remain green. Lint retains
+the three pre-existing Fast Refresh warnings and the build retains documented
+non-fatal notices. Graphify reports 281 files, 5,329 nodes, 12,057 edges, and
+260 communities; CodeGraph is unavailable because no command/index is present.
+Build output remains external at `C:\CargoTarget\SpotDIY`, and repository-local
+`src-tauri\target` remains absent.

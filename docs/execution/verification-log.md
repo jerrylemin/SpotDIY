@@ -447,26 +447,40 @@ below.
 - `codegraph sync .` and `codegraph status .` - passed; the index is up to date
   at 176 files, 5,781 nodes, and 21,456 edges.
 
-## 2026-09-03 - Plan 14 verification status
+## 2026-09-03 - Plan 14 final verification
 
-- `pnpm typecheck` - passed. `pnpm lint` - passed with three pre-existing Fast
-  Refresh warnings. `pnpm test` - passed: 83 tests across 23 files.
-- `pnpm build` - passed; existing non-fatal frontend notices remain.
-- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` - passed.
-  `git diff --check` - passed. The Plan 14 packaged Node harness and
-  PowerShell smoke script both pass syntax/parser checks.
-- `cargo test`, strict all-features Clippy, and `pnpm tauri build` could not
-  reach source compilation because this machine's MSVC/Windows SDK cannot
-  provide `msvcrt.lib`/`excpt.h`. This is an environment blocker, not a
-  passing native result.
-- `pnpm exec playwright test` could not start because the configured Chromium
-  headless shell is missing. Consequently the release-based regular/Plan 11/
-  Plan 12/Plan 13/Plan 14 packaged runs, including schema 8-to-9 and
-  `.spotdiy` schema-9 roundtrip, are not claimed here.
-- `graphify update .` passed after the code changes: 279 files, 5,298 nodes,
-  12,027 edges, and 260 communities. CodeGraph was unavailable in this
-  checkout and no refresh result is claimed.
-- No runtime SQLite, archive, media, browser report, target directory,
-  credentials, tokens, or `memory.zip` was staged or tracked. The blocked
-  Playwright run produced ignored `test-results` diagnostics in the workspace;
-  they are outside the commit scope.
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` passed. Vitest
+  reports 83 tests across 23 files. Lint retains three pre-existing Fast
+  Refresh warnings; frontend build notices remain non-fatal.
+- `pnpm exec playwright test` passed: 69 tests across the 1280, 1920, and
+  2560 viewport projects.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` passed.
+  `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` passed:
+  420 Rust unit tests plus one real-mpv synthetic WAV integration test.
+  Strict all-target/all-feature Clippy with `-D warnings` passed.
+- `pnpm tauri build` passed and produced the release executable and NSIS
+  installer under external `C:\CargoTarget\SpotDIY`; repository-local
+  `src-tauri\target` remains absent.
+- The rebuilt release passed the regular playback/restart smoke, Plan 11
+  shell/inspector smoke, Plan 12 Windows integration smoke (schema 8-to-9,
+  tray, SMTC, shortcut, overlay, click-through, and output-profile checks),
+  Plan 13 Standard/Portable storage smoke, and Plan 14 history/privacy/
+  temporary/smart/analytics smoke. All reported clean owned-process shutdown.
+- An isolated synthetic schema-9 roundtrip passed in a temporary Rust test:
+  the exported `.spotdiy` manifest remained format 1, schema 9, and metadata,
+  genres, sessions, history, and smart playlists survived staged import and
+  restart apply. A fresh mode service had Private Session and Temporary Mode
+  disabled. The temporary test and archive were deleted afterward.
+- Plan 13 staging security regressions passed in the final Rust suite, covering
+  symlink/reparse/path ownership rejection and safe cleanup. The real mpv
+  smoke used the verified `.tools\mpv\v0.41.0\mpv.exe` binary.
+- The initial native blocker was an uninitialized Visual Studio Developer
+  Shell environment, not a missing installation; the x64 DevShell was loaded
+  and no repository code was changed for that repair. Chromium was installed
+  with `pnpm exec playwright install chromium`. The only source fixes were a
+  Clippy-required settings match guard and the Plan 12 smoke's stale schema-8
+  assertion, both verified by the final gate.
+- `graphify update .` passed after those code changes: 281 files, 5,329 nodes,
+  12,057 edges, and 260 communities. CodeGraph remains unavailable because no
+  command/index is present. No runtime SQLite, archive, media, credentials,
+  tokens, or generated test diagnostics are retained.
