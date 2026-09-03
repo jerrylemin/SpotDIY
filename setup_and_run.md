@@ -7,16 +7,17 @@ This document records the release-candidate setup and verified host facts for
 
 - Windows 11 x64; Windows 10 is a target where Tauri/WebView2 supports it.
 - Node.js `24.11.1` and pnpm `11.22.0` for reproducible release/CI runs.
-- Rust stable MSVC and a Visual Studio x64 Developer Command Prompt with the
+- Rust `1.98.1-x86_64-pc-windows-msvc` and a Visual Studio x64 Developer Command Prompt with the
   Windows SDK and MSVC headers/libraries.
 - Evergreen WebView2 Runtime.
 - Python, FFmpeg, yt-dlp, and mpv for the managed media-tool boundary.
 
 The local host observed during Plan 16 was Node `24.14.0`, pnpm `11.19.0`, and
-Rust/Cargo `1.95.0`. CI pins Node/pnpm as above. The local Visual Studio
-installation currently lacks required MSVC headers/libraries, so native
-compile, package, and RustSec gates are blocked until that installation is
-repaired.
+default Rust/Cargo `1.95.0`; the repository toolchain file pins verification
+commands to Rust `1.98.1`. CI uses the same exact Rust target and passed the
+native, RustSec, and package jobs. The local Visual Studio installation still
+lacks required MSVC headers/libraries, so a local native rebuild remains
+blocked even though the CI release build is verified.
 
 ## Install
 
@@ -79,7 +80,10 @@ pnpm tauri build
 
 When native prerequisites are healthy, the NSIS artifact is under
 `C:\CargoTarget\SpotDIY\release\bundle\nsis\`. The repository must not
-contain `src-tauri\target`.
+contain `src-tauri\target`. Plan 16 verified the CI artifact
+`SpotDIY_0.1.0_x64-setup.exe` from run `33769072435`; it was `6,489,236`
+bytes and `NotSigned` with SHA-256
+`D52A17EF5A69F514DFE20C98EAD904543F8FA18599FE0DE74CAFB3B62ACA95CB`.
 
 Release verification records the installer filename, version, byte size,
 SHA-256, and `Get-AuthenticodeSignature` result. No signing certificate is

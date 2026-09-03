@@ -4,120 +4,114 @@ Date: 2026-09-03. Release candidate: SpotDIY `0.1.0`.
 
 ## Status
 
-`PARTIAL` — frontend quality, browser accessibility, JavaScript dependency
-audits, layout performance proxies, stable visual identity, capability-aware
-actions, and source-level security checks are complete. Native compilation,
-RustSec, package creation, installer checks, clean install, and packaged
-acceptance are blocked by the host's incomplete MSVC installation. Commit and
-push are also pending explicit approval because they are external repository
-changes.
+`PARTIAL`. The source repair, exact pinned CI native/frontend/package jobs,
+NSIS artifact, clean install/uninstall, and functional packaged feature smokes
+pass. The broad packaged process-tree playback budget fails, and native
+VisualExplorer SQL and timed packaged render-readiness budgets were not
+measured. No completion claim is made.
 
-No PASS below implies a blocked check. Historical Plan 1–15 records remain
-unchanged; this file records only work and evidence from Plan 16.
+## Fixed blockers
 
-## Repository and frozen contracts
+- Preview stop now resets stale `Playing` state, and stale reaper generations
+  cannot overwrite a newer preview state.
+- Visual genre aggregation is deterministic; native capability positives and
+  metadata-only negatives are covered.
+- Rust and CI use exact `1.98.1-x86_64-pc-windows-msvc`.
+- `windows 0.62.2` is listed in third-party notices.
+- CSP removes arbitrary remote `connect-src` while retaining remote artwork
+  image loading.
+- The packaged search harness now waits for `start_search` before cancelling
+  and accepts a naturally completed search's `null` cancellation result.
 
-- Expected primary root: `D:\MEGA\SpotDIY`.
-- Starting `HEAD` and `origin/main`: `8df74be5b05cbb5f88e86f8f08b9b63bf005275b`.
-- Version parity remains `0.1.0` in `package.json`, `src-tauri/Cargo.toml`,
-  and `src-tauri/tauri.conf.json`.
-- SQLite schema remains 9; `.spotdiy` format remains 1; no migration 10 was
-  added.
-- `CARGO_TARGET_DIR` remains external and
-  `Test-Path .\src-tauri\target` is `False`.
-- The primary checkout preserves the three unrelated pre-existing changes:
-  `.gitignore` modified and the two old Plan 05 report files deleted.
+## Source and CI evidence
 
-## Plan 15 repairs
+- Repair commit: `39b79bc63396897b6ddfaf81cce3cb2bd3180c2a`.
+- GitHub Actions run `33769072435` completed `success` for that exact SHA.
+  Rust, Frontend, and Package jobs all passed; Rust fmt, Clippy, tests,
+  RustSec audit, typecheck, lint, Vitest, build, Playwright, and NSIS upload
+  all ran in the green run.
+- `pnpm typecheck`, zero-warning ESLint, `pnpm test` (26 files / 91 tests),
+  `pnpm build`, and `pnpm exec playwright test` (76/76) pass locally.
+- Local pinned `cargo fmt --all -- --check` passes. Local all-target native
+  compilation cannot complete because this host's Visual Studio installation
+  lacks `excpt.h` and `msvcrt.lib`; the exact CI Windows job is the native
+  verification authority for the release source.
+- `pnpm audit --audit-level high` and `pnpm audit --prod --audit-level
+  moderate` pass with no known vulnerabilities. CI `cargo audit` passes.
+- `cargo metadata --manifest-path src-tauri/Cargo.toml --locked` reports 596
+  packages and the dependency notice index is current.
 
-- Preview/main transport now share `PreviewService.audio_gate`; preview stop,
-  normal Tauri transport, SMTC, shortcut/tray transport, output-profile apply,
-  audio-device changes, source switching, backend retry, and queue-opening
-  operations serialize without recursive locking.
-- Visual DTOs carry ordered `artistIds` and `albumId`; Music Map and Galaxy use
-  stable IDs with label fallback only when an ID is genuinely absent.
-- Visual DTOs carry set-based `canPlayback`, `canPreview`, and
-  `canRevealLocal`; unavailable actions are disabled with truthful reasons and
-  Spotify remains metadata-only.
+## Release artifact and install
 
-## Frontend and browser gates
+- Artifact: `spotdiy-nsis-39b79bc63396897b6ddfaf81cce3cb2bd3180c2a`, GitHub
+  artifact ID `9899808630`, ZIP size `6,472,041` bytes.
+- Installer: `SpotDIY_0.1.0_x64-setup.exe`, `6,489,236` bytes.
+- SHA-256:
+  `D52A17EF5A69F514DFE20C98EAD904543F8FA18599FE0DE74CAFB3B62ACA95CB`.
+- `Get-AuthenticodeSignature`: `NotSigned`; no certificate or signing step
+  was attempted.
+- Silent clean install exited `0`; the installed executable was exercised.
+  Silent uninstall exited `0`, removed the isolated install root, and left
+  zero SpotDIY-owned packaged processes.
 
-- `pnpm typecheck`: PASS.
-- `pnpm exec eslint . --max-warnings 0`: PASS, zero warnings.
-- `pnpm test`: PASS, 25 files / 90 tests.
-- `pnpm build`: PASS. Main chunk is `404.04 kB` minified / `123.88 kB` gzip;
-  route chunks are lazy-loaded and no prior dynamic-import warning remains.
-- `pnpm exec playwright test`: PASS, 76/76 across the 1280, 1920, 2560, and
-  Plan 15 ultrawide projects. The accessibility subset is 6/6 across the
-  three standard viewport projects.
-- axe-core `4.13.0`: targeted representative route suite PASS with zero
-  serious or critical violations at 1280, 1920, and 2560 widths.
-- Keyboard coverage includes Ctrl+K, primary navigation, context actions,
-  radial fallback, inspector, queue drawer, visual navigators, and Theme
-  Studio focus/reduced-motion paths.
+## Packaged functional evidence
 
-## Native, package, and dependency gates
+Using the exact CI executable, these passed with app exit code `0` and owned
+process cleanup: regular playback/restart; Plan 08 playlists, collections,
+queue, and snapshot persistence; Plan 09 lyrics, bookmarks, A/B loop, preset,
+queue, restart, and no-autoplay; Plan 11 schema migration, shell, inspector,
+appearance, queue, lyrics, restart, and no-autoplay; Plan 12 schema migration,
+SMTC, tray, shortcut, overlays, click-through recovery, output profiles, and
+restart; Plan 13 Standard/Portable transitions; Plan 14 history, sessions,
+Private Session, Temporary Mode, smart playlist preview/mix, analytics, and
+restart; and Plan 15 visual routes, native dataset contract, local preview,
+Theme Studio, and restart isolation.
 
-- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`: PASS before the
-  final documentation-only changes; passed after the last native edit.
-- `cargo clippy`, `cargo test`, and `pnpm tauri build`: BLOCKED by the local
-  Visual Studio installation. The x64 developer shell is present, but the
-  installation lacks MSVC headers/libraries (`stdarg.h`, `stdint.h`, and later
-  `msvcrt.lib`). No system installation was modified.
-- `pnpm audit --audit-level high`: PASS — no known vulnerabilities.
-- `pnpm audit --prod --audit-level moderate`: PASS — no known vulnerabilities.
-- `cargo audit`: BLOCKED. Installing the pinned `cargo-audit 0.22.2` failed at
-  native linking because `msvcrt.lib` is unavailable; this is not reported as
-  PASS.
-- Rust dependency metadata: `cargo metadata --locked --format-version 1`
-  completed and was used for `THIRD_PARTY_NOTICES.md`.
+The Plan 11/12/14 legacy database fixtures used a temporary Python standard-
+library SQLite command shim because `sqlite3.exe` is not installed on the
+host. The shim was verification-only, was removed, and added no dependency or
+repository artifact. The exact package search smoke also passed local search,
+provider failure isolation, Spotify gating, and cancellation boundary.
 
-## Performance and security
+## Provider, download, and privacy boundaries
 
-- Synthetic layout harness: Music Map p95 `295.40 ms`; Galaxy p95 `64.87 ms`.
-- Packaged launch, idle, playback, and native 5,000-row SQL measurements are
-  BLOCKED without a release executable. See
-  `docs/SpotDIY-Vault/Research/performance-baseline.md`.
-- Process execution uses structured arguments for mpv, FFmpeg, and yt-dlp;
-  no shell interpolation was found at those boundaries.
-- Backup traversal, symlink/reparse, canonical containment, staged rollback,
-  and cleanup ownership checks remain covered by the existing Plan 13 native
-  tests; rerunning them is blocked with the same native compiler failure.
-- No new arbitrary path, URL, shell/process, raw SQL, or generic mutation IPC
-  boundary was introduced. Existing CSP was not broadened.
-- Tracked-file secret scan found no credential; the only pattern match was the
-  documented illustrative `NEO4J_PASSWORD` text in the Graphify skill.
-- No tracked `.env`, runtime SQLite database, `.spotdiy` archive, real media,
-  managed binary, Playwright report, or credential dump was found.
-- Analytics remains local-only; Private Session is non-writing, Temporary Mode
-  is non-durable, visual exploration performs no network work, and preview
-  does not write analytics/history.
+- Local search and provider isolation pass in the packaged smoke. Spotify is
+  disabled without authorization; YouTube/SoundCloud are explicit missing-
+  `yt-dlp` states in the isolated profile.
+- Live YouTube/SoundCloud metadata was not run because `yt-dlp` is unavailable.
+  Spotify authorization was not available. Live download is
+  `SKIPPED — no approved legal live-download fixture`.
+- Structured process arguments, path containment, archive validation,
+  symlink/reparse rejection, staged rollback, and cleanup ownership are
+  covered by the CI Rust suite and packaged storage checks.
+- No tracked secrets, runtime database, archive, real media, or generated
+  diagnostic artifact was found. Analytics, Private Session, Temporary Mode,
+  visual exploration, and preview retain their documented local-only
+  boundaries.
 
-## Release and regression status
+## Performance
 
-- NSIS filename, size, SHA-256, Authenticode status, clean install/uninstall,
-  Standard/Portable install, and packaged Plan 1–15 acceptance: BLOCKED by the
-  missing release executable. Signing was not attempted; no certificate was
-  generated and no unsigned installer claim is made.
-- Live YouTube/SoundCloud metadata checks: not required for this local release
-  gate and not run.
-- Live download: `SKIPPED — no approved legal live-download fixture`.
-- Existing deterministic provider/download, backup, playlist/queue,
-  analytics, visual, preview, and restart harnesses remain the intended local
-  regression path; native execution awaits a repaired MSVC host.
+Frontend layout proxies pass: Music Map median/p95 `123.83/154.02 ms` and
+Galaxy median/p95 `14.83/48.24 ms`. Five fresh-profile cold launches pass at
+median `0.541 s`, p95/max `0.624 s`.
 
-## Commit and delivery
+The full process-tree idle sample was `6.56%` CPU / `448.8 MiB`; the parent
+alone was `2.50%` / `40.0 MiB`. The 60-second local playback sample reached
+`60059 ms` and peaked at `57.81%` / `522.5 MiB` across SpotDIY, WebView2, and
+owned mpv. These exceed the requested `2% / 350 MiB` idle and `10% / 450 MiB`
+playback budgets. Native 5,000-track SQL and timed packaged render readiness
+remain unmeasured. See
+`docs/SpotDIY-Vault/Research/performance-baseline.md`.
 
-Plan 16 is committed and pushed as `5dfdd1e`. No tag or GitHub Release was
-created. Gmail is not an available connector in this session, so the requested
-completion email was not sent.
+## Repository and handoff
 
-## Graphs and handoff
-
-- `graphify update .`: PASS; graph JSON/report refreshed to 5,625 nodes,
-  12,674 edges, and 271 communities. The HTML visualization was skipped by
-  Graphify's 5,000-node safety limit. CodeGraph is unavailable because no
-  command/index is present.
-- The next step is to repair the MSVC installation and rerun the
-  native/package gates in a clean detached worktree; only then can a release
-  be considered.
+- SQLite schema is `9`; `.spotdiy` format is `1`; no migration 10, updater,
+  tag, GitHub Release, or Gmail message was created.
+- `CARGO_TARGET_DIR` remains external and repository-local
+  `src-tauri\target` is absent. `memory.zip` is absent. The actual checkout
+  began clean apart from tracked history; no claimed unrelated `.gitignore`
+  or Plan 05 deletions were present.
+- `graphify update .` completed after the source change with no topology change;
+  CodeGraph remains unavailable.
+- Full 27-group evidence is in
+  `docs/SpotDIY-Vault/Sessions/full-feature-acceptance.md`.

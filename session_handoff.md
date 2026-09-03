@@ -350,3 +350,22 @@ the graph exceeded its 5,000-node safety limit. CodeGraph remains unavailable.
 Required next step: repair the Visual Studio x64 MSVC installation, create a
 clean detached release worktree from the implementation commit, and rerun
 native and package gates. Do not start Plan 17.
+
+## Plan 16 final handoff — 2026-09-03
+
+The previous Plan 16 note is superseded by the verified release evidence
+below. Repair SHA `39b79bc63396897b6ddfaf81cce3cb2bd3180c2a` is pushed to
+`origin/main`; GitHub Actions run `33769072435` is green for the exact SHA with
+Rust `1.98.1-x86_64-pc-windows-msvc`, frontend, RustSec, and NSIS package jobs.
+
+The exact installer was hash-checked, clean-installed, exercised, and
+uninstalled. Regular playback, provider isolation, Plans 08/09/11/12/13/14/15,
+and Standard/Portable packaged smokes pass. The 27-group feature matrix is at
+`docs/SpotDIY-Vault/Sessions/full-feature-acceptance.md`.
+
+Plan 16 remains `PARTIAL`: broad process-tree idle is `6.56% / 448.8 MiB`,
+60-second playback peaks at `57.81% / 522.5 MiB`, and native SQL/timed packaged
+render budgets are unmeasured. Local native rebuild remains blocked by missing
+MSVC `excpt.h` and `msvcrt.lib`. No tag, release, email, reviewer loop, or
+Plan 17 was created. Keep the work stopped in Plan 16 until the performance
+gates are addressed or their authoritative process scope is decided.

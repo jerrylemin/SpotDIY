@@ -1,6 +1,6 @@
 # SpotDIY project state
 
-State date: 2026-09-02
+State date: 2026-09-03
 
 ## Repository
 
@@ -14,12 +14,12 @@ State date: 2026-09-02
 - Plan 10 implementation commits: `cc28ba1`, `f2a5995`, `850bc82`, `8c62aed`, and `6eb231d`.
 - Plan 11 implementation commits: `e5129a0`, `f5562e1`, `0012a43`, `0026146`, `dba1f24`, `d631a2a`, `d2199d5`, `e072fec`, and `15031bf`.
 - Plan 12 implementation commits: `95eb41b`, `b7daac6`, `d9b58c3`, `e4793b6`, and `3d39e1d`.
-- Delivery status: Plan 12 implementation and final verification are complete; this document is part of the documentation closure boundary.
+- Delivery status: Plan 16 release verification is `PARTIAL`; exact CI/package and functional packaged gates pass, while broad runtime performance budgets fail.
 
 ## Runtime
 
 - Frontend: React 19, TypeScript 6 strict, Vite 8, TanStack Router/Query, Zustand, Zod.
-- Native: Tauri 2, Rust stable MSVC, SQLite WAL, typed serialized DTOs, and runtime frontend parsing.
+- Native: Tauri 2, Rust `1.98.1-x86_64-pc-windows-msvc`, SQLite WAL, typed serialized DTOs, and runtime frontend parsing.
 - Library: `LibraryService` owns persistent folder roots, recursive local indexing, metadata/artwork/fingerprint evidence, watcher reconciliation, and managed-source path validation.
 - Playback: `PlaybackService` is the sole serialized controller. It owns the persistent ID-only queue, checkpointed position, immutable snapshots, transport, repeat/shuffle/previous/EOF policy, source switching, recovery, and shutdown.
 - Playlists: `PlaylistService` owns durable playlists, seeded Inbox, playlist items, one-shot branches, likes, ratings, tags, and bounded collection reads.
@@ -402,3 +402,21 @@ release artifact or completion claim is recorded. See
 Graphify refreshed the final code state to 5,625 nodes, 12,674 edges, and 271
 communities; its HTML visualization was skipped at the 5,000-node safety
 limit. CodeGraph remains unavailable.
+
+## Plan 16 final release evidence — 2026-09-03
+
+Repair commit `39b79bc63396897b6ddfaf81cce3cb2bd3180c2a` is pushed to
+`origin/main`. GitHub Actions run `33769072435` passed for that exact SHA with
+the pinned Rust `1.98.1-x86_64-pc-windows-msvc`, frontend, RustSec, and NSIS
+package jobs. The artifact is `spotdiy-nsis-39b79bc...`, ID `9899808630`; its
+`SpotDIY_0.1.0_x64-setup.exe` payload is 6,489,236 bytes, SHA-256
+`D52A17EF5A69F514DFE20C98EAD904543F8FA18599FE0DE74CAFB3B62ACA95CB`, and
+`NotSigned`.
+
+The exact package passed regular playback, Plans 08–15 packaged smokes,
+provider isolation/search, clean install/uninstall, and owned-process cleanup.
+The functional acceptance matrix has all 27 rows `PASS`. Plan 16 remains
+`PARTIAL` because the broad process-tree idle sample was 6.56% / 448.8 MiB,
+the 60-second playback sample peaked at 57.81% / 522.5 MiB, and native SQL /
+timed packaged render readiness were not measured. The local MSVC installation
+still lacks `excpt.h` and `msvcrt.lib`; CI is the native release authority.

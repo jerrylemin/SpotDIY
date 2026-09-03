@@ -38,11 +38,11 @@ pnpm tauri dev # native Tauri window
 
 ## Release-candidate status
 
-The Plan 16 quality work is currently `PARTIAL`: frontend, browser/a11y,
-JavaScript audit, visual identity/capability fixes, and synthetic layout
-measurements pass. Native compilation, RustSec, packaging, installer checks,
-and packaged acceptance are blocked on the current host's incomplete MSVC
-installation. Evidence is in
+The Plan 16 release candidate is currently `PARTIAL`: the exact pinned CI
+native/frontend/package jobs, NSIS artifact, clean install/uninstall, and
+packaged feature smokes pass. The broad packaged process-tree performance
+sample exceeds the requested playback budget, and the local host still lacks
+MSVC headers needed for a native rebuild. Evidence is in
 [`docs/SpotDIY-Vault/Sessions/final-verification.md`](docs/SpotDIY-Vault/Sessions/final-verification.md).
 
 ## Documentation

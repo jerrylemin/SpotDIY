@@ -548,3 +548,28 @@ below.
   passed, refreshing 5,625 nodes, 12,674 edges, and 271 communities; the HTML
   visualization was skipped at Graphify's 5,000-node safety limit. CodeGraph is
   unavailable.
+
+## 2026-09-03 - Plan 16 final release verification
+
+- Repair SHA `39b79bc63396897b6ddfaf81cce3cb2bd3180c2a` passed GitHub Actions
+  run `33769072435`. Rust used exact `1.98.1-x86_64-pc-windows-msvc`; fmt,
+  Clippy, all-target tests, cargo audit, frontend checks, Playwright, and NSIS
+  packaging passed.
+- Local frontend verification passed: typecheck, zero-warning ESLint, 91
+  Vitest tests across 26 files, build, and 76 Playwright tests. Local native
+  compilation remains blocked by the host's missing `excpt.h` and `msvcrt.lib`.
+- Artifact `9899808630` was downloaded and hash-checked. Installer
+  `SpotDIY_0.1.0_x64-setup.exe` is 6,489,236 bytes, SHA-256
+  `D52A17EF5A69F514DFE20C98EAD904543F8FA18599FE0DE74CAFB3B62ACA95CB`, and
+  `NotSigned`. Clean install/uninstall passed with no owned process left.
+- Exact packaged regular, provider, Plans 08/09/11/12/13/14/15, and
+  Standard/Portable storage smokes passed. The migration smokes used a
+  temporary Python stdlib SQLite CLI shim because the host lacks `sqlite3.exe`;
+  it was removed after verification.
+- Performance evidence is mixed: fresh cold-launch p95 `0.624 s` and frontend
+  layout proxies pass, but broad idle is `6.56% / 448.8 MiB` and 60-second
+  playback peaks at `57.81% / 522.5 MiB`; native SQL and timed packaged render
+  readiness remain unmeasured. Release status is `PARTIAL`, not complete.
+- `src-tauri\\target` is absent, `CARGO_TARGET_DIR` is external, schema is 9,
+  `.spotdiy` format is 1, and no tag, GitHub Release, certificate, Gmail
+  message, or Plan 17 work was created.

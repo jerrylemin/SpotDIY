@@ -4,18 +4,19 @@
 |---|---|---|
 | Frontend type safety | `pnpm typecheck` | Pass. Strict playback/library/settings DTOs and command arguments are checked. |
 | Frontend lint | `pnpm lint` | Pass. |
-| Frontend behavior | `pnpm test` | Pass: 78 Vitest tests across 21 files, including Windows integration DTO parsing, browser-preview state, shortcut/profile controls, inspector DTO parsing, capability-aware actions, shell state, and existing playback/library/lyrics behavior. |
+| Frontend behavior | `pnpm test` | Pass: 91 Vitest tests across 26 files, including Plan 16 preview/visual capability/order regressions and existing playback/library/lyrics behavior. |
 | Frontend build | `pnpm build` | Pass. Existing Browserslist/Tailwind content notices are non-fatal. |
 | Rust formatting | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` | Pass. |
-| Rust quality | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | Pass. |
-| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | Pass: 365 unit tests plus one synthetic mpv integration test, including schema-7-to-8 preservation, Windows settings/overlay/shortcut/SMTC/output behavior, inspector privacy, playback, persistence, and existing service behavior. |
-| Browser playback | `pnpm exec playwright test` | Pass: 69 tests across 1280, 1920, and 2560 viewport projects; includes browser-preview Windows settings/overlay state, real-data Home, persisted/ephemeral inspectors, player modes, command palette, source-aware shell behavior, appearance, context-menu keyboard paths, responsive overflow, and existing playback coverage. |
-| Real mpv | Windows `mpv_smoke` integration gate | Pass with local `v0.41.0-dev-g41f6a6450`; synthetic WAV transport, device, EOF, shutdown, and process-exit behavior verified. |
-| Packaged lifecycle | `scripts/packaged-playback-smoke.ps1` and `scripts/packaged-windows-integration-smoke.ps1` | Pass with release executable: regular playback/restart cleanup, Plan 11 migration/shell/restart, and Plan 12 schema-8 tray/SMTC/shortcut/overlay/click-through/output-profile/restart cleanup. |
-| Release | `pnpm tauri build` | Pass. Release executable and NSIS bundle built with external `C:\CargoTarget\SpotDIY`; no repository-local `src-tauri\target`. |
-| Provider contracts | Plan 05 native adapter/search tests and metadata smoke | Pass: 250 Rust tests include provider registry, local search, yt-dlp adapters, Spotify PKCE/error mapping, timeouts, cancellation, sorting, and cache bounds; opt-in YouTube/SoundCloud metadata smoke returned 25 entries each. |
-| Persistence boundary | Schema and restart smoke | Pass: migration 8 preserves schema-7 settings and adds only Windows integration settings; shortcut/profile records persist, while overlay visibility and click-through remain session-only. |
-| Visual follow-up | Playwright screenshots | Pass: Plan 12 extends the Plan 11 Home/player/inspector coverage with browser-preview Windows controls, overlay state, focus, reduced motion, context actions, icon rendering, responsive guards, and the 1080-pixel height fallback. |
+| Rust quality | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | CI PASS on exact Rust `1.98.1-x86_64-pc-windows-msvc`; local host compile is blocked by missing MSVC headers/libraries. |
+| Rust behavior | `cargo test --manifest-path src-tauri/Cargo.toml --all-targets` | CI PASS for repair SHA `39b79bc`, including migration 9, playback, persistence, Windows, backup, analytics, visual, preview, and regression coverage. |
+| Browser playback | `pnpm exec playwright test` | Pass: 76 tests across 1280, 1920, 2560, and Plan 15 ultrawide projects. |
+| Real mpv | CI `mpv_smoke` plus packaged 60-second playback | Pass: exact CI native integration and packaged WAV playback reached `60059 ms` with owned-process cleanup. |
+| Packaged lifecycle | Plan 08/09/11/12/13/14/15 smoke scripts | Pass with exact CI executable: playback/restart, migrations, Windows integration, Standard/Portable storage, analytics/privacy, visual routes, preview, Theme Studio, and cleanup. |
+| Release | GitHub Actions run `33769072435` | Pass: exact pinned NSIS artifact uploaded; installer SHA-256 and unsigned status are recorded in `docs/SpotDIY-Vault/Sessions/final-verification.md`. |
+| Provider contracts | Native/frontend tests and exact packaged search smoke | Pass: local search, provider isolation, Spotify gate, missing-yt-dlp states, and cancellation boundary; live upstream checks skipped. |
+| Persistence boundary | Schema/restart package matrix | Pass: schema 9 and format 1 remain current; migration and restart boundaries pass, with private/temporary state non-durable. |
+| Visual follow-up | 76 Playwright tests and Plan 15 package smoke | Pass: visual routes, keyboard/focus, capability actions, local preview, Theme Studio, and responsive guards. |
+| Performance budgets | Synthetic layout + packaged process samples | Partial: layout and cold launch pass; broad idle/playback process-tree budgets fail and native SQL/render timings remain unmeasured. |
 
 ## Plan 12 verification
 
@@ -300,29 +301,26 @@
 
 ## Plan 16 final verification — 2026-09-03
 
-- Frontend: `pnpm typecheck`, `pnpm exec eslint . --max-warnings 0`,
-  `pnpm test`, and `pnpm build` pass. Vitest reports 90 tests across 25
-  files; ESLint reports zero warnings. The build has a 404.04 kB minified main
-  chunk and lazy secondary route chunks.
-- Browser/a11y: `pnpm exec playwright test` passes 76/76 across 1280, 1920,
-  2560, and the Plan 15 ultrawide project. The axe subset reports zero serious
-  or critical violations; keyboard/focus/reduced-motion paths pass.
-- Performance: the ten-run synthetic 5,000-track harness reports Music Map
-  p95 295.40 ms and Galaxy p95 64.87 ms. Packaged launch/idle/playback and
-  native VisualExplorer SQL budgets are blocked without a release executable.
-- Native: `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` passes.
-  Clippy and all-target tests are BLOCKED by missing MSVC headers/libraries
-  (`excpt.h`, `stdarg.h`, `stdint.h`, `vcruntime.h`).
-- Audit: both configured pnpm audits pass with no known vulnerabilities.
-  `cargo metadata --manifest-path src-tauri/Cargo.toml --locked` reports 596
-  packages and one workspace member. RustSec remains BLOCKED because
-  `cargo-audit 0.22.2` could not link without `msvcrt.lib`.
-- Packaging/install: `pnpm tauri build`, NSIS hash/signature, clean install,
-  uninstall, Standard/Portable install, and packaged smokes are BLOCKED by
-  the same native toolchain failure. No installer or certificate was created.
+- Frontend: typecheck, zero-warning ESLint, 91 Vitest tests across 26 files,
+  and build pass. Playwright passes 76/76 across 1280, 1920, 2560, and Plan 15
+  ultrawide projects; the axe subset reports zero serious/critical violations.
+- Performance: current synthetic p95 is Music Map `154.02 ms` and Galaxy
+  `48.24 ms`. Five fresh packaged launches pass at p95 `0.624 s`. Broad idle
+  is `6.56% / 448.8 MiB` and 60-second playback peaks at `57.81% / 522.5 MiB`,
+  so the requested process-tree budgets fail; native SQL/render timings are
+  unmeasured.
+- Native/audit/package: GitHub Actions run `33769072435` passes exact Rust
+  `1.98.1-x86_64-pc-windows-msvc`, fmt, Clippy, all-target tests, cargo audit,
+  frontend gates, and NSIS packaging for repair SHA `39b79bc`. Local native
+  compilation remains blocked by missing MSVC headers/libraries.
+- Install/runtime: the exact NSIS artifact was hash-checked, clean-installed,
+  exercised, uninstalled with exit `0`, and left no owned packaged processes.
+  Regular, Plan 08/09/11/12/13/14/15, provider-search, and storage smokes
+  pass. The full 27-row feature matrix is in
+  `docs/SpotDIY-Vault/Sessions/full-feature-acceptance.md`.
 - Safety: schema 9, archive format 1, external Cargo output, and absent
-  repository-local `src-tauri\\target` remain intact. The primary worktree
-  preserves the three unrelated pre-existing changes.
+  repository-local `src-tauri\\target` remain intact. No unrelated worktree
+  changes or `memory.zip` were present.
 
 `graphify update .` passes at the final code state with 5,625 nodes, 12,674
 edges, and 271 communities; the HTML visualization is skipped because the

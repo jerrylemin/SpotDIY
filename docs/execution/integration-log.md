@@ -337,3 +337,22 @@
 - Plan 16 is committed and pushed as `5dfdd1e`; the primary checkout's
   unrelated `.gitignore` change and two deleted Plan 05 reports were not
   touched.
+
+## 2026-09-03 - Plan 16 blocker repair and release verification
+
+- Repaired preview state cleanup and reaper generation ordering, deterministic
+  visual genre ordering, positive/negative capability coverage, exact Rust
+  toolchain pinning, CSP `connect-src`, and the third-party `windows` notice.
+- Corrected the packaged search harness so command ordering is deterministic
+  and a naturally completed missing-provider search is not misreported as a
+  cancellation failure.
+- Repair commit is `39b79bc63396897b6ddfaf81cce3cb2bd3180c2a`; it is pushed to
+  `origin/main`. The exact CI run `33769072435` passed Rust, frontend, audit,
+  and NSIS package jobs.
+- The exact NSIS artifact passed install/uninstall and all regular, provider,
+  Plan 08/09/11/12/13/14/15 packaged smoke boundaries. No product dependency
+  or repository artifact was added for the temporary Python SQLite fixture
+  shim.
+- Plan 16 remains partial because broad process-tree idle/playback budgets
+  fail; the complete evidence and 27-group matrix are recorded in the Plan
+  16 final-verification and full-feature-acceptance session notes.
