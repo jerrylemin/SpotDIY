@@ -502,14 +502,12 @@ impl<'database> SettingsRepository<'database> {
 
     pub fn set_setting(&self, setting: SettingValue) -> Result<SettingsSnapshot, SettingsError> {
         match &setting {
-            SettingValue::Theme(Theme::Custom) => {
-                if self.get_snapshot()?.custom_theme.is_none() {
-                    return Err(SettingsError::InvalidValue {
-                        key: "theme",
-                        reason: "a valid custom theme must be stored before selecting custom"
-                            .to_owned(),
-                    });
-                }
+            SettingValue::Theme(Theme::Custom) if self.get_snapshot()?.custom_theme.is_none() => {
+                return Err(SettingsError::InvalidValue {
+                    key: "theme",
+                    reason: "a valid custom theme must be stored before selecting custom"
+                        .to_owned(),
+                });
             }
             SettingValue::CustomTheme(value)
                 if value.is_none() && self.get_snapshot()?.theme == Theme::Custom =>
