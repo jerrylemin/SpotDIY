@@ -22,9 +22,7 @@ downloads/
 Data/
 
 # Tooling indexes and local reports
-.codegraph/
-.graphify/
-graphify-out/
+
 coverage/
 playwright-report/
 test-results/
