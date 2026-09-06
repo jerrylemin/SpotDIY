@@ -60,8 +60,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\scripts\\packaged-playback-smoke.ps1": {
-    "mtime": 1788511185.2121437,
-    "ast_hash": "392a79d483c38a6e0e7bbf5fac2c161d",
+    "mtime": 1788726358.3154483,
+    "ast_hash": "6afcfeb74e3df525473b747a208c960e",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\scripts\\packaged-search-smoke.mjs": {
@@ -195,8 +195,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\components\\inspector\\TrackInspector.tsx": {
-    "mtime": 1788719677.9958649,
-    "ast_hash": "d0036f7811af52d26a6d7a7b2e8f3973",
+    "mtime": 1788726358.8900626,
+    "ast_hash": "bed52446220f4d882e5600ee9551bacc",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\components\\library\\LibraryFolderRow.tsx": {
@@ -300,8 +300,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\components\\shell\\CommandPalette.tsx": {
-    "mtime": 1788719478.4782615,
-    "ast_hash": "19d8d482f3e0baf35fd09621da7a0f21",
+    "mtime": 1788726358.9632976,
+    "ast_hash": "52a5108d6730a5c90804ca8a96a16af2",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\components\\shell\\PlayerBar.tsx": {
@@ -370,8 +370,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\features\\theme\\ThemeStudio.tsx": {
-    "mtime": 1788719317.3096414,
-    "ast_hash": "b83f6ef16162eab9c64f349a824cdde5",
+    "mtime": 1788726359.0451794,
+    "ast_hash": "d28af3218e41c16fac4a66279e452d40",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\features\\theme\\theme-studio\\dynamic-accent.ts": {
@@ -380,18 +380,18 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\features\\visual-exploration\\drag-actions.ts": {
-    "mtime": 1788719438.224919,
-    "ast_hash": "6b3464a6d695a9e101e2d094e4259405",
+    "mtime": 1788726359.21753,
+    "ast_hash": "b6db9940d11569b04d780c89be186df2",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\features\\visual-exploration\\TrackActionDragPanel.tsx": {
-    "mtime": 1788719438.226924,
-    "ast_hash": "df377e73a0edcfb826055e10484ce3be",
+    "mtime": 1788726359.1109722,
+    "ast_hash": "ab5c875a4435a7416661e39a557303cc",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\features\\visual-exploration\\VisualTrackActions.tsx": {
-    "mtime": 1788719451.8438036,
-    "ast_hash": "c08480cd396ff45c86d3fafe98e08590",
+    "mtime": 1788726359.1633189,
+    "ast_hash": "ba08f6c7c9ce844f23c6d8f234bd28c8",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\hooks\\useAnalytics.ts": {
@@ -480,8 +480,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\pages\\LibraryGalaxyPage.tsx": {
-    "mtime": 1788719438.2311614,
-    "ast_hash": "346609c6dbf4b43eb3131b828abf851a",
+    "mtime": 1788726359.273136,
+    "ast_hash": "add09dd981118953c009f039f09a3116",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\pages\\LibraryPage.tsx": {
@@ -495,13 +495,13 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\pages\\MusicMapPage.tsx": {
-    "mtime": 1788719438.230104,
-    "ast_hash": "7c80e283187d682f4fbbf6da246b1044",
+    "mtime": 1788726359.3373952,
+    "ast_hash": "e64fd6ada5da461bdf990e1faec2b14b",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\pages\\PlaylistsPage.tsx": {
-    "mtime": 1788720690.3906279,
-    "ast_hash": "843fc04205c9376cd851abb0dc3ffd96",
+    "mtime": 1788726373.100604,
+    "ast_hash": "d95690020c022a70133a6534673b583a",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\pages\\SearchPage.tsx": {
@@ -515,13 +515,13 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\pages\\ThemeStudioPage.tsx": {
-    "mtime": 1788719317.319042,
-    "ast_hash": "0b58b129936ab28e748bf8fd407fe6ad",
+    "mtime": 1788726359.4735253,
+    "ast_hash": "5f8ac44461f6f22844c46498720c30f3",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\services\\ipc.ts": {
-    "mtime": 1788694123.5976746,
-    "ast_hash": "16a97df84b457d592a3d56d8289701aa",
+    "mtime": 1788726359.5448043,
+    "ast_hash": "5a539396626ef89d85b9392d8657f255",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\stores\\overlay-store.ts": {
@@ -630,8 +630,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\lib.rs": {
-    "mtime": 1788722866.434244,
-    "ast_hash": "9d3258dfe16b350df308df0fcbce58e9",
+    "mtime": 1788726358.5682752,
+    "ast_hash": "8fdfae20a1df31be4ebdec0b35ab1ceb",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\main.rs": {
@@ -670,8 +670,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\db\\mod.rs": {
-    "mtime": 1788558156.7965755,
-    "ast_hash": "d630b22a43abe9b37c2b3c758ac78c0b",
+    "mtime": 1788726358.5027275,
+    "ast_hash": "ac0036ac81638cbbdb753d6aed2bd36e",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\db\\repository.rs": {
@@ -730,8 +730,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\library\\metadata.rs": {
-    "mtime": 1788627812.178462,
-    "ast_hash": "377ceeb5a61625a354ed5507a0bff22b",
+    "mtime": 1788726358.631646,
+    "ast_hash": "4c0d8d7798a985296ff77c0b3a28cbc3",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\library\\mod.rs": {
@@ -775,8 +775,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\playback\\mod.rs": {
-    "mtime": 1788559145.017151,
-    "ast_hash": "b73bf53452bab278bd2266945d19f204",
+    "mtime": 1788726358.69797,
+    "ast_hash": "d0d7b6f59a83480d9e126843ffbc7c2e",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\playback\\mpv.rs": {
@@ -810,8 +810,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\preview\\mod.rs": {
-    "mtime": 1788446757.0,
-    "ast_hash": "992d1673e3ff4e3a9b38a04c6fd4e510",
+    "mtime": 1788726358.762305,
+    "ast_hash": "faf45fb8dc48110a90cd772cce89a3d6",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\queue\\mod.rs": {
@@ -895,8 +895,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\visual_explorer\\mod.rs": {
-    "mtime": 1788446558.0,
-    "ast_hash": "7267a565e73c7e3ca54bd4b3149c06fa",
+    "mtime": 1788726358.826387,
+    "ast_hash": "ed039096b932b3df6d76ce80337e1e06",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src-tauri\\src\\windows\\mod.rs": {
@@ -1045,8 +1045,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\tests\\visual-exploration.test.ts": {
-    "mtime": 1788719438.2317224,
-    "ast_hash": "97f080621e811f67da6503f60d5e3fcc",
+    "mtime": 1788726359.8043995,
+    "ast_hash": "f310636568c8c1547469a6b28b92170b",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\tests\\windows-integration.test.tsx": {
@@ -1055,8 +1055,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\tests\\playwright\\accessibility.spec.ts": {
-    "mtime": 1788722022.520553,
-    "ast_hash": "f0e443192694204ea38ed7ba179084dc",
+    "mtime": 1788726359.6749477,
+    "ast_hash": "765e33a33d1aba4b3a342d16f97133ba",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\tests\\playwright\\design-system.spec.ts": {
@@ -1075,8 +1075,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\tests\\playwright\\plan15-visual-exploration.spec.ts": {
-    "mtime": 1788722084.1241534,
-    "ast_hash": "504e069ef1a0f8f59fd1d5e12fdb6f1a",
+    "mtime": 1788726359.7354999,
+    "ast_hash": "0df8f9ed9347fcccba578ae61718ba6f",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\tests\\playwright\\playback.spec.ts": {
@@ -1115,12 +1115,12 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\DECISION_LOG.md": {
-    "mtime": 1788559589.9547029,
-    "ast_hash": "e1e4739d8d1f7997f05bcb78714685fe",
+    "mtime": 1788726357.135316,
+    "ast_hash": "0c4509f376ea296282b2ac5f3a0219f9",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\feature_progress.md": {
-    "mtime": 1788671165.854367,
+    "mtime": 1788726358.2501981,
     "ast_hash": "3251b846c3227aa482a55f9ccd65c85d",
     "semantic_hash": ""
   },
@@ -1135,7 +1135,7 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\PROJECT_STATE.md": {
-    "mtime": 1788671165.8327215,
+    "mtime": 1788726357.20553,
     "ast_hash": "fbc63155898e3925bb1a90e766268db3",
     "semantic_hash": ""
   },
@@ -1145,28 +1145,28 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\README.md": {
-    "mtime": 1788671165.8343635,
+    "mtime": 1788726357.277961,
     "ast_hash": "5fa75c31b1036af39aafa9a9e34a37ae",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\session_handoff.md": {
-    "mtime": 1788671165.855482,
+    "mtime": 1788726358.3818517,
     "ast_hash": "4d3e457b07aacb3dafd1b08a991a57f1",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\setup_and_run.md": {
-    "mtime": 1788671165.856544,
+    "mtime": 1788726358.4405217,
     "ast_hash": "0cc3ae97b7f07e97f2cffa76d743e299",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\TEST_MATRIX.md": {
-    "mtime": 1788671165.835367,
+    "mtime": 1788726357.3444965,
     "ast_hash": "510ecdbbe728776c50acd55f62aa6a4a",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\THIRD_PARTY_NOTICES.md": {
-    "mtime": 1788559485.407747,
-    "ast_hash": "7c47ca13a1050616e86e43493966204e",
+    "mtime": 1788726357.4029908,
+    "ast_hash": "71f29ce2db720f6b8a3f8c4b96a4b239",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\.agents\\skills\\graphify\\SKILL.md": {
@@ -1265,8 +1265,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\execution\\integration-log.md": {
-    "mtime": 1788451132.0,
-    "ast_hash": "600b8ae95bb956fd87d1cb9cdc19cd87",
+    "mtime": 1788726358.0752237,
+    "ast_hash": "bbc5735affb96f28b04636304d4da2b7",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\execution\\milestones.md": {
@@ -1275,7 +1275,7 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\execution\\verification-log.md": {
-    "mtime": 1788671165.8513668,
+    "mtime": 1788726358.1297257,
     "ast_hash": "3ec7d260402edfe6435a42edbecb9a96",
     "semantic_hash": ""
   },
@@ -1305,13 +1305,13 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\05 Database.md": {
-    "mtime": 1788608984.806607,
-    "ast_hash": "7f4eab731490eccd1729869a995fe478",
+    "mtime": 1788726357.466672,
+    "ast_hash": "c758b45736237f7ca27af4d3eb7614e6",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\06 UI Design System.md": {
-    "mtime": 1788608984.8044899,
-    "ast_hash": "cac0918884073d06f6b289963d77383c",
+    "mtime": 1788726357.5293093,
+    "ast_hash": "6f4256041ae680ead15d895cc96aa89f",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\07 Provider Integrations.md": {
@@ -1320,8 +1320,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\08 Playback.md": {
-    "mtime": 1788723164.5958622,
-    "ast_hash": "d835afd30d6019376abef1d836ef762a",
+    "mtime": 1788726357.588938,
+    "ast_hash": "3de2cca77aac5ab489b84ff594ef6a76",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\09 Downloads.md": {
@@ -1340,13 +1340,13 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\12 Testing.md": {
-    "mtime": 1788560572.079877,
-    "ast_hash": "8d52218a102e0b7c0b4f7abaf0dfcd89",
+    "mtime": 1788726357.654824,
+    "ast_hash": "3c7cbefad9a6e1eddc3f2e73504a7f7a",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\13 Build and Release.md": {
-    "mtime": 1788510957.9096222,
-    "ast_hash": "0b665dfaf75f0bd5be9b3298d5aee97b",
+    "mtime": 1788726357.7741392,
+    "ast_hash": "a2e59148a0b4a632d8d125bfb31dbbe2",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\14 Roadmap.md": {
@@ -1360,13 +1360,13 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\16 Active Work.md": {
-    "mtime": 1788559662.844797,
-    "ast_hash": "33e77ddf5cbf7b1fcd5850ffc7a523b0",
+    "mtime": 1788726357.8348434,
+    "ast_hash": "fdcd1a3915979c3defe35a1a6c8e9dc1",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\17 Session Handoff.md": {
-    "mtime": 1788559662.8604221,
-    "ast_hash": "ee4f0858a86827ffed065c4167127e7e",
+    "mtime": 1788726357.8905957,
+    "ast_hash": "0fa7a58fc1e22d1cc46557fd0d07f02c",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\18 Advanced Visual Exploration.md": {
@@ -1495,7 +1495,7 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\Research\\performance-baseline.md": {
-    "mtime": 1788671165.835367,
+    "mtime": 1788726357.9477024,
     "ast_hash": "468b48a8754823fa21d5a40028fe5900",
     "semantic_hash": ""
   },
@@ -1525,7 +1525,7 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\SpotDIY-Vault\\Sessions\\final-verification.md": {
-    "mtime": 1788671165.837363,
+    "mtime": 1788726358.0119195,
     "ast_hash": "de12dc9174b10608ecec518eee32181d",
     "semantic_hash": ""
   },
@@ -1610,8 +1610,8 @@
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\superpowers\\plans\\16-quality-performance-and-release.md": {
-    "mtime": 1788451235.0,
-    "ast_hash": "664ca16beaa3ec7508d2ec350f6d296d",
+    "mtime": 1788726358.1853309,
+    "ast_hash": "4e604f5c44e1aa6c886900403fef12c4",
     "semantic_hash": ""
   },
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\docs\\superpowers\\specs\\2026-08-30-spotdiy-design.md": {
@@ -1922,6 +1922,41 @@
   "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\output\\playwright\\lyrics-redesign.png": {
     "mtime": 1788724442.6731346,
     "ast_hash": "23f633d10c76b9bda56bdd28aafba5b7",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\.codegraph\\.obsidian\\app.json": {
+    "mtime": 1788090122.7443874,
+    "ast_hash": "99914b932bd37a50b983c5e7c90ae93b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\.codegraph\\.obsidian\\appearance.json": {
+    "mtime": 1788090122.753179,
+    "ast_hash": "99914b932bd37a50b983c5e7c90ae93b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\.codegraph\\.obsidian\\core-plugins.json": {
+    "mtime": 1788090122.3624377,
+    "ast_hash": "7c877bea49eaeabb100563bd157b9051",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\.codegraph\\.obsidian\\workspace.json": {
+    "mtime": 1788090122.9325912,
+    "ast_hash": "f9972110d3dbc80684afff376c845d5b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\components\\smart\\SmartPlaylistPanel.tsx": {
+    "mtime": 1788726298.2214131,
+    "ast_hash": "0729fd3c6ef66b63ac7ecf3bc9bdd752",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\src\\hooks\\useSmartPlaylists.ts": {
+    "mtime": 1788726298.2305858,
+    "ast_hash": "58bf4697d1adf82e2932a77211b9b286",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\Administrator\\Documents\\MEGA\\SpotDIY\\graphify-out\\memory\\query_20260831_164140_searchservice_sourceadapter_search_request_events.md": {
+    "mtime": 1788194500.8434422,
+    "ast_hash": "89af8b182c680e9acf89fd018de7f365",
     "semantic_hash": ""
   }
 }

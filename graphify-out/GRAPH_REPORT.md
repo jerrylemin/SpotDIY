@@ -1,16 +1,16 @@
 # Graph Report - SpotDIY  (2026-09-07)
 
 ## Corpus Check
-- 329 files · ~327,940 words
+- 336 files · ~330,118 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 6008 nodes · 13979 edges · 298 communities (239 shown, 59 thin omitted)
+- 6076 nodes · 14042 edges · 300 communities (242 shown, 58 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 123 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b6c0bc25`
+- Built from commit: `4256350c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -324,22 +324,22 @@
   src/services/ipc.ts → scripts/packaged-playback-smoke.mjs
 - `revealLocalFile()` --calls--> `invoke()`  [INFERRED]
   src/services/ipc.ts → scripts/packaged-playback-smoke.mjs
-- `TrackInspectorProps` --references--> `TrackId`  [EXTRACTED]
-  src/components/inspector/TrackInspector.tsx → src/types/domain.ts
+- `ThemeReadout()` --calls--> `useTheme()`  [EXTRACTED]
+  tests/design-system.test.tsx → src/features/theme/theme-controller-model.ts
 
-## Communities (298 total, 59 thin omitted)
+## Communities (300 total, 58 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.09
 Nodes (52): aggregate_round_trip_preserves_artists_sources_and_provider_ids(), ArtistRepository, bool_from_integer(), bool_integer(), capabilities(), database_trigger_rejects_preferred_source_from_another_track(), fixture_track(), FromId (+44 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.20
-Nodes (15): validate_provider_url(), canonical_spotify_url(), duration_ms(), first_artwork(), non_empty(), normalize_album(), normalize_artist(), normalize_spotify_response() (+7 more)
+Cohesion: 0.23
+Nodes (13): validate_provider_url(), artist_tokens(), choose_sunnify_youtube_match(), first_artwork(), normalize_album(), normalize_artist(), normalize_match_text(), normalize_spotify_response() (+5 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.02
-Nodes (118): PlaybackE2EAdapterState, defaultPredicate(), defaultRule(), defaultValue(), FieldSpec, fieldSpecs, isIntegerField(), operationLabels (+110 more)
+Nodes (105): PlaybackE2EAdapterState, Album, AlbumId, Artist, ArtistId, ArtworkId, AudioDevice, AudioQuality (+97 more)
 
 ### Community 3 - "Community 3"
 Cohesion: 0.08
@@ -354,7 +354,7 @@ Cohesion: 0.12
 Nodes (16): code:block1 (/graphify                                             # full), code:bash ($(cat .graphify_python) -c "), code:bash ($(cat .graphify_python) -c "), code:bash (python3 -m graphify.watch INPUT_PATH --debounce 3), code:bash (graphify hook install    # install), code:bash (graphify claude install), code:bash (graphify claude uninstall  # remove the section), For --cluster-only (+8 more)
 
 ### Community 6 - "Community 6"
-Cohesion: 0.15
+Cohesion: 0.14
 Nodes (46): clean_database_reaches_latest_schema_with_core_tables(), configure_connection(), create_wal_safe_backup(), current_schema_version(), Database, DatabaseError, destructive_migration_creates_wal_safe_backup_before_apply(), failed_migration_rolls_back_schema_and_version() (+38 more)
 
 ### Community 7 - "Community 7"
@@ -362,8 +362,8 @@ Cohesion: 0.12
 Nodes (28): Album, Artist, capabilities(), default_page_size(), DomainError, LibraryFolder, LibraryFolderStatus, LibraryPage (+20 more)
 
 ### Community 8 - "Community 8"
-Cohesion: 0.16
-Nodes (23): accelerator_identity(), contrast_ratio(), custom_theme_validation_rejects_schema_and_color_shape_but_allows_low_contrast(), custom_theme_validation_rejects_schema_colors_unknown_tokens_and_contrast(), encode_setting(), GlobalShortcutAction, GlobalShortcutBinding, is_hex_color() (+15 more)
+Cohesion: 0.15
+Nodes (25): accelerator_identity(), contrast_ratio(), custom_theme_validation_rejects_schema_and_color_shape_but_allows_low_contrast(), custom_theme_validation_rejects_schema_colors_unknown_tokens_and_contrast(), encode_setting(), GlobalShortcutAction, GlobalShortcutBinding, is_hex_color() (+17 more)
 
 ### Community 9 - "Community 9"
 Cohesion: 0.10
@@ -590,24 +590,24 @@ Cohesion: 0.07
 Nodes (25): Current Spotify source matching — 2026-09-05, Next atomic task, Next atomic task, Next atomic task, Next atomic task, Next atomic task, Next atomic task, Next atomic task (+17 more)
 
 ### Community 93 - "Community 93"
-Cohesion: 0.10
-Nodes (30): AnalyticsHeatmap(), longWeekdays, shortWeekdays, ANALYTICS_HEATMAP_QUERY_KEY, ANALYTICS_OVERVIEW_QUERY_KEY, ANALYTICS_SESSIONS_QUERY_KEY, ANALYTICS_TIMELINE_QUERY_KEY, ANALYTICS_TOP_ARTISTS_QUERY_KEY (+22 more)
+Cohesion: 0.04
+Nodes (65): AnalyticsHeatmap(), longWeekdays, shortWeekdays, ANALYTICS_HEATMAP_QUERY_KEY, ANALYTICS_OVERVIEW_QUERY_KEY, ANALYTICS_SESSIONS_QUERY_KEY, ANALYTICS_TIMELINE_QUERY_KEY, ANALYTICS_TOP_ARTISTS_QUERY_KEY (+57 more)
 
 ### Community 94 - "Community 94"
-Cohesion: 0.27
+Cohesion: 0.29
 Nodes (15): case_only_root_variants_are_duplicates(), display_path(), FolderPathError, is_descendant(), is_path_within(), is_reparse_point(), normalize_file_path(), normalize_folder_path() (+7 more)
 
 ### Community 95 - "Community 95"
 Cohesion: 0.01
-Nodes (225): abLoopPresetIdSchema, abLoopPresetSchema, abLoopStateSchema, analyticsOverviewSchema, appStatusSchema, audioQualitySchema, bookmarkErrorCodeSchema, bookmarkErrorSchema (+217 more)
+Nodes (229): abLoopPresetIdSchema, abLoopPresetSchema, abLoopStateSchema, addLibraryFolders(), analyticsOverviewSchema, appStatusSchema, audioQualitySchema, bookmarkErrorCodeSchema (+221 more)
 
 ### Community 96 - "Community 96"
 Cohesion: 0.21
 Nodes (16): an_unpaired_rename_requests_reconciliation(), coalesce_events(), coalesces_duplicate_modifications_and_pairs_rename_events(), debounce_events(), event(), flush_pending_rename(), malformed_or_interrupted_rename_sequences_request_reconciliation(), notify_rescan_and_unknown_modifications_request_reconciliation() (+8 more)
 
 ### Community 97 - "Community 97"
-Cohesion: 0.05
-Nodes (87): ensurePlaybackBridge(), errorMessage(), refreshPlaybackSnapshot(), PREVIEW_QUERY_KEY, ensureQueueBridge(), errorMessage(), refreshQueueWorkspace(), advanceE2EQueue() (+79 more)
+Cohesion: 0.07
+Nodes (67): ensurePlaybackBridge(), errorMessage(), refreshPlaybackSnapshot(), PREVIEW_QUERY_KEY, advanceE2EQueue(), applyAbLoopPreset(), applyOutputProfile(), browserPreviewQueueWorkspace() (+59 more)
 
 ### Community 98 - "Community 98"
 Cohesion: 0.17
@@ -630,8 +630,8 @@ Cohesion: 0.13
 Nodes (28): cancelled_section(), escape_like(), failed_section(), local_album_match_returns_track(), local_artist_match_returns_track(), local_empty_query_returns_no_provider_request(), local_exact_title_ranks_first(), local_like_wildcards_are_literal() (+20 more)
 
 ### Community 103 - "Community 103"
-Cohesion: 0.14
-Nodes (63): ab_loop_presets_save_apply_and_delete_without_autoplay(), ab_loop_requires_a_valid_interval_and_routes_only_typed_backend_commands(), add_local_source(), an_invalid_requested_source_falls_back_to_the_first_valid_local_source(), an_invalid_requested_source_is_rejected_without_fallback(), analytics_error_to_playback(), bookmark_error_to_playback(), clear_queue_stops_without_treating_stop_as_eof() (+55 more)
+Cohesion: 0.13
+Nodes (66): ab_loop_presets_save_apply_and_delete_without_autoplay(), ab_loop_requires_a_valid_interval_and_routes_only_typed_backend_commands(), add_local_source(), an_invalid_requested_source_falls_back_to_the_first_valid_local_source(), an_invalid_requested_source_is_rejected_without_fallback(), analytics_error_to_playback(), bookmark_error_to_playback(), clear_queue_stops_without_treating_stop_as_eof() (+58 more)
 
 ### Community 104 - "Community 104"
 Cohesion: 0.48
@@ -726,8 +726,8 @@ Cohesion: 0.15
 Nodes (10): commandPalette, consoleErrors, deviceMenu, mute, playButton, progress, repeat, retryButton (+2 more)
 
 ### Community 137 - "Community 137"
-Cohesion: 0.07
-Nodes (44): LIBRARY_PAGE_QUERY_KEY, LIBRARY_STATUS_QUERY_KEY, libraryPageQueryKey(), useAddLibraryFolders(), useDeleteLocalFile(), useLibraryPage(), useLibraryProgress(), useLibraryStatus() (+36 more)
+Cohesion: 0.06
+Nodes (47): LIBRARY_PAGE_QUERY_KEY, LIBRARY_STATUS_QUERY_KEY, libraryPageQueryKey(), useAddLibraryFolders(), useDeleteLocalFile(), useLibraryPage(), useLibraryProgress(), useLibraryStatus() (+39 more)
 
 ### Community 138 - "Community 138"
 Cohesion: 0.49
@@ -738,8 +738,8 @@ Cohesion: 0.14
 Nodes (13): Concern, Exact argv, Files, Fix round 1, GREEN evidence, GREEN evidence, RED evidence, RED evidence (+5 more)
 
 ### Community 140 - "Community 140"
-Cohesion: 0.15
-Nodes (21): usePlayback(), useWindowsIntegration(), EdgeOverlay(), GamingOverlay(), artworkSource(), MiniOverlay(), OverlayFrame(), OverlayFrameProps (+13 more)
+Cohesion: 0.06
+Nodes (31): audio-recorder, backlink, bases, bookmarks, canvas, command-palette, daily-notes, editor-status (+23 more)
 
 ### Community 141 - "Community 141"
 Cohesion: 0.25
@@ -747,7 +747,7 @@ Nodes (12): Assert-Schema8Database(), Close-PackagedApp(), Get-MpvProcesses(), G
 
 ### Community 142 - "Community 142"
 Cohesion: 0.06
-Nodes (61): authorization_requests_no_scopes(), bind_loopback(), build_authorization_url(), build_search_url(), CachedAccessToken, callback_rejects_oauth_error(), callback_rejects_state_mismatch(), callback_requires_exact_path() (+53 more)
+Nodes (64): authorization_requests_no_scopes(), bind_loopback(), build_authorization_url(), build_search_url(), CachedAccessToken, callback_rejects_oauth_error(), callback_rejects_state_mismatch(), callback_requires_exact_path() (+56 more)
 
 ### Community 143 - "Community 143"
 Cohesion: 0.14
@@ -818,7 +818,7 @@ Cohesion: 0.08
 Nodes (47): ArtworkCache, ArtworkCacheEntry, ArtworkError, cache_is_content_addressed_and_does_not_rewrite_existing_bytes(), detect_image_format(), unsupported_artwork_is_reported_separately(), write_atomically(), FingerprintError (+39 more)
 
 ### Community 165 - "Community 165"
-Cohesion: 0.17
+Cohesion: 0.16
 Nodes (25): app_status(), app_status_reads_track_count_and_persisted_first_run_state(), app_status_with_runtime(), AppStatus, open_provider_result_rejects_non_https(), open_provider_result_rejects_wrong_host(), provider_capabilities(), provider_status_reports_local_folder_configuration() (+17 more)
 
 ### Community 166 - "Community 166"
@@ -830,8 +830,8 @@ Cohesion: 0.17
 Nodes (28): dataset_empty_state_is_bounded_and_read_only(), dataset_filters_orders_aggregates_and_does_not_leak_media_paths(), dataset_keeps_provider_only_capabilities_disabled(), dataset_orders_multiple_genres_deterministically(), dataset_reports_capabilities_for_an_indexed_managed_local_file(), dataset_reports_truncation_and_respects_hard_limit(), dataset_sql(), default_limit() (+20 more)
 
 ### Community 168 - "Community 168"
-Cohesion: 0.22
-Nodes (8): FakeState, mode_error_to_playback(), persistence_error(), playback_error_from_library(), playback_error_from_resolution_candidate(), playback_error_from_resolver(), PlaybackSnapshot, snapshot_repository_error()
+Cohesion: 0.14
+Nodes (5): clamp_position(), deterministic_tool_failure(), is_deterministic_tool_error(), is_recoverable_backend_failure(), playback_error_from_backend()
 
 ### Community 169 - "Community 169"
 Cohesion: 0.17
@@ -845,13 +845,17 @@ Nodes (14): art, downloadMode, local, longQuery, lyricsLink, openSearch(), searc
 Cohesion: 0.15
 Nodes (16): configured_mpv_path_validation_rejects_missing_non_mpv_and_directory_paths(), executable_names(), ffmpeg_executable_names(), find_development_mpv_on_disk(), find_ffmpeg_in_paths(), find_ffmpeg_on_path(), find_in_known_windows_locations(), find_mpv_in_paths() (+8 more)
 
+### Community 174 - "Community 174"
+Cohesion: 0.29
+Nodes (3): classify_error_response(), ReqwestSpotifyTransport, TokenWire
+
 ### Community 175 - "Community 175"
 Cohesion: 0.22
 Nodes (6): cancelledPromise, input, local, pages, providers, startedPromise
 
 ### Community 176 - "Community 176"
-Cohesion: 0.14
-Nodes (10): buildGalaxyLayout(), clusterFor(), GalaxyClusterMode, GalaxyLayout, galaxy, graph, layout, musicMap (+2 more)
+Cohesion: 0.13
+Nodes (22): AppShell(), useAppStatus(), SpotLogo(), CapabilityList(), errorMessage(), formatDuration(), formatSampleRate(), Overview() (+14 more)
 
 ### Community 177 - "Community 177"
 Cohesion: 0.25
@@ -886,12 +890,12 @@ Cohesion: 0.48
 Nodes (5): Get-SearchSmokeProcesses(), Invoke-ExactRustTest(), Invoke-StructuredProviderSmoke(), New-SilentWav(), Wait-ForCdp()
 
 ### Community 185 - "Community 185"
-Cohesion: 0.06
-Nodes (58): deriveSearchResultActions(), downloadModesForProvider(), downloadModesForResult(), DownloadReadiness, downloadReadinessReason(), isDownloadFolderReadinessReason(), onlinePlaybackReason(), runtimeToolReason() (+50 more)
+Cohesion: 0.08
+Nodes (42): deriveSearchResultActions(), downloadModesForProvider(), downloadModesForResult(), DownloadReadiness, downloadReadinessReason(), isDownloadFolderReadinessReason(), onlinePlaybackReason(), runtimeToolReason() (+34 more)
 
 ### Community 186 - "Community 186"
-Cohesion: 0.20
-Nodes (12): copy_zip_entry_to_file(), digest_bytes(), hex_digest(), inspect_archive(), metadata_archive_stages_without_touching_active_database(), read_zip_bytes(), schema_eight_archive_is_migrated_to_nine_without_losing_prior_rows(), stage_archive() (+4 more)
+Cohesion: 0.18
+Nodes (13): cleanup_staged_root_for_failure(), copy_zip_entry_to_file(), digest_bytes(), hex_digest(), inspect_archive(), metadata_archive_stages_without_touching_active_database(), read_zip_bytes(), schema_eight_archive_is_migrated_to_nine_without_losing_prior_rows() (+5 more)
 
 ### Community 188 - "Community 188"
 Cohesion: 0.08
@@ -930,8 +934,8 @@ Cohesion: 0.08
 Nodes (3): Command, controller_unavailable_error(), PlaybackService
 
 ### Community 198 - "Community 198"
-Cohesion: 0.19
-Nodes (17): customVariableNames, ResolvedTheme, resolveTheme(), SETTINGS_QUERY_KEY, ThemeContext, ThemeContextValue, ResolvedTheme, resolveTheme() (+9 more)
+Cohesion: 0.18
+Nodes (15): LAYOUT_PROFILE_LABELS, customVariableNames, ResolvedTheme, SETTINGS_QUERY_KEY, ThemeContext, ThemeContextValue, ResolvedTheme, SETTINGS_QUERY_KEY (+7 more)
 
 ### Community 200 - "Community 200"
 Cohesion: 0.13
@@ -950,40 +954,40 @@ Cohesion: 0.16
 Nodes (4): BackupError, BackupService, ImportCommitResult, latest_rollback_path()
 
 ### Community 210 - "Community 210"
-Cohesion: 0.04
-Nodes (76): SMART_PLAYLISTS_QUERY_KEY, smartPlaylistPreviewQueryKey(), smartPlaylistQueryKey(), useSmartPlaylist(), useSmartPlaylistActions(), useSmartPlaylistPreview(), useSmartPlaylists(), fallbackCapabilities (+68 more)
+Cohesion: 0.05
+Nodes (65): startOverlayDrag(), playlistKindLabel(), PlaylistsPage(), SortablePlaylistItemProps, fallbackCapabilities, providerOrder, invoke(), acceptFusionCandidate() (+57 more)
 
 ### Community 211 - "Community 211"
-Cohesion: 0.19
-Nodes (6): FakeControl, lock(), missing_mpv_fails_without_recovery_cycles_or_file_loaded_wait(), output_profile_apply_error(), output_profile_invalid_error(), output_profile_rolls_back_volume_and_reports_rollback_failure_truthfully()
+Cohesion: 0.18
+Nodes (5): FakeBackend, FakeControl, lock(), missing_mpv_fails_without_recovery_cycles_or_file_loaded_wait(), output_profile_rolls_back_volume_and_reports_rollback_failure_truthfully()
 
 ### Community 212 - "Community 212"
-Cohesion: 0.06
-Nodes (41): AB_LOOP_PRESETS_QUERY_KEY, automaticLookupKeys, BOOKMARKS_QUERY_KEY, bookmarksQueryKey(), clampLyricsOffset(), cueEndMs(), cueProgress(), LYRICS_QUERY_KEY (+33 more)
+Cohesion: 0.07
+Nodes (38): AB_LOOP_PRESETS_QUERY_KEY, abLoopPresetsQueryKey(), automaticLookupKeys, BOOKMARKS_QUERY_KEY, bookmarksQueryKey(), clampLyricsOffset(), cueEndMs(), cueProgress() (+30 more)
 
 ### Community 213 - "Community 213"
-Cohesion: 0.09
-Nodes (12): validate_loop(), clamp_position(), Controller, deterministic_tool_failure(), FakeBackend, invalid_state_error(), is_deterministic_tool_error(), is_recoverable_backend_failure() (+4 more)
+Cohesion: 0.13
+Nodes (10): validate_loop(), Controller, invalid_state_error(), mode_error_to_playback(), persistence_error_message(), playback_error_from_library(), playback_error_from_resolution_candidate(), playback_error_from_resolver() (+2 more)
 
 ### Community 214 - "Community 214"
 Cohesion: 0.21
 Nodes (3): is_valid_accelerator(), classify_registration_error(), ShortcutController
 
 ### Community 215 - "Community 215"
-Cohesion: 0.13
-Nodes (26): useBookmarks(), interpolatePlaybackPosition(), monotonicNow(), PlaybackClockSnapshot, usePlaybackClock(), TRACK_INSPECTOR_QUERY_KEY, trackInspectorQueryKey(), useTrackInspector() (+18 more)
+Cohesion: 0.08
+Nodes (54): activeCueIndex(), activeWordIndex(), lyricsQueryKey(), useBookmarks(), useLyrics(), usePlayback(), interpolatePlaybackPosition(), monotonicNow() (+46 more)
 
 ### Community 216 - "Community 216"
-Cohesion: 0.09
-Nodes (72): apply_descriptor(), apply_pending_restore(), applying_descriptor_recovery_is_restart_safe(), archive_inspection_rejects_case_duplicates_symlinks_and_bombs(), ArchiveEntryInfo, artwork_entries(), build_preview(), cleanup_created_paths() (+64 more)
+Cohesion: 0.10
+Nodes (61): apply_descriptor(), apply_pending_restore(), applying_descriptor_recovery_is_restart_safe(), archive_inspection_rejects_case_duplicates_symlinks_and_bombs(), ArchiveEntryInfo, artwork_entries(), build_preview(), cleanup_created_paths() (+53 more)
 
 ### Community 217 - "Community 217"
 Cohesion: 0.28
 Nodes (12): configure_downloads(), create_owned_task_temp(), ensure_owned_root(), failed_download_can_be_retried_without_reusing_output(), migration_service_snapshot_starts_with_default_concurrency(), queue_rejects_spotify_and_non_track_results_without_creating_tasks(), ready_media_tools(), scheduler_completes_and_finalizes_a_provider_download() (+4 more)
 
 ### Community 218 - "Community 218"
-Cohesion: 0.19
-Nodes (4): ensure_record(), portable_mode_is_an_ordinary_setting_for_the_resolved_startup_mode(), read_setting(), SettingsRepository<'database>
+Cohesion: 0.16
+Nodes (6): defaults_are_available_without_speculative_rows(), ensure_record(), invalid_serialized_setting_fails_safely(), portable_mode_is_rejected_until_portable_startup_is_implemented(), read_setting(), SettingsRepository<'database>
 
 ### Community 219 - "Community 219"
 Cohesion: 0.29
@@ -994,16 +998,16 @@ Cohesion: 0.29
 Nodes (5): History and sessions, Privacy boundaries, Smart Features and Analytics, Smart playlists and shuffle, UI and verification
 
 ### Community 221 - "Community 221"
-Cohesion: 0.13
-Nodes (10): credential_store(), disabled_gate_performs_no_network_or_auth(), FakeTransport, persisted_opt_in_enables_spotify_after_auth_service_reconstruction(), refresh_rotates_refresh_token(), service(), spotify_401_refreshes_once_then_retries_once(), SpotifyAuthService (+2 more)
+Cohesion: 0.09
+Nodes (14): callback_url_from_target(), credential_store(), disabled_gate_performs_no_network_or_auth(), FakeTransport, persisted_opt_in_enables_spotify_after_auth_service_reconstruction(), read_callback_target(), refresh_rotates_refresh_token(), service() (+6 more)
 
 ### Community 222 - "Community 222"
 Cohesion: 0.06
 Nodes (68): labels_collapse_whitespace_and_enforce_unicode_length(), ListeningModeChange, ListeningModeError, ListeningModeErrorCode, ListeningModeReason, ListeningModeService, ListeningModeState, local_parts() (+60 more)
 
 ### Community 223 - "Community 223"
-Cohesion: 0.11
-Nodes (24): abLoopPresetsQueryKey(), activeCueIndex(), activeWordIndex(), formatLyricsOffset(), useAbLoopPresets(), useLyrics(), useLyricsOffset(), LyricsPanel() (+16 more)
+Cohesion: 0.12
+Nodes (18): formatLyricsOffset(), useAbLoopPresets(), useLyricsOffset(), LyricsPanelProps, errorCode(), errorMessage(), formatClock(), LyricsPage() (+10 more)
 
 ### Community 224 - "Community 224"
 Cohesion: 0.33
@@ -1019,7 +1023,7 @@ Nodes (57): attribution_for(), attribution_is_only_added_for_lrclib(), candidate
 
 ### Community 227 - "Community 227"
 Cohesion: 0.07
-Nodes (41): playlistKindLabel(), PlaylistsPage(), SortablePlaylistItemProps, addPlaylistItem(), addTrackTag(), createPlaylist(), createPlaylistBranch(), createTag() (+33 more)
+Nodes (28): ensureQueueBridge(), errorMessage(), refreshQueueWorkspace(), clearQueueSection(), createPlaylist(), deleteQueueSnapshot(), listPlaylists(), listQueueSnapshots() (+20 more)
 
 ### Community 228 - "Community 228"
 Cohesion: 0.33
@@ -1030,8 +1034,8 @@ Cohesion: 0.13
 Nodes (28): browserPreviewSettings(), browserWindowsIntegrationSnapshot(), bumpBrowserWindowsIntegrationRevision(), closeOverlay(), createOutputProfile(), deleteOutputProfile(), getSettingsSnapshot(), getWindowsIntegrationSnapshot() (+20 more)
 
 ### Community 230 - "Community 230"
-Cohesion: 0.14
-Nodes (14): SegmentedControl(), SegmentedControlOption, SegmentedControlProps, IconGallery(), spotIconNames, spotIconNames, invalidTheme, onChange (+6 more)
+Cohesion: 0.10
+Nodes (22): IconButton, IconButtonProps, SegmentedControl(), SegmentedControlOption, SegmentedControlProps, IconGallery(), spotIconNames, spotIconNames (+14 more)
 
 ### Community 231 - "Community 231"
 Cohesion: 0.11
@@ -1058,8 +1062,8 @@ Cohesion: 0.17
 Nodes (9): consoleErrors, contextAnchor, customTheme, darkFocus, importInput, invalidTheme, menu, projectViewport (+1 more)
 
 ### Community 237 - "Community 237"
-Cohesion: 0.08
-Nodes (24): OverlayRoot(), LibraryGalaxyPage(), MusicMapPage(), trackLabel(), ThemeStudioPage(), bootstrap(), nativeWindowLabel(), overlayLabels (+16 more)
+Cohesion: 0.09
+Nodes (21): OverlayRoot(), ThemeStudioPage(), bootstrap(), nativeWindowLabel(), overlayLabels, queryClient, analyticsRoute, downloadsRoute (+13 more)
 
 ### Community 238 - "Community 238"
 Cohesion: 0.18
@@ -1074,12 +1078,16 @@ Cohesion: 0.07
 Nodes (45): ActiveEvent, analytics_queries_are_local_typed_and_reopen_preserves_live_duplicates(), AnalyticsError, AnalyticsOverview, AnalyticsRecorder, AnalyticsService, bool_i64(), checked_i64() (+37 more)
 
 ### Community 241 - "Community 241"
-Cohesion: 0.26
-Nodes (10): default_global_shortcuts(), global_shortcut_validation_requires_modifiers_and_isolates_duplicates(), windows_settings_shortcuts_and_output_profiles_round_trip(), action_label(), defaults_have_unique_valid_accelerators(), labels_cover_every_action(), RegisteredShortcut, ShortcutRegistrationStatus (+2 more)
+Cohesion: 0.19
+Nodes (11): default_global_shortcuts(), global_shortcut_validation_requires_modifiers_and_isolates_duplicates(), SettingsSnapshot, WindowsIntegrationSettings, action_label(), defaults_have_unique_valid_accelerators(), labels_cover_every_action(), RegisteredShortcut (+3 more)
 
 ### Community 245 - "Community 245"
 Cohesion: 0.28
 Nodes (12): apply_error(), collapse_whitespace(), names_are_case_insensitively_unique(), names_are_trimmed_and_whitespace_is_collapsed(), normalize_output_profiles(), OutputProfile, OutputProfileApplyError, OutputProfileApplyErrorCode (+4 more)
+
+### Community 247 - "Community 247"
+Cohesion: 0.07
+Nodes (29): active, bases:Create new base, canvas:Create new canvas, command-palette:Open command palette, daily-notes:Open today's daily note, graph:Open graph view, switcher:Open quick switcher, templates:Insert template (+21 more)
 
 ### Community 248 - "Community 248"
 Cohesion: 0.17
@@ -1094,8 +1102,8 @@ Cohesion: 0.35
 Nodes (5): invalid(), non_empty(), validate_download_directory(), validate_download_provider(), validate_final_output()
 
 ### Community 251 - "Community 251"
-Cohesion: 0.08
-Nodes (34): DownloadTaskRowProps, DOWNLOAD_SNAPSHOT_QUERY_KEY, useCancelDownload(), useClearCompletedDownload(), useClearCompletedDownloads(), useDownloadSnapshot(), useRenameDownload(), useRetryDownload() (+26 more)
+Cohesion: 0.07
+Nodes (38): DownloadTaskRowProps, DOWNLOAD_SNAPSHOT_QUERY_KEY, useCancelDownload(), useClearCompletedDownload(), useClearCompletedDownloads(), useDownloadSnapshot(), useRenameDownload(), useRetryDownload() (+30 more)
 
 ### Community 252 - "Community 252"
 Cohesion: 0.22
@@ -1122,8 +1130,8 @@ Cohesion: 0.06
 Nodes (37): BackupSection(), initialOptions, modeLabel(), ImportPreview(), modeLabel(), Button, ButtonProps, ButtonSize (+29 more)
 
 ### Community 258 - "Community 258"
-Cohesion: 0.28
-Nodes (7): LAYOUT_PROFILE_LABELS, LayoutWorkspace(), ThemeReadout(), useTheme(), useTheme(), cloneTheme(), ThemeStudio()
+Cohesion: 0.27
+Nodes (9): LayoutWorkspace(), SettingsPage(), statusLabel(), ThemeReadout(), useTheme(), useTheme(), SpotThemeTokenName, cloneTheme() (+1 more)
 
 ### Community 260 - "Community 260"
 Cohesion: 0.62
@@ -1150,24 +1158,24 @@ Cohesion: 0.22
 Nodes (9): 2026-09-04 runtime repair status, code:powershell (pnpm exec vitest run scripts/performance-baseline.test.ts --), Environment, Interpretation, Packaged measurements, Release measurements, Reproducible frontend harness, Reproducible harness (+1 more)
 
 ### Community 267 - "Community 267"
-Cohesion: 0.08
-Nodes (33): cancelledSections(), failedSections(), loadingSections(), PendingSearchStart, providersForLens(), SEARCH_PROVIDER_ORDER, searchProviderOrder(), SearchSections (+25 more)
+Cohesion: 0.06
+Nodes (50): ProviderBadge(), ProviderBadgeProps, bytesLabel(), DownloadTaskRow(), etaLabel(), speedLabel(), stateLabel(), cancelledSections() (+42 more)
 
 ### Community 268 - "Community 268"
 Cohesion: 0.40
 Nodes (4): ProcessSpotDlRunner, read_spotdl_output(), run_spotdl_process(), terminate_spotdl_child()
 
 ### Community 269 - "Community 269"
-Cohesion: 0.12
-Nodes (22): applyRootAppearance(), BUILT_IN_THEMES, DARK_THEME, LIGHT_THEME, colorToRgb(), formatValidationError(), hexColorSchema, parseThemeDefinition() (+14 more)
+Cohesion: 0.20
+Nodes (14): applyRootAppearance(), colorToRgb(), formatValidationError(), hexColorSchema, parseThemeDefinition(), rawSpotThemeDefinitionSchema, relativeLuminance(), serializeThemeDefinition() (+6 more)
 
 ### Community 270 - "Community 270"
 Cohesion: 0.29
 Nodes (5): ADR-0019: deterministic import/export and portable storage, Consequences, Context, Decision, Verification
 
 ### Community 271 - "Community 271"
-Cohesion: 0.09
-Nodes (22): LISTENING_MODE_QUERY_KEY, browserModeChange(), enterTemporaryMode(), exitTemporaryMode(), openSmartMix(), parseAnalyticsOverview(), parseListeningHeatmap(), parseSmartPlaylist() (+14 more)
+Cohesion: 0.08
+Nodes (34): SMART_PLAYLISTS_QUERY_KEY, smartPlaylistPreviewQueryKey(), smartPlaylistQueryKey(), useSmartPlaylist(), useSmartPlaylistActions(), useSmartPlaylistPreview(), useSmartPlaylists(), createSmartPlaylist() (+26 more)
 
 ### Community 273 - "Community 273"
 Cohesion: 0.25
@@ -1178,8 +1186,8 @@ Cohesion: 0.50
 Nodes (6): Assert-Directory(), Assert-File(), Assert-PackagedPortableLayout(), Close-PackagedApp(), Start-PackagedApp(), Wait-ForCdp()
 
 ### Community 277 - "Community 277"
-Cohesion: 0.13
-Nodes (15): AudioDeviceMenu(), AudioDeviceMenuProps, PlaybackControlsProps, PlayerStoreState, usePlayerStore, calls, first, firstSnapshot (+7 more)
+Cohesion: 0.12
+Nodes (17): AudioDeviceMenu(), AudioDeviceMenuProps, PlaybackControls(), PlaybackControlsProps, repeatLabel(), PlayerStoreState, usePlayerStore, calls (+9 more)
 
 ### Community 278 - "Community 278"
 Cohesion: 0.14
@@ -1190,8 +1198,8 @@ Cohesion: 0.40
 Nodes (5): clear_mpv_path(), configure_mpv(), rescan_mpv(), restart_playback_if_backend_unavailable(), retry_playback_backend()
 
 ### Community 280 - "Community 280"
-Cohesion: 0.11
-Nodes (24): EmptyState(), usePreview(), useVisualLibraryDataset(), VISUAL_LIBRARY_DATASET_QUERY_KEY, GalaxyPoint, MusicMapNode, EMPTY_REQUEST, EMPTY_TRACKS (+16 more)
+Cohesion: 0.04
+Nodes (60): ContextAction, ContextActionMenu(), ContextActionMenuProps, usePreview(), useVisualLibraryDataset(), VISUAL_LIBRARY_DATASET_QUERY_KEY, TrackInspectorProps, buildGalaxyLayout() (+52 more)
 
 ### Community 281 - "Community 281"
 Cohesion: 0.11
@@ -1202,24 +1210,24 @@ Cohesion: 0.50
 Nodes (3): mpvRow, spotifyRow, spotifyToggle
 
 ### Community 284 - "Community 284"
-Cohesion: 0.24
-Nodes (12): clearing_custom_theme_after_switching_back_to_dark_is_supported(), custom_theme_and_layout_profile_round_trip_without_a_schema_migration(), custom_theme_cannot_be_selected_without_a_valid_definition(), defaults_are_available_without_speculative_rows(), invalid_preference_order_is_rejected_before_persistence(), invalid_serialized_setting_fails_safely(), LayoutProfile, output_profile_validation_rejects_invalid_device_volume_and_duplicate_names() (+4 more)
+Cohesion: 0.38
+Nodes (9): clearing_custom_theme_after_switching_back_to_dark_is_supported(), custom_theme_and_layout_profile_round_trip_without_a_schema_migration(), custom_theme_cannot_be_selected_without_a_valid_definition(), invalid_preference_order_is_rejected_before_persistence(), portable_mode_is_an_ordinary_setting_for_the_resolved_startup_mode(), setting_overwrite_replaces_the_previous_typed_value(), setting_updates_persist_across_reopen(), Theme (+1 more)
 
 ### Community 286 - "Community 286"
-Cohesion: 0.27
-Nodes (9): addNode(), buildMusicMapGraph(), key(), layerOrder, MusicMapEdge, MusicMapGraph, musicMapLayerPosition(), MusicMapNodeKind (+1 more)
+Cohesion: 0.12
+Nodes (15): browserPreviewMediaTools(), browserPreviewSpotifyProviderStatus(), browserPreviewSpotifySetupStatus(), browserPreviewStatus(), getAppStatus(), getSpotifySetupStatus(), openProviderResult(), parseProviderSearchEvent() (+7 more)
 
 ### Community 287 - "Community 287"
-Cohesion: 0.18
-Nodes (9): addLibraryFolders(), browserPreviewLibraryPage(), deleteLocalFile(), getLibraryPage(), parseScanProgress(), pickLibraryFolders(), sortLibraryTracks(), invokeMock (+1 more)
+Cohesion: 0.36
+Nodes (10): cleanup_refuses_an_unowned_staging_directory(), cleanup_staged_root(), create_staging_root(), ensure_trusted_directory(), staging_error(), staging_rejects_a_destination_outside_the_generated_root(), staging_rejects_a_file_payload_parent_without_writing_outside(), staging_rejects_a_symlink_payload_parent_without_writing_outside() (+2 more)
 
 ### Community 288 - "Community 288"
-Cohesion: 0.06
-Nodes (37): AppShell(), EmptyStateProps, StatusDot(), StatusDotProps, useAppStatus(), useQueue(), SpotIconName, paths (+29 more)
+Cohesion: 0.11
+Nodes (18): EmptyState(), EmptyStateProps, StatusDot(), StatusDotProps, SpotIconName, paths, SpotIconName, SpotIconProps (+10 more)
 
 ### Community 290 - "Community 290"
-Cohesion: 0.27
-Nodes (7): ContextAction, ContextActionMenu(), ContextActionMenuProps, RadialAction, visibleRadialActions(), RadialMenu(), RadialMenuProps
+Cohesion: 0.28
+Nodes (7): BUILT_IN_THEMES, DARK_THEME, LIGHT_THEME, spotThemeDefinitionSchema, input, parsed, serialized
 
 ### Community 291 - "Community 291"
 Cohesion: 0.40
@@ -1230,36 +1238,32 @@ Cohesion: 0.29
 Nodes (6): doc, header, host, lines, panel, root
 
 ### Community 293 - "Community 293"
-Cohesion: 0.20
-Nodes (15): ProviderBadge(), ProviderBadgeProps, bytesLabel(), DownloadTaskRow(), etaLabel(), speedLabel(), stateLabel(), detailMessage() (+7 more)
-
-### Community 294 - "Community 294"
-Cohesion: 0.47
-Nodes (6): artist_tokens(), choose_sunnify_youtube_match(), normalize_match_text(), parse_youtube_match_candidates(), spotify_title_core(), title_plausibly_matches()
+Cohesion: 0.50
+Nodes (3): Answer, Q: SearchService SourceAdapter search request events cache sorting provider lens cancellation timeout, Source Nodes
 
 ### Community 296 - "Community 296"
-Cohesion: 0.15
-Nodes (14): actions, albumIds, artistIds, bright, first, galaxy, graph, second (+6 more)
+Cohesion: 0.70
+Nodes (4): rgbToHex(), sampleAccentFromPixels(), validAccent(), contrastRatio()
 
 ## Knowledge Gaps
-- **1542 isolated node(s):** `dev`, `build`, `preview`, `typecheck`, `lint` (+1537 more)
+- **1599 isolated node(s):** `dev`, `build`, `preview`, `typecheck`, `lint` (+1594 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **59 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **58 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `validate_provider_url()` connect `Community 1` to `Community 294`, `Community 168`, `Community 233`, `Community 178`, `Community 181`, `Community 248`, `Community 153`, `Community 250`, `Community 120`, `Community 189`, `Community 190`?**
-  _High betweenness centrality (0.048) - this node is a cross-community bridge._
+- **Why does `validate_provider_url()` connect `Community 1` to `Community 233`, `Community 142`, `Community 178`, `Community 213`, `Community 181`, `Community 248`, `Community 153`, `Community 250`, `Community 120`, `Community 189`, `Community 190`?**
+  _High betweenness centrality (0.054) - this node is a cross-community bridge._
 - **Why does `normalize_file_path()` connect `Community 94` to `Community 164`, `Community 100`, `Community 103`, `Community 216`, `Community 121`, `Community 186`?**
-  _High betweenness centrality (0.040) - this node is a cross-community bridge._
-- **Why does `add_local_source()` connect `Community 103` to `Community 168`, `Community 94`?**
-  _High betweenness centrality (0.035) - this node is a cross-community bridge._
+  _High betweenness centrality (0.044) - this node is a cross-community bridge._
+- **Why does `add_local_source()` connect `Community 103` to `Community 213`, `Community 94`?**
+  _High betweenness centrality (0.037) - this node is a cross-community bridge._
 - **What connects `dev`, `build`, `preview` to the rest of the system?**
-  _1542 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _1599 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.08878968253968254 - nodes in this community are weakly interconnected._
 - **Should `Community 2` be split into smaller, more focused modules?**
-  _Cohesion score 0.018392642942822873 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.01904761904761905 - nodes in this community are weakly interconnected._
 - **Should `Community 3` be split into smaller, more focused modules?**
   _Cohesion score 0.08333333333333333 - nodes in this community are weakly interconnected._
