@@ -47,9 +47,9 @@ describe("Windows command-palette actions", () => {
     );
 
     expect(screen.getByText("Toggle Mini Overlay")).toBeVisible();
-    expect(screen.getByText("Toggle Edge Overlay")).toBeVisible();
-    expect(screen.getByText("Toggle Lyrics Overlay")).toBeVisible();
-    expect(screen.getByText("Toggle Gaming Overlay")).toBeVisible();
+    expect(screen.queryByText("Toggle Edge Overlay")).not.toBeInTheDocument();
+    expect(screen.queryByText("Toggle Lyrics Overlay")).not.toBeInTheDocument();
+    expect(screen.queryByText("Toggle Gaming Overlay")).not.toBeInTheDocument();
     expect(screen.getByText("Show SpotDIY")).toBeVisible();
     screen.getByRole("button", { name: /Toggle Mini Overlay/ }).click();
     expect(toggleOverlayMock).toHaveBeenCalledWith("mini");

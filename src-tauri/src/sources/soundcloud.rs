@@ -16,11 +16,11 @@ use crate::sources::{
 const SUPPORTED_ENTITIES: &[SearchEntityKind] = &[SearchEntityKind::Track];
 const SOUNDCLOUD_CAPABILITIES: SourceCapabilities = SourceCapabilities {
     search: true,
-    playback: false,
+    playback: true,
     metadata: true,
     artwork: true,
     lyrics: false,
-    downloads: false,
+    downloads: true,
     popularity: true,
     release_date: false,
     lyrics_metadata: false,
@@ -185,7 +185,10 @@ fn safe_canonical_url(
     entry: &Map<String, Value>,
     provider: ProviderKind,
 ) -> Option<crate::search::types::SafeUrl> {
-    string(entry, "webpage_url").and_then(|url| validate_provider_url(provider, url).ok())
+    ["webpage_url", "original_url", "url"]
+        .into_iter()
+        .filter_map(|field| string(entry, field))
+        .find_map(|url| validate_provider_url(provider, url).ok())
 }
 
 #[cfg(test)]
@@ -309,6 +312,54 @@ mod tests {
             section.results[0].engagement_kind,
             Some(EngagementKind::Plays)
         );
+        assert_eq!(
+            section.results[0]
+                .canonical_url
+                .as_ref()
+                .unwrap()
+                .as_url()
+                .as_str(),
+            "https://soundcloud.com/artist/signal"
+        );
+    }
+
+    #[tokio::test]
+    async fn soundcloud_accepts_a_valid_full_url_from_flat_url_field() {
+        let section = soundcloud_with(FakeYtDlpRunner::json(
+            r#"{"entries":[{"id":"s1","title":"Signal","url":"https://soundcloud.com/artist/signal"}]}"#,
+        ))
+        .search(test_request(), SearchCancellation::new())
+        .await;
+
+        assert_eq!(
+            section.results[0]
+                .canonical_url
+                .as_ref()
+                .unwrap()
+                .as_url()
+                .as_str(),
+            "https://soundcloud.com/artist/signal"
+        );
+    }
+
+    #[tokio::test]
+    async fn soundcloud_rejects_unsafe_alternate_url_fields() {
+        let section = soundcloud_with(FakeYtDlpRunner::json(
+            r#"{"entries":[{"id":"s1","title":"Signal","webpage_url":"javascript:alert(1)","original_url":"https://evil.example/track","url":"https://soundcloud.com/artist/signal?token=secret"}]}"#,
+        ))
+        .search(test_request(), SearchCancellation::new())
+        .await;
+
+        assert!(section.results[0].canonical_url.is_none());
+    }
+
+    #[test]
+    fn soundcloud_advertises_task_creation_download_capability() {
+        assert!(
+            soundcloud_with(FakeYtDlpRunner::json(r#"{"entries":[]}"#))
+                .capabilities()
+                .downloads
+        );
     }
 
     #[tokio::test]
@@ -413,7 +464,7 @@ mod tests {
                 "--no-warnings",
                 "--socket-timeout",
                 "10",
-                "scsearch25:a & b | c",
+                "scsearch5:a & b | c",
             ]
         );
     }

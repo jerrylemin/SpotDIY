@@ -1,6 +1,10 @@
 # SpotDIY project state
 
-State date: 2026-09-02
+State date: 2026-09-05
+
+Current correction: Spotify catalog/PKCE integration has been removed. Spotify
+search now uses the local `spotdl` CLI, and search-result audio downloads use
+validated source matching followed by the existing yt-dlp/FFmpeg pipeline.
 
 ## Repository
 
@@ -14,22 +18,22 @@ State date: 2026-09-02
 - Plan 10 implementation commits: `cc28ba1`, `f2a5995`, `850bc82`, `8c62aed`, and `6eb231d`.
 - Plan 11 implementation commits: `e5129a0`, `f5562e1`, `0012a43`, `0026146`, `dba1f24`, `d631a2a`, `d2199d5`, `e072fec`, and `15031bf`.
 - Plan 12 implementation commits: `95eb41b`, `b7daac6`, `d9b58c3`, `e4793b6`, and `3d39e1d`.
-- Delivery status: Plan 12 implementation and final verification are complete; this document is part of the documentation closure boundary.
+- Delivery status: Plan 16 release verification is `PARTIAL`; exact CI/package, local external-target build, and functional packaged gates pass, while broad runtime performance budgets fail.
 
 ## Runtime
 
 - Frontend: React 19, TypeScript 6 strict, Vite 8, TanStack Router/Query, Zustand, Zod.
-- Native: Tauri 2, Rust stable MSVC, SQLite WAL, typed serialized DTOs, and runtime frontend parsing.
+- Native: Tauri 2, Rust `1.98.1-x86_64-pc-windows-msvc`, SQLite WAL, typed serialized DTOs, and runtime frontend parsing.
 - Library: `LibraryService` owns persistent folder roots, recursive local indexing, metadata/artwork/fingerprint evidence, watcher reconciliation, and managed-source path validation.
 - Playback: `PlaybackService` is the sole serialized controller. It owns the persistent ID-only queue, checkpointed position, immutable snapshots, transport, repeat/shuffle/previous/EOF policy, source switching, recovery, and shutdown.
 - Playlists: `PlaylistService` owns durable playlists, seeded Inbox, playlist items, one-shot branches, likes, ratings, tags, and bounded collection reads.
 - Inspector: `TrackInspectorService` owns the narrow read-only `get_track_inspector` DTO boundary; local filesystem paths never cross it, and provider URLs are revalidated before exposure.
 - Lyrics: `LyricsService` owns local-first precedence, bounded LRC/embedded metadata reads, manual overrides, explicit LRCLIB lookup/cache, and typed lyrics DTOs. Local media reads are read-only through `LibraryService`.
 - Bookmarks and loops: `BookmarkService` owns durable bookmarks and A/B presets; `PlaybackService` owns active A/B transport state and clears it at a new-track boundary.
-- Backend: `MpvBackend` starts one external `mpv.exe` child over one fresh Windows named pipe and keeps JSON protocol/process details behind the backend boundary. Discovery is `SPOTDIY_MPV_PATH`, then PATH.
+- Backend: `MpvBackend` starts one external `mpv.exe` child over one fresh Windows named pipe and keeps JSON protocol/process details behind the backend boundary. Discovery is persisted Settings path, `SPOTDIY_MPV_PATH`, approved app-owned `mpv\mpv.exe`, then PATH; Settings owns configure/clear/rescan actions.
 - Windows integration: `WindowsIntegrationService` owns native overlay lifecycle, tray actions, global shortcut registration/status, SMTC state, gaming click-through recovery, and output-profile application while keeping the frontend on typed DTOs.
 - Tauri playback surface: `get_playback_snapshot`, `play_track`, `enqueue_track`, `play_track_next`, `toggle_play_pause`, `seek_playback`, `next_track`, `previous_track`, `set_playback_volume`, `set_playback_muted`, `set_repeat_mode`, `set_shuffle_enabled`, `get_audio_devices`, `set_audio_device`, `switch_playback_source`, `retry_playback_backend`, `clear_playback_queue`, playlist playback/queue commands, queue workspace mutations, and queue snapshot commands; state events use `playback://state` and `queue://state`.
-- Downloads: `DownloadService` owns schema-v4 task persistence, yt-dlp/FFmpeg execution, bounded progress, scheduling, cancellation, retry, restart recovery, destination-side finalization, and `downloads://state` snapshots. Tasks support YouTube and SoundCloud only; Spotify and Local are rejected.
+- Downloads: `DownloadService` owns schema-v4 task persistence, spotdl/yt-dlp/FFmpeg execution, bounded progress, scheduling, cancellation, retry, restart recovery, destination-side finalization, and `downloads://state` snapshots. Search-result tasks support YouTube, SoundCloud, and Spotify audio; persisted Spotify and Local sources are rejected.
 - Tauri download surface: `get_download_snapshot`, `queue_search_result_download`, `queue_source_download`, `cancel_download`, `retry_download`, `set_download_concurrency`, and `open_download_location`.
 - Tauri lyrics/playback surface: typed lyrics load/save/delete/import/provider/cache commands, bookmark and A/B preset commands, and `set_ab_loop`/`clear_ab_loop`; lyrics state is presentation-owned while active loop state remains in `playback://state`.
 - Build cache: Rust/Tauri output is external at `C:\CargoTarget\SpotDIY`; `src-tauri\target` is absent and the path is not committed.
@@ -38,7 +42,7 @@ State date: 2026-09-02
 
 - Keep one Tauri application and keep provider-specific logic behind later adapter boundaries.
 - Use explicit Rust DTOs plus strict Zod parsing at the IPC boundary; frontend commands carry typed IDs and values, never local paths, pipe names, request IDs, URLs, or raw mpv JSON.
-- Permit playback only for managed, indexed, enabled, available local sources resolved by Rust through `LibraryService`.
+- Permit playback for managed, indexed, enabled, available local sources resolved by Rust through `LibraryService`, or for available YouTube/SoundCloud sources with a validated provider URL; Spotify remains metadata-only for in-app playback.
 - Keep `PlaybackService` as the sole queue owner; durable queue state and snapshots use typed IDs and never expose paths, URLs, or raw queue JSON through IPC.
 - Use the exact mpv startup arguments in the Plan 04 specification, positive request IDs, bounded 1 MiB frames, six property observations, generation-scoped events, and bounded quit/kill/reap.
 - Keep standard data under `%LOCALAPPDATA%\SpotDIY`; `SPOTDIY_PACKAGED_DATA_ROOT` is a smoke-only isolation seam because Windows known-folder resolution does not follow a child `LOCALAPPDATA` override.
@@ -48,10 +52,10 @@ State date: 2026-09-02
 - Keep LRCLIB opt-in and metadata-safe: no automatic lookup, no raw provider payload persistence, no full copyrighted lyrics in fixtures or logs, and no provider result is sent to playback.
 - Keep bookmarks and A/B loop state ID-based. `PlaybackService` owns loop commands; a new track clears A/B, same-track source switching and recovery restore it, and presets never autoplay.
 - Keep player modes as presentation-only Zustand state. Standard, Mini, and Expanded surfaces consume the same `usePlayback()` snapshot; `SourceSwitcher` delegates source changes to `PlaybackService`.
-- Derive search and track actions from provider capabilities and runtime availability. Online playback remains disabled, Spotify remains metadata-only, and local reveal remains source-ID based.
-- Keep provider playback/search, lyrics, overlays, media keys/SMTC, portable mode, analytics, EQ, normalization, crossfade, ReplayGain, and unrelated refactors outside the Plan 08 boundary.
+- Derive search and track actions from provider capabilities and runtime availability. YouTube/SoundCloud online playback requires native MPV and a validated URL; Spotify search-result audio downloads require spotdl, yt-dlp, FFmpeg, and a destination folder, while playback remains external-only and local reveal remains source-ID based.
+- Keep provider search, lyrics, overlays, media keys/SMTC, portable mode, analytics, EQ, normalization, crossfade, ReplayGain, and unrelated refactors outside the Plan 08 boundary; current runtime online playback is implemented in the later repair boundary.
 - Keep Plan 12 Windows integration optional and recoverable: unsupported SMTC and failed shortcut registrations are explicit status values, overlay windows are created lazily, and gaming click-through is session-only with a rescue shortcut.
-- Persist only ordinary Windows settings, shortcut bindings, and output profiles in schema 8; do not persist overlay visibility, click-through state, tray state, SMTC runtime handles, native window handles, or media paths.
+- Persist only ordinary Windows settings, shortcut bindings, output profiles, and validated media-tool selections in schema 12; do not persist overlay visibility, click-through state, tray state, SMTC runtime handles, native window handles, Spotify credentials, or raw media paths.
 
 ## Plan 04 verification snapshot
 
@@ -63,9 +67,17 @@ State date: 2026-09-02
 - Review: the single fresh read-only reviewer rechecked the fixes with `PASS`; critical, high, and correctness/security medium findings are zero. One low-priority request for additional hostile-probe regression coverage remains non-blocking.
 - Development mpv: local `.tools\mpv\v0.41.0\mpv.exe`, version `v0.41.0-dev-g41f6a6450`, SHA-256 `6145E63F026451A764077D53FD60860EC9F5C2BC76DCD6E62A88967AC375453D`. The documented official Windows x64 asset verification is recorded separately in the execution log.
 
-## Next slice
+## Current correction — Spotify source matching (2026-09-05)
 
-Plan 05 — Source Adapters and Search. Do not begin Source Fusion or provider playback in that slice until its own boundary is specified.
+- The old Spotify developer-app, Client ID, market, PKCE, token, and catalog
+  opt-in path is removed from the active application and settings UI.
+- `spotdl save` provides bounded transient Spotify search metadata without
+  persisting provider payloads. `spotdl url` resolves a canonical Spotify
+  track to a validated YouTube/SoundCloud URL for audio-only MP3 extraction.
+- Spotify remains outside in-app playback, Source Fusion, and persisted
+  library-source downloads. No SpotMate private endpoint or CAPTCHA bypass is
+  embedded; the product behavior is implemented through the local CLI and
+  existing validated media-tool boundary.
 
 ## Plan 05 delivery snapshot (2026-09-01)
 
@@ -254,11 +266,11 @@ settings allowlist for Windows integration, nine shortcut bindings, and output
 profiles while preserving all schema-7 settings rows and advancing the latest
 schema to 8.
 
-The native boundary adds lazy Mini, Edge, Lyrics, and Gaming overlay windows
-with exact labels/dimensions and always-on-top state, a tray menu, truthful
+The native boundary adds one lazy Mini overlay window with exact label/
+dimensions, always-on-top state, and native dragging, a tray menu, truthful
 global shortcut registration/conflict/failure statuses, Windows SMTC media
-commands and metadata projection, session-only Gaming click-through with a
-rescue path, and bounded output-device/profile apply with rollback. The SMTC
+commands and metadata projection, and bounded output-device/profile apply with
+rollback. The SMTC
 WinRT bridge is isolated in `src-tauri/crates/spotdiy-windows-smtc`; the
 frontend uses typed IPC, browser-preview adapters, Settings controls, and
 command-palette actions without native-only leakage.
@@ -402,3 +414,36 @@ release artifact or completion claim is recorded. See
 Graphify refreshed the final code state to 5,625 nodes, 12,674 edges, and 271
 communities; its HTML visualization was skipped at the 5,000-node safety
 limit. CodeGraph remains unavailable.
+
+## Plan 16 final release evidence — 2026-09-03
+
+Repair commit `39b79bc63396897b6ddfaf81cce3cb2bd3180c2a` is pushed to
+`origin/main`. GitHub Actions run `33769072435` passed for that exact SHA with
+the pinned Rust `1.98.1-x86_64-pc-windows-msvc`, frontend, RustSec, and NSIS
+package jobs. The artifact is `spotdiy-nsis-39b79bc...`, ID `9899808630`; its
+`SpotDIY_0.1.0_x64-setup.exe` payload is 6,489,236 bytes, SHA-256
+`D52A17EF5A69F514DFE20C98EAD904543F8FA18599FE0DE74CAFB3B62ACA95CB`, and
+`NotSigned`.
+
+The exact package passed regular playback, Plans 08–15 packaged smokes,
+provider isolation/search, clean install/uninstall, and owned-process cleanup.
+The functional acceptance matrix has all 27 rows `PASS`. Plan 16 remains
+`PARTIAL` because the broad process-tree idle sample was 6.56% / 448.8 MiB,
+the 60-second playback sample peaked at 57.81% / 522.5 MiB, and native SQL /
+timed packaged render readiness were not measured. The local MSVC installation
+still lacks `excpt.h` and `msvcrt.lib`; CI is the native release authority.
+
+## Current Plan 16 runtime usability repair — 2026-09-04
+
+The current working tree is based on `eceabb3c4a898c8de3abf409811e60eb78cc9171`
+and remains uncommitted. It adds validated YouTube/SoundCloud canonical URL
+fallback and capability policy, truthful native download readiness and
+structured errors, persisted Spotify opt-in, schema 11 migration, truthful
+case-insensitive WebM recognition, validated online MPV playback, and
+persisted/configurable MPV/yt-dlp/FFmpeg resolution. Rust fmt/Clippy/all-target
+tests, frontend gates, 97 Vitest tests, 82
+Playwright tests, local external-target Tauri/NSIS packaging, real-MPV smoke,
+packaged search smoke, and Plan 15 packaged visual/restart smoke pass. Live
+provider/download checks remain skipped without yt-dlp, authorization, and an
+approved legal fixture. Performance budgets remain unresolved; Plan 16 is
+still `PARTIAL`. No commit or push was made.

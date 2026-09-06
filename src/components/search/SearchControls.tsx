@@ -55,10 +55,10 @@ export function SearchControls({
           aria-label="Search music"
           autoFocus
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Try an artist, track, album, or mood"
+          placeholder={lens === "spotify" ? "Search Spotify by artist, track, or link" : "Try an artist, track, album, or mood"}
           value={query}
         />
-        {query ? <button aria-label="Clear search" className="search-field-clear search-field-clear-button" onClick={onClear} type="button">CLEAR</button> : <span className="search-field-clear">⌘ /</span>}
+        {query ? <button aria-label="Clear search" className="search-field-clear search-field-clear-button icon-only-button" onClick={onClear} title="Clear search" type="button"><SpotIcon name="close" size={15} /></button> : <span className="search-field-clear">⌘ /</span>}
       </div>
       <div aria-label="Search lenses" className="lens-row" role="tablist">
         {SEARCH_LENSES.map((item) => (
@@ -88,7 +88,7 @@ export function SearchControls({
             <option value="ascending">Ascending</option>
           </select>
         </label>
-        {isSearching ? <button className="button button-quiet search-cancel-button" onClick={onCancel} type="button">Cancel search</button> : null}
+        {isSearching ? <button aria-label="Cancel search" className="button button-quiet search-cancel-button icon-only-button" onClick={onCancel} title="Cancel search" type="button"><SpotIcon name="close" size={14} /></button> : null}
       </div>
     </div>
   );

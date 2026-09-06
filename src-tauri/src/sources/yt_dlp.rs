@@ -355,6 +355,7 @@ async fn run_yt_dlp_download(
 
     let mut stdout_finished = false;
     let mut stderr_finished = false;
+    let mut reader_channel_closed = false;
     let mut exit_status = None;
     let mut diagnostic = String::new();
     let mut poll = tokio::time::interval(PROCESS_POLL_INTERVAL);
@@ -390,8 +391,13 @@ async fn run_yt_dlp_download(
         }
 
         tokio::select! {
-            reader_event = reader_rx.recv() => {
+            reader_event = reader_rx.recv(), if !reader_channel_closed => {
                 let Some(reader_event) = reader_event else {
+                    // Windows launchers can close both pipes before the process exits.
+                    if stdout_finished && stderr_finished {
+                        reader_channel_closed = true;
+                        continue;
+                    }
                     terminate_owned_child(&mut child).await;
                     let _ = stdout_reader.await;
                     let _ = stderr_reader.await;
@@ -755,6 +761,29 @@ mod tests {
                 .collect::<Vec<_>>(),
             args
         );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn download_runner_waits_for_exit_after_streams_close() {
+        let args = vec![
+            "-NoLogo".to_owned(),
+            "-NoProfile".to_owned(),
+            "-NonInteractive".to_owned(),
+            "-Command".to_owned(),
+            "$out = [Console]::OpenStandardOutput(); $err = [Console]::OpenStandardError(); $out.Dispose(); $err.Dispose(); Start-Sleep -Milliseconds 100".to_owned(),
+        ];
+        let (events, _received) = mpsc::channel(8);
+        let output = TokioYtDlpProcessRunner::default()
+            .run_download(
+                Path::new("powershell.exe"),
+                &args,
+                SearchCancellation::new(),
+                events,
+            )
+            .await
+            .expect("closed output streams should not imply a failed process");
+        assert_eq!(output.exit_code, Some(0));
     }
 
     #[test]

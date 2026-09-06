@@ -22,9 +22,6 @@ const queryClient = new QueryClient({
 
 const overlayLabels = new Map<string, OverlayKind>([
   ["overlay-mini", "mini"],
-  ["overlay-edge", "edge"],
-  ["overlay-lyrics", "lyrics"],
-  ["overlay-gaming", "gaming"],
 ]);
 
 async function nativeWindowLabel(): Promise<string> {

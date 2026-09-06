@@ -268,3 +268,25 @@ compile, Clippy, all-target tests, RustSec, Tauri packaging, and packaged
 smokes is blocked by the local MSVC installation's missing headers/libraries.
 The exact failure, performance evidence, dependency inventory, and truthful
 skips are in `docs/SpotDIY-Vault/Sessions/final-verification.md`.
+
+## Current Spotify source-matching verification — 2026-09-05
+
+The historical Plan 16 gate note above predates the current native toolchain
+repair. The current checkout passes Rust fmt, `cargo check --tests`, 446 Rust
+unit tests plus the real-MPV integration test, frontend typecheck,
+zero-warning ESLint, 102 Vitest tests, production build, and 82 Playwright
+tests. Strict Clippy still reports two unrelated existing warnings in
+`src/sources/local.rs` and `src/lyrics/providers.rs`; no warning was reported
+in the Spotify/download changes. Focused native coverage includes
+YouTube/SoundCloud URL and capability policy, structured download errors,
+schema-9-to-12 persistence, MPV/yt-dlp/FFmpeg path validation and resolution,
+folder-picker download readiness, Spotify `spotdl` metadata/source resolution,
+online MPV playback, deterministic missing-tool playback failure, and
+case-insensitive WebM recognition including valid finite WebM segments larger
+than the probe window.
+
+The external-target Tauri/NSIS build, explicit real-MPV smoke, packaged search
+smoke, and Plan 15 visual/restart smoke pass. Live audio download checks remain
+skipped without an approved legal fixture. Broad process-tree performance
+budgets still fail; native SQL and timed packaged render budgets remain
+unmeasured, so Plan 16 is still partial.

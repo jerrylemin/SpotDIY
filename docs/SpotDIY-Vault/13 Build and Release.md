@@ -64,3 +64,15 @@ Studio MSVC installation is missing headers/libraries, including
 `msvcrt.lib`. Therefore installer hash/signature, clean-install, uninstall,
 and packaged acceptance evidence is `BLOCKED`, not PASS. No root LICENSE,
 certificate, tag, or GitHub Release was created.
+
+## Current checkout runtime repair — 2026-09-04
+
+The earlier release-gate note is historical. In the current checkout, the
+external-target local `pnpm tauri build` completed successfully and produced
+`C:\CargoTarget\SpotDIY\release\bundle\nsis\SpotDIY_0.1.0_x64-setup.exe`.
+The artifact is 6,501,279 bytes, SHA-256
+`0DA477FE2B2163130484DD8346D14871564DB1FC13422D8B2A39F3D2FBC325A4`, and
+`NotSigned`. The release payload includes the approved MPV resource at
+`release\mpv\mpv.exe`; packaged search and Plan 15 visual/restart smokes pass.
+FFmpeg and yt-dlp remain configurable external tools with validated Settings
+paths. Plan 16 remains partial because broad performance budgets fail.

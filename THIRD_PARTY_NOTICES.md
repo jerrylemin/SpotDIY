@@ -41,9 +41,7 @@ The expressions below are the published metadata returned by
 | Crate | Version | License | Project/source | Distribution |
 |---|---:|---|---|---|
 | `async-trait` | 0.1.92 | MIT OR Apache-2.0 | [dtolnay/async-trait](https://github.com/dtolnay/async-trait) | native |
-| `base64` | 0.23.1 | MIT OR Apache-2.0 | [marshallpierce/rust-base64](https://github.com/marshallpierce/rust-base64) | native |
 | `chrono` | 0.4.45 | MIT OR Apache-2.0 | [chronotope/chrono](https://github.com/chronotope/chrono) | native |
-| `keyring` | 4.2.0 | MIT OR Apache-2.0 | [open-source-cooperative/keyring-rs](https://github.com/open-source-cooperative/keyring-rs) | native |
 | `lofty` | 0.25.1 | MIT OR Apache-2.0 | [Serial-ATA/lofty-rs](https://github.com/Serial-ATA/lofty-rs) | native |
 | `notify` | 8.2.0 | CC0-1.0 | [notify-rs/notify](https://github.com/notify-rs/notify) | native |
 | `rand` | 0.9.5 | MIT OR Apache-2.0 | [rust-random/rand](https://github.com/rust-random/rand) | native |
@@ -66,6 +64,7 @@ The expressions below are the published metadata returned by
 | `walkdir` | 2.5.0 | Unlicense OR MIT | [BurntSushi/walkdir](https://github.com/BurntSushi/walkdir) | native |
 | `zip` | 8.6.0 | MIT | [zip-rs/zip2](https://github.com/zip-rs/zip2) | native |
 | `windows-sys` | 0.61.2 | MIT OR Apache-2.0 | [microsoft/windows-rs](https://github.com/microsoft/windows-rs) | Windows native |
+| `windows` | 0.62.2 | MIT OR Apache-2.0 | [microsoft/windows-rs](https://github.com/microsoft/windows-rs) | Windows native helper |
 
 `spotdiy-windows-smtc` is a project-owned path dependency and has no
 third-party license expression. `tauri-build` 2.6.3 is build-time tooling and
@@ -86,6 +85,7 @@ adds them.
 | mpv | [mpv](https://github.com/mpv-player/mpv); the historical local smoke binary was `v0.41.0-dev-g41f6a6450` | GPL-2.0-or-later | external managed tool; exact binary notice required before vendoring |
 | FFmpeg | [ffmpeg.org](https://ffmpeg.org/) | depends on the selected build configuration (LGPL/GPL options) | external managed tool; exact binary/build configuration required before vendoring |
 | yt-dlp | [yt-dlp](https://github.com/yt-dlp/yt-dlp); setup baseline `2026.08.19` | Unlicense plus notices for bundled third-party components | external managed tool; not bundled |
+| spotdl | [spotDL/spotify-downloader](https://github.com/spotDL/spotify-downloader); verified setup baseline `4.5.2` | MIT | external Python CLI; not bundled |
 | WebView2 Evergreen Runtime | [Microsoft WebView2](https://learn.microsoft.com/microsoft-edge/webview2/) | Microsoft runtime terms | OS/runtime prerequisite; not bundled by current Tauri config |
 
 No exact external binary is copied into this repository or release artifact by

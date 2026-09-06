@@ -350,3 +350,53 @@ the graph exceeded its 5,000-node safety limit. CodeGraph remains unavailable.
 Required next step: repair the Visual Studio x64 MSVC installation, create a
 clean detached release worktree from the implementation commit, and rerun
 native and package gates. Do not start Plan 17.
+
+## Plan 16 final handoff — 2026-09-03
+
+The previous Plan 16 note is superseded by the verified release evidence
+below. Repair SHA `39b79bc63396897b6ddfaf81cce3cb2bd3180c2a` is pushed to
+`origin/main`; GitHub Actions run `33769072435` is green for the exact SHA with
+Rust `1.98.1-x86_64-pc-windows-msvc`, frontend, RustSec, and NSIS package jobs.
+
+The exact installer was hash-checked, clean-installed, exercised, and
+uninstalled. Regular playback, provider isolation, Plans 08/09/11/12/13/14/15,
+and Standard/Portable packaged smokes pass. The 27-group feature matrix is at
+`docs/SpotDIY-Vault/Sessions/full-feature-acceptance.md`.
+
+Plan 16 remains `PARTIAL`: broad process-tree idle is `6.56% / 448.8 MiB`,
+60-second playback peaks at `57.81% / 522.5 MiB`, and native SQL/timed packaged
+render budgets are unmeasured. Local native rebuild remains blocked by missing
+MSVC `excpt.h` and `msvcrt.lib`. No tag, release, email, reviewer loop, or
+Plan 17 was created. Keep the work stopped in Plan 16 until the performance
+gates are addressed or their authoritative process scope is decided.
+
+## Plan 16 runtime usability repair — 2026-09-04
+
+The current uncommitted checkout is based on `eceabb3c4a898c8de3abf409811e60eb78cc9171`.
+It contains the requested YouTube/SoundCloud canonical URL and capability
+repairs, native download readiness and structured errors, persisted Spotify
+opt-in with schema 11, case-insensitive WebM recognition, validated online MPV
+playback, persisted/configured MPV/yt-dlp/FFmpeg resolution, and deterministic
+missing-tool playback failure. Rust fmt, strict Clippy, 457 Rust unit tests
+plus real-MPV integration, frontend typecheck/lint/build, 97 Vitest tests, 82 Playwright tests, local Tauri/NSIS
+packaging, packaged search, real-MPV, and Plan 15 packaged visual/restart
+smokes pass. Live provider/download acceptance remains skipped without yt-dlp,
+Spotify authorization, and an approved legal fixture. Performance remains
+partial. No commit or push was made.
+
+## Current Spotify source matching — 2026-09-05
+
+The active uncommitted change supersedes the previous Spotify authorization
+notes. Spotify catalog/PKCE setup, Client ID, market, token, and disconnect
+flows are removed from the application. Search invokes local `spotdl` through a
+bounded process runner; canonical Spotify track results can queue audio-only
+downloads after `spotdl url` resolves a validated YouTube/SoundCloud source.
+The existing yt-dlp/FFmpeg worker writes MP3 output. Spotify remains disabled
+for in-app playback and persisted source downloads, and no SpotMate private
+endpoint or CAPTCHA bypass is used.
+
+Verified in this session: `spotdl --version` reports `4.5.2`, direct Spotify
+metadata normalization succeeds, Spotify URL resolution succeeds, frontend
+typecheck and 102 Vitest tests pass, and all-target Rust verification passes
+with 446 unit tests plus the real-MPV integration test. Strict Clippy still
+reports two pre-existing warnings outside the Spotify/download changes.

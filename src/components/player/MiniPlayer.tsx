@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import { isTauriRuntime } from "../../services/ipc";
 import { usePlayback } from "../../hooks/usePlayback";
+import { usePlaybackClock } from "../../hooks/usePlaybackClock";
 import { useUiStore } from "../../stores/ui-store";
 import { ProgressControl } from "./ProgressControl";
 import { VolumeControl } from "./VolumeControl";
@@ -18,6 +19,7 @@ function phaseLabel(phase: ReturnType<typeof usePlayback>["snapshot"]["phase"]):
 
 export function MiniPlayer() {
   const playback = usePlayback();
+  const visualPositionMs = usePlaybackClock(playback.snapshot);
   const setPlayerMode = useUiStore((state) => state.setPlayerMode);
   const openTrackInspector = useUiStore((state) => state.openTrackInspector);
   const [artworkFailed, setArtworkFailed] = useState(false);
@@ -47,7 +49,7 @@ export function MiniPlayer() {
         <span className={`player-phase-chip player-phase-${snapshot.phase}`}>{phaseLabel(snapshot.phase)}</span>
         <strong title={snapshot.title ?? undefined}>{snapshot.title ?? "Nothing queued"}</strong>
         <span>{hasTrack ? snapshot.artists.join(" · ") || "Unknown artist" : "Choose a local track to start listening."}</span>
-        <ProgressControl disabled={!hasTrack || snapshot.phase === "failed" || snapshot.phase === "recovering"} durationMs={snapshot.durationMs} onSeek={(positionMs) => { void playback.seekPlayback(positionMs); }} pending={playback.pending} positionMs={snapshot.positionMs} />
+        <ProgressControl disabled={!hasTrack || snapshot.phase === "failed" || snapshot.phase === "recovering"} durationMs={snapshot.durationMs} onSeek={(positionMs) => { void playback.seekPlayback(positionMs); }} pending={playback.pending} positionMs={visualPositionMs} />
       </div>
       <div className="mini-player-controls" aria-label="Mini player controls">
         <button aria-label="Previous track" className="player-icon-button" disabled={!queueReady || playback.pending} onClick={() => { void playback.previousTrack(); }} type="button"><SpotIcon name="previous" size={17} /></button>

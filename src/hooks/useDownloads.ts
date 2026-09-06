@@ -3,9 +3,12 @@ import { useEffect, useState } from "react";
 
 import {
   cancelDownload,
+  clearCompletedDownload,
+  clearCompletedDownloads,
   getDownloadSnapshot,
   isTauriRuntime,
   retryDownload,
+  renameDownload,
   setDownloadConcurrency,
   subscribeToDownloadState,
 } from "../services/ipc";
@@ -81,12 +84,40 @@ export function useRetryDownload() {
   });
 }
 
+export function useClearCompletedDownload() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: DownloadTaskId) => clearCompletedDownload(taskId),
+    onSuccess: () => invalidateDownloadSnapshot(queryClient),
+  });
+}
+
+export function useClearCompletedDownloads() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: clearCompletedDownloads,
+    onSuccess: () => invalidateDownloadSnapshot(queryClient),
+  });
+}
+
 export function useSetDownloadConcurrency() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (maxConcurrent: number) => setDownloadConcurrency(maxConcurrent),
     onSuccess: (snapshot) => {
       queryClient.setQueryData(DOWNLOAD_SNAPSHOT_QUERY_KEY, snapshot);
+    },
+  });
+}
+
+export function useRenameDownload() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, name }: { taskId: DownloadTaskId; name: string }) => renameDownload(taskId, name),
+    onSuccess: (task) => {
+      queryClient.setQueryData<DownloadSnapshot>(DOWNLOAD_SNAPSHOT_QUERY_KEY, (snapshot) => snapshot
+        ? { ...snapshot, tasks: snapshot.tasks.map((item) => item.id === task.id ? task : item) }
+        : snapshot);
     },
   });
 }

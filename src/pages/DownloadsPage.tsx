@@ -15,7 +15,10 @@ import {
 import {
   DOWNLOAD_SNAPSHOT_QUERY_KEY,
   useCancelDownload,
+  useClearCompletedDownload,
+  useClearCompletedDownloads,
   useDownloadSnapshot,
+  useRenameDownload,
   useRetryDownload,
   useSetDownloadConcurrency,
 } from "../hooks/useDownloads";
@@ -59,7 +62,10 @@ export function DownloadsPage() {
   const queryClient = useQueryClient();
   const downloads = useDownloadSnapshot();
   const cancel = useCancelDownload();
+  const clearOne = useClearCompletedDownload();
+  const clearAll = useClearCompletedDownloads();
   const retry = useRetryDownload();
+  const rename = useRenameDownload();
   const concurrency = useSetDownloadConcurrency();
   const [filter, setFilter] = useState("");
   const [directoryBusy, setDirectoryBusy] = useState(false);
@@ -80,7 +86,8 @@ export function DownloadsPage() {
     ].join(" ").toLowerCase().includes(query));
   }, [filter, snapshot]);
   const activeCount = snapshot?.tasks.filter((task) => activeStates.includes(task.state)).length ?? 0;
-  const mutationBusy = cancel.isPending || retry.isPending || concurrency.isPending || directoryBusy;
+  const completedCount = snapshot?.tasks.filter((task) => task.state === "completed").length ?? 0;
+  const mutationBusy = cancel.isPending || clearOne.isPending || clearAll.isPending || retry.isPending || rename.isPending || concurrency.isPending || directoryBusy;
   const visibleError = actionError
     ?? downloads.eventError
     ?? errorMessage(downloads.error, "The download service could not be read.");
@@ -128,8 +135,23 @@ export function DownloadsPage() {
     runTaskAction(() => retry.mutateAsync(taskId), "SpotDIY could not retry that download.");
   }
 
+  function clearTask(taskId: DownloadTaskId) {
+    runTaskAction(() => clearOne.mutateAsync(taskId), "SpotDIY could not clear that completed download.");
+  }
+
+  function clearAllCompleted() {
+    if (completedCount === 0 || !window.confirm("Clear completed downloads from this list? Downloaded files are kept.")) {
+      return;
+    }
+    runTaskAction(() => clearAll.mutateAsync(), "SpotDIY could not clear completed downloads.");
+  }
+
   function openLocation(taskId: DownloadTaskId) {
     runTaskAction(() => openDownloadLocation(taskId), "SpotDIY could not open that download folder.");
+  }
+
+  function renameTask(taskId: DownloadTaskId, name: string) {
+    runTaskAction(() => rename.mutateAsync({ taskId, name }), "SpotDIY could not rename that downloaded file.");
   }
 
   return (
@@ -149,7 +171,7 @@ export function DownloadsPage() {
           <strong>{snapshot?.downloadsDirectory ?? "Not configured"}</strong>
           <span>{snapshot?.downloadsDirectory ? "New tasks use this folder." : "Choose a folder before queuing a task."}</span>
         </div>
-        <button className="button button-primary" disabled={!nativeRuntime || mutationBusy} onClick={() => void chooseDirectory()} type="button"><SpotIcon name="folder" size={15} /> Choose folder</button>
+        <button aria-label="Choose folder" className="button button-primary icon-only-button" disabled={!nativeRuntime || mutationBusy} onClick={() => void chooseDirectory()} title="Choose download folder" type="button"><SpotIcon name="folder" size={15} /> Choose folder</button>
         <label className="downloads-concurrency"><span className="eyebrow">CONCURRENT TASKS</span><select aria-label="Maximum concurrent downloads" disabled={!nativeRuntime || mutationBusy} onChange={(event) => void updateConcurrency(event.target.value)} value={snapshot?.maxConcurrent ?? 2}><option value={1}>1 task</option><option value={2}>2 tasks</option><option value={3}>3 tasks</option><option value={4}>4 tasks</option></select></label>
       </section>
 
@@ -166,8 +188,8 @@ export function DownloadsPage() {
 
       {downloads.isLoading ? <EmptyState icon="download" eyebrow="DOWNLOAD QUEUE" title="Loading downloads" description="Reading persistent task state from the local database…" /> : snapshot && snapshot.tasks.length === 0 ? <EmptyState icon="download" eyebrow="DOWNLOAD QUEUE EMPTY" title="Downloaded tracks appear here" description="Queue a YouTube or SoundCloud track from Search. The task and its provenance remain available across restarts." action={<Link className="button button-quiet" to="/search">Browse sources <SpotIcon name="arrow" size={14} /></Link>} /> : (
         <section className="downloads-list-section" aria-labelledby="downloads-list-heading">
-          <div className="section-heading"><div><span className="eyebrow">TASK QUEUE</span><h2 id="downloads-list-heading">Managed downloads</h2></div><label className="downloads-filter"><SpotIcon name="search" size={14} /><input aria-label="Filter downloads" onChange={(event) => setFilter(event.target.value)} placeholder="Filter title, artist, provider…" value={filter} /></label></div>
-          {tasks.length > 0 ? <div className="download-task-list">{tasks.map((task) => <DownloadTaskRow actionPending={mutationBusy} key={task.id} onCancel={cancelTask} onOpenLocation={openLocation} onRetry={retryTask} task={task} />)}</div> : <div className="library-pending-state"><SpotIcon name="search" size={18} /> No tasks match this filter.</div>}
+          <div className="section-heading"><div><span className="eyebrow">TASK QUEUE</span><h2 id="downloads-list-heading">Managed downloads</h2></div><div className="library-heading-actions"><label className="downloads-filter"><SpotIcon name="search" size={14} /><input aria-label="Filter downloads" onChange={(event) => setFilter(event.target.value)} placeholder="Filter title, artist, provider…" value={filter} /></label><button aria-label="Clear all completed downloads" className="button button-quiet button-small playlist-danger" disabled={!nativeRuntime || mutationBusy || completedCount === 0} onClick={clearAllCompleted} title="Clear all completed downloads" type="button"><SpotIcon name="trash" size={13} /> Clear completed</button></div></div>
+          {tasks.length > 0 ? <div className="download-task-list">{tasks.map((task) => <DownloadTaskRow actionPending={mutationBusy} key={task.id} onCancel={cancelTask} onClear={clearTask} onOpenLocation={openLocation} onRename={renameTask} onRetry={retryTask} task={task} />)}</div> : <div className="library-pending-state"><SpotIcon name="search" size={18} /> No tasks match this filter.</div>}
         </section>
       )}
 

@@ -1,17 +1,10 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "../common/Button";
 import { StatusChip } from "../common/StatusChip";
 import { SpotIcon } from "../icons/SpotIcon";
 import { useWindowsIntegration } from "../../hooks/useWindowsIntegration";
-import type { GlobalShortcutBinding, OutputProfile, OverlayKind } from "../../types/domain";
-
-const overlayLabels: Record<OverlayKind, string> = {
-  mini: "Mini",
-  edge: "Edge",
-  lyrics: "Lyrics",
-  gaming: "Gaming",
-};
+import type { GlobalShortcutBinding, OutputProfile } from "../../types/domain";
 
 const shortcutLabels: Record<GlobalShortcutBinding["action"], string> = {
   playPause: "Play / Pause",
@@ -21,8 +14,6 @@ const shortcutLabels: Record<GlobalShortcutBinding["action"], string> = {
   volumeDown: "Volume -5%",
   showHideMain: "Show / Hide main",
   toggleMiniOverlay: "Mini overlay",
-  toggleLyricsOverlay: "Lyrics overlay",
-  toggleGamingOverlay: "Gaming overlay",
 };
 
 function statusLabel(value: string | undefined): string {
@@ -71,7 +62,7 @@ export function WindowsIntegrationSettingsSection() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingProfile, setEditingProfile] = useState<OutputProfile | null>(null);
   const smtcEnabled = snapshot?.smtcStatus !== "disabled";
-  const overlayStates = useMemo(() => new Map(snapshot?.overlays.map((overlay) => [overlay.kind, overlay]) ?? []), [snapshot?.overlays]);
+  const miniOverlay = snapshot?.overlays.find((overlay) => overlay.kind === "mini");
 
   const updateWindowsSettings = (next: { smtcEnabled?: boolean; globalShortcutsEnabled?: boolean }) => {
     const current = {
@@ -128,15 +119,10 @@ export function WindowsIntegrationSettingsSection() {
       </div>
 
       <div className="windows-integration-card">
-        <div className="windows-card-heading"><div><strong>Overlay windows</strong><span>Always-on-top desktop surfaces</span></div><StatusChip status={snapshot?.platformSupported ? "success" : "neutral"}>{snapshot?.platformSupported ? "Native ready" : "Desktop app only"}</StatusChip></div>
+        <div className="windows-card-heading"><div><strong>Mini overlay</strong><span>Minimal always-on-top playback controls</span></div><StatusChip status={snapshot?.platformSupported ? "success" : "neutral"}>{snapshot?.platformSupported ? "Native ready" : "Desktop app only"}</StatusChip></div>
         <div className="windows-overlay-buttons">
-          {(Object.keys(overlayLabels) as OverlayKind[]).map((kind) => {
-            const overlay = overlayStates.get(kind);
-            return <Button key={kind} onClick={() => { void windows.toggleOverlay(kind); }} size="sm" type="button" variant="quiet"><SpotIcon name={kind === "lyrics" ? "lyrics" : kind === "gaming" ? "play" : "expand"} size={15} />{overlayLabels[kind]} <StatusChip status={chipStatus(overlay?.status)}>{statusLabel(overlay?.status)}</StatusChip></Button>;
-          })}
+          <Button onClick={() => { void windows.toggleOverlay("mini"); }} size="sm" type="button" variant="quiet"><SpotIcon name="expand" size={15} />Mini overlay <StatusChip status={chipStatus(miniOverlay?.status)}>{statusLabel(miniOverlay?.status)}</StatusChip></Button>
         </div>
-        <div className="windows-gaming-warning"><SpotIcon name="info" size={16} /><span>Gaming Overlay is a standard always-on-top desktop window. Best with windowed or borderless games; exclusive fullscreen can cover desktop overlays.</span></div>
-        <label className="windows-toggle-row windows-gaming-toggle"><span><strong>Gaming click-through</strong><small>Click-through is session-only and starts disabled. Rescue: Ctrl+Alt+Shift+G.</small></span><input aria-label="Gaming click-through" checked={snapshot?.gamingClickThrough ?? false} disabled={overlayStates.get("gaming")?.status !== "open"} onChange={(event) => { void windows.setGamingClickThrough(event.target.checked).catch(() => undefined); }} type="checkbox" /></label>
       </div>
 
       <div className="windows-integration-card">

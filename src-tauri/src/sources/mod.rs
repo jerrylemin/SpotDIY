@@ -190,7 +190,7 @@ pub(crate) fn is_cancelled(cancellation: &SearchCancellation) -> bool {
 fn structured_search_args(provider: ProviderKind, query: &str) -> Vec<String> {
     let expression = match provider {
         ProviderKind::Youtube => format!("ytsearch25:{query}"),
-        ProviderKind::Soundcloud => format!("scsearch25:{query}"),
+        ProviderKind::Soundcloud => format!("scsearch5:{query}"),
         ProviderKind::Local | ProviderKind::Spotify => unreachable!("yt-dlp search is online-only"),
     };
     [

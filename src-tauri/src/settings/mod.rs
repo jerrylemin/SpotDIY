@@ -76,11 +76,6 @@ pub enum SettingClass {
     Secret,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SecretSettingKey {
-    SpotifyClientSecret,
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsSnapshot {
@@ -114,8 +109,6 @@ pub enum GlobalShortcutAction {
     VolumeDown,
     ShowHideMain,
     ToggleMiniOverlay,
-    ToggleLyricsOverlay,
-    ToggleGamingOverlay,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -376,7 +369,6 @@ impl<'database> SettingsRepository<'database> {
                 }
             })?;
         }
-
         if let Some((value_json, value_type, schema_version)) =
             read_setting(&connection, "layout_profile")?
         {
@@ -443,11 +435,26 @@ impl<'database> SettingsRepository<'database> {
                 "global_shortcuts",
                 schema_version,
             )?;
-            snapshot.global_shortcuts = serde_json::from_str(&value_json).map_err(|source| {
-                SettingsError::Deserialization {
+            let stored_shortcuts: Vec<serde_json::Value> = serde_json::from_str(&value_json)
+                .map_err(|source| SettingsError::Deserialization {
                     key: "global_shortcuts",
                     source,
-                }
+                })?;
+            let stored_shortcuts = stored_shortcuts
+                .into_iter()
+                .filter(|binding| {
+                    !matches!(
+                        binding.get("action").and_then(serde_json::Value::as_str),
+                        Some("toggleLyricsOverlay") | Some("toggleGamingOverlay")
+                    )
+                })
+                .collect::<Vec<_>>();
+            snapshot.global_shortcuts = serde_json::from_value(serde_json::Value::Array(
+                stored_shortcuts,
+            ))
+            .map_err(|source| SettingsError::Deserialization {
+                key: "global_shortcuts",
+                source,
             })?;
             validate_global_shortcuts(&snapshot.global_shortcuts)?;
         }
@@ -500,6 +507,18 @@ impl<'database> SettingsRepository<'database> {
         Ok(self.get_snapshot()?.source_preference_order)
     }
 
+    pub fn get_mpv_path(&self) -> Result<Option<PathBuf>, SettingsError> {
+        self.get_path_setting("mpv_path")
+    }
+
+    pub fn get_yt_dlp_path(&self) -> Result<Option<PathBuf>, SettingsError> {
+        self.get_path_setting("yt_dlp_path")
+    }
+
+    pub fn get_ffmpeg_path(&self) -> Result<Option<PathBuf>, SettingsError> {
+        self.get_path_setting("ffmpeg_path")
+    }
+
     pub fn set_setting(&self, setting: SettingValue) -> Result<SettingsSnapshot, SettingsError> {
         match &setting {
             SettingValue::Theme(Theme::Custom) if self.get_snapshot()?.custom_theme.is_none() => {
@@ -521,6 +540,65 @@ impl<'database> SettingsRepository<'database> {
             _ => {}
         }
         let (key, value_type, value_json) = encode_setting(&setting)?;
+        self.write_setting(key, value_type, value_json)?;
+        self.get_snapshot()
+    }
+
+    pub fn set_mpv_path(&self, path: Option<PathBuf>) -> Result<(), SettingsError> {
+        self.set_path_setting("mpv_path", path)
+    }
+
+    pub fn set_yt_dlp_path(&self, path: Option<PathBuf>) -> Result<(), SettingsError> {
+        self.set_path_setting("yt_dlp_path", path)
+    }
+
+    pub fn set_ffmpeg_path(&self, path: Option<PathBuf>) -> Result<(), SettingsError> {
+        self.set_path_setting("ffmpeg_path", path)
+    }
+
+    pub fn mark_initialized(&self) -> Result<(), SettingsError> {
+        let mut connection = self.database.connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO settings_metadata (setting_key, value_json, value_type, schema_version, updated_at)
+             VALUES ('first_run', 'false', 'boolean', ?1, ?2)
+             ON CONFLICT(setting_key) DO UPDATE SET
+                 value_json = excluded.value_json,
+                 value_type = excluded.value_type,
+                 schema_version = excluded.schema_version,
+                 updated_at = excluded.updated_at",
+            params![SETTINGS_SCHEMA_VERSION, Utc::now().to_rfc3339()],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn get_path_setting(&self, key: &'static str) -> Result<Option<PathBuf>, SettingsError> {
+        let connection = self.database.connection()?;
+        let Some((value_json, value_type, schema_version)) = read_setting(&connection, key)? else {
+            return Ok(None);
+        };
+        ensure_record(key, &value_type, key, schema_version)?;
+        serde_json::from_str(&value_json)
+            .map_err(|source| SettingsError::Deserialization { key, source })
+    }
+
+    fn set_path_setting(
+        &self,
+        key: &'static str,
+        path: Option<PathBuf>,
+    ) -> Result<(), SettingsError> {
+        let value_json = serde_json::to_string(&path)
+            .map_err(|source| SettingsError::Serialization { key, source })?;
+        self.write_setting(key, key, value_json)
+    }
+
+    fn write_setting(
+        &self,
+        key: &'static str,
+        value_type: &'static str,
+        value_json: String,
+    ) -> Result<(), SettingsError> {
         let mut connection = self.database.connection()?;
         let transaction = connection.transaction()?;
         transaction.execute(
@@ -538,24 +616,6 @@ impl<'database> SettingsRepository<'database> {
                 SETTINGS_SCHEMA_VERSION,
                 Utc::now().to_rfc3339(),
             ],
-        )?;
-        transaction.commit()?;
-        drop(connection);
-        self.get_snapshot()
-    }
-
-    pub fn mark_initialized(&self) -> Result<(), SettingsError> {
-        let mut connection = self.database.connection()?;
-        let transaction = connection.transaction()?;
-        transaction.execute(
-            "INSERT INTO settings_metadata (setting_key, value_json, value_type, schema_version, updated_at)
-             VALUES ('first_run', 'false', 'boolean', ?1, ?2)
-             ON CONFLICT(setting_key) DO UPDATE SET
-                 value_json = excluded.value_json,
-                 value_type = excluded.value_type,
-                 schema_version = excluded.schema_version,
-                 updated_at = excluded.updated_at",
-            params![SETTINGS_SCHEMA_VERSION, Utc::now().to_rfc3339()],
         )?;
         transaction.commit()?;
         Ok(())
@@ -628,16 +688,6 @@ pub fn default_global_shortcuts() -> Vec<GlobalShortcutBinding> {
         GlobalShortcutBinding {
             action: GlobalShortcutAction::ToggleMiniOverlay,
             accelerator: "Ctrl+Alt+M".to_owned(),
-            enabled: true,
-        },
-        GlobalShortcutBinding {
-            action: GlobalShortcutAction::ToggleLyricsOverlay,
-            accelerator: "Ctrl+Alt+L".to_owned(),
-            enabled: true,
-        },
-        GlobalShortcutBinding {
-            action: GlobalShortcutAction::ToggleGamingOverlay,
-            accelerator: "Ctrl+Alt+G".to_owned(),
             enabled: true,
         },
     ]

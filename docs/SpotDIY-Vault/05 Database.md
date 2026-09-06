@@ -73,10 +73,10 @@ row byte-for-byte, expands the ordinary settings allowlist for
 `user_version` to 8. No media, library, queue, lyrics, collection, or download
 table is changed.
 
-The typed settings contract persists SMTC/global-shortcut preferences, nine
+The typed settings contract persists SMTC/global-shortcut preferences, seven
 validated action/accelerator bindings, and normalized output profiles with
-device, volume, and mute values. Overlay visibility, native handles, tray
-state, SMTC runtime objects, and Gaming click-through are session-only. The
+device, volume, and mute values. Mini overlay visibility, native handles, tray
+state, SMTC runtime objects, and native drag state are session-only. The
 schema 7-to-8 fixture compares all prior settings rows before and after the
 migration and keeps `foreign_key_check` at zero; the packaged Plan 12 smoke
 also verifies a fresh database reaches schema 8 and retains the durable values
@@ -115,3 +115,20 @@ filesystem path or provider raw URL.
 The migration is included in fresh startup and schema-8 upgrade fixtures.
 Native execution of those fixtures remains pending the local Rust linker
 toolchain; the source-level migration assertions are present.
+
+## Plan 16 runtime settings migration — 2026-09-04
+
+Migration 10 rebuilds only `settings_metadata`, preserves every existing
+setting row and foreign-key relationship, and adds the persisted `mpv_path`.
+The former `spotify_catalog_enabled` row is retained only in that historical
+migration so existing databases can be upgraded safely.
+
+## Current schema 12 — Spotify source matching
+
+Migration 12 rebuilds the `downloads` table to allow the transient Spotify
+search-result provider kind, preserves existing task rows and foreign keys,
+and removes the obsolete `spotify_catalog_enabled` metadata row. Spotify
+search results keep their canonical Spotify URL in the task; the worker uses
+`spotdl` only to resolve a validated YouTube/SoundCloud source before the
+audio-only yt-dlp/FFmpeg step. The latest schema is 12 and archive format
+remains 1.

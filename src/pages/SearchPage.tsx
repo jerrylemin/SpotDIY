@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
-import { Link } from "@tanstack/react-router";
 
-import { EmptyState } from "../components/common/EmptyState";
+import type { DownloadReadiness } from "../features/actions/track-actions";
 import { ProviderSearchSection } from "../components/search/ProviderSearchSection";
 import { SearchControls } from "../components/search/SearchControls";
 import { SpotIcon } from "../components/icons/SpotIcon";
@@ -36,7 +35,7 @@ function providerName(kind: ProviderKind): string {
     case "soundcloud":
       return "SoundCloud";
     case "spotify":
-      return "Spotify catalog";
+      return "Spotify";
   }
 }
 
@@ -48,15 +47,18 @@ export function SearchPage() {
   const status = useAppStatus();
   const search = useSearch({ query, lens, sortField, sortDirection });
   const providerStatuses = useMemo(() => new Map((status.data?.providers ?? []).map((provider) => [provider.kind, provider])), [status.data?.providers]);
+  const downloadReadiness: DownloadReadiness | undefined = status.data ? {
+    ytDlpStatus: status.data.mediaTools.ytDlp.status,
+    ffmpegStatus: status.data.mediaTools.ffmpeg.status,
+    downloadDirectoryStatus: status.data.downloadDirectoryStatus,
+    mpvStatus: status.data.mediaTools.mpv.status,
+    spotifyStatus: providerStatuses.get("spotify")?.runtimeStatus,
+  } : undefined;
   const providers = searchProviderOrder(lens);
   const hasQuery = query.trim().length > 0;
 
   return (
     <div className="page-stack search-page">
-      <section className="page-intro search-intro">
-        <div><span className="eyebrow">GLOBAL SEARCH</span><h1>Find your next <em>listen.</em></h1><p>One query, independent source responses, and enough context to choose the right version.</p></div>
-        <span className="command-hint"><SpotIcon name="command" size={15} /> <kbd>CTRL K</kbd> commands</span>
-      </section>
       <SearchControls
         isSearching={search.isSearching}
         lens={lens}
@@ -79,7 +81,7 @@ export function SearchPage() {
             <div><span className="eyebrow">RESULTS FOR</span><h2>“{query.trim()}”</h2></div>
             <span className="section-note">{search.isDebouncing ? "Waiting 250 ms" : `Relevance · ${sortDirection === "descending" ? "descending" : "ascending"}`}</span>
           </div>
-          {search.error ? <div className="search-global-error" role="alert"><SpotIcon name="alert" size={17} /><span>{search.error}</span><button className="button button-small" onClick={search.retry} type="button">Retry search</button></div> : null}
+          {search.error ? <div className="search-global-error" role="alert"><SpotIcon name="alert" size={17} /><span>{search.error}</span><button aria-label="Retry search" className="button button-small icon-only-button" onClick={search.retry} title="Retry search" type="button"><SpotIcon name="refresh" size={14} /></button></div> : null}
           <div className="provider-result-groups">
             {providers.map((provider) => (
               <ProviderSearchSection
@@ -105,13 +107,12 @@ export function SearchPage() {
                   },
                   detail: `No ${providerLabel(provider)} search status is available.`,
                 }}
+                downloadReadiness={downloadReadiness}
               />
             ))}
           </div>
         </section>
-      ) : (
-        <EmptyState icon="search" eyebrow="READY WHEN YOU ARE" title="Search starts with a signal" description="Type above to search local tracks and configured sources. Results keep provider context visible so you can choose with confidence." action={<Link className="button button-quiet" to="/library">Set up local library <SpotIcon name="arrow" size={14} /></Link>} />
-      )}
+      ) : null}
     </div>
   );
 }

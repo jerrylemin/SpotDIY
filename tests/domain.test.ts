@@ -48,8 +48,6 @@ describe("settings IPC contract", () => {
         { action: "volumeDown", accelerator: "Ctrl+Alt+Down", enabled: true },
         { action: "showHideMain", accelerator: "Ctrl+Alt+S", enabled: true },
         { action: "toggleMiniOverlay", accelerator: "Ctrl+Alt+M", enabled: true },
-        { action: "toggleLyricsOverlay", accelerator: "Ctrl+Alt+L", enabled: true },
-        { action: "toggleGamingOverlay", accelerator: "Ctrl+Alt+G", enabled: true },
       ],
       outputProfiles: [],
     });
@@ -110,9 +108,6 @@ describe("settings IPC contract", () => {
     expect(snapshot.platformSupported).toBe(false);
     expect(snapshot.overlays).toEqual([
       { kind: "mini", status: "closed", detail: null },
-      { kind: "edge", status: "closed", detail: null },
-      { kind: "lyrics", status: "closed", detail: null },
-      { kind: "gaming", status: "closed", detail: null },
     ]);
     const opened = await toggleOverlay("mini");
     expect(opened.overlays.find((overlay) => overlay.kind === "mini")?.status).toBe("open");

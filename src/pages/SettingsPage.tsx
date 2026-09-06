@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ProviderBadge } from "../components/common/ProviderBadge";
 import { Button } from "../components/common/Button";
@@ -15,13 +14,18 @@ import { MAX_THEME_BYTES } from "../features/theme/theme-schema";
 import { useTheme } from "../features/theme/theme-controller-model";
 import { useAppStatus } from "../hooks/useAppStatus";
 import {
-  IpcError,
-  beginSpotifyAuthorization,
-  disconnectSpotify,
-  getSpotifySetupStatus,
-  subscribeToSpotifyAuthState,
+  clearFfmpegPath,
+  clearMpvPath,
+  clearYtDlpPath,
+  configureFfmpeg,
+  configureMpv,
+  configureYtDlp,
+  isTauriRuntime,
+  rescanFfmpeg,
+  rescanMpv,
+  rescanYtDlp,
 } from "../services/ipc";
-import type { ProviderKind, SpotifySetupStatus } from "../types/domain";
+import type { ProviderKind } from "../types/domain";
 
 const providerOrder: ProviderKind[] = ["local", "youtube", "soundcloud", "spotify"];
 
@@ -46,20 +50,7 @@ function providerName(kind: ProviderKind): string {
     case "soundcloud":
       return "SoundCloud";
     case "spotify":
-      return "Spotify catalog";
-  }
-}
-
-function statusLabel(status: SpotifySetupStatus | undefined): string {
-  switch (status?.state) {
-    case "connected":
-      return "Connected";
-    case "setup_required":
-      return "Setup required";
-    case "unavailable":
-      return "Unavailable";
-    default:
-      return "Disabled";
+      return "Spotify";
   }
 }
 
@@ -80,60 +71,14 @@ function runtimeToolLabel(status: string | undefined): string {
   }
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof IpcError && error.message) {
-    return error.message;
-  }
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return "Spotify setup could not be updated.";
-}
-
 export function SettingsPage() {
   const appStatus = useAppStatus();
   const appearance = useTheme();
-  const queryClient = useQueryClient();
-  const spotify = useQuery({
-    queryKey: ["spotify-setup"],
-    queryFn: getSpotifySetupStatus,
-    staleTime: Number.POSITIVE_INFINITY,
-    retry: 1,
-  });
-  const [clientId, setClientId] = useState("");
-  const [market, setMarket] = useState(spotify.data?.market ?? "US");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
   const [exportedThemeJson, setExportedThemeJson] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (spotify.data?.market) {
-      setMarket(spotify.data.market);
-    }
-  }, [spotify.data?.market]);
-
-  useEffect(() => {
-    let mounted = true;
-    let unsubscribe: (() => void) | undefined;
-    void subscribeToSpotifyAuthState((next) => {
-      if (mounted) {
-        queryClient.setQueryData(["spotify-setup"], next);
-      }
-    }).then((stop) => {
-      if (mounted) {
-        unsubscribe = stop;
-      } else {
-        stop();
-      }
-    }).catch(() => undefined);
-    return () => {
-      mounted = false;
-      unsubscribe?.();
-    };
-  }, [queryClient]);
-
-  const spotifyStatus = spotify.data;
   const providers = providerOrder.map((kind) => appStatus.data?.providers.find((provider) => provider.kind === kind) ?? {
     kind,
     label: providerName(kind),
@@ -144,29 +89,62 @@ export function SettingsPage() {
     detail: "Provider status is not available yet.",
   });
 
-  async function setupSpotify() {
+  async function runMpvAction(action: () => Promise<unknown>, fallback: string) {
     setBusy(true);
     setActionError(null);
     try {
-      await beginSpotifyAuthorization(clientId, market);
-      await queryClient.invalidateQueries({ queryKey: ["spotify-setup"] });
+      await action();
+      await appStatus.refetch();
     } catch (error) {
-      setActionError(errorMessage(error));
+      setActionError(error instanceof Error && error.message ? error.message : fallback);
     } finally {
       setBusy(false);
     }
   }
 
-  async function disconnect() {
-    setBusy(true);
-    setActionError(null);
-    try {
-      queryClient.setQueryData(["spotify-setup"], await disconnectSpotify());
-    } catch (error) {
-      setActionError(errorMessage(error));
-    } finally {
-      setBusy(false);
-    }
+  function configureMpvAction() {
+    return runMpvAction(configureMpv, "MPV could not be configured.");
+  }
+
+  function clearMpvAction() {
+    return runMpvAction(clearMpvPath, "The custom MPV path could not be cleared.");
+  }
+
+  function rescanMpvAction() {
+    return runMpvAction(rescanMpv, "MPV could not be re-scanned.");
+  }
+
+  function configureYtDlpAction() {
+    return runMpvAction(configureYtDlp, "yt-dlp could not be configured.");
+  }
+
+  function clearYtDlpAction() {
+    return runMpvAction(clearYtDlpPath, "The custom yt-dlp path could not be cleared.");
+  }
+
+  function rescanYtDlpAction() {
+    return runMpvAction(rescanYtDlp, "yt-dlp could not be re-scanned.");
+  }
+
+  function configureFfmpegAction() {
+    return runMpvAction(configureFfmpeg, "FFmpeg could not be configured.");
+  }
+
+  function clearFfmpegAction() {
+    return runMpvAction(clearFfmpegPath, "The custom FFmpeg path could not be cleared.");
+  }
+
+  function rescanFfmpegAction() {
+    return runMpvAction(rescanFfmpeg, "FFmpeg could not be re-scanned.");
+  }
+
+  function toolActions(key: "ytDlp" | "ffmpeg" | "mpv") {
+    const actions = key === "ytDlp"
+      ? { configure: configureYtDlpAction, clear: clearYtDlpAction, rescan: rescanYtDlpAction }
+      : key === "ffmpeg"
+        ? { configure: configureFfmpegAction, clear: clearFfmpegAction, rescan: rescanFfmpegAction }
+        : { configure: configureMpvAction, clear: clearMpvAction, rescan: rescanMpvAction };
+    return <div className="settings-tool-actions"><button aria-label="Configure…" className="button button-small icon-only-button" disabled={busy || !isTauriRuntime()} onClick={() => { void actions.configure(); }} title="Configure executable path" type="button"><SpotIcon name="settings" size={14} /> Configure…</button><button aria-label="Clear custom path" className="button button-small button-quiet icon-only-button" disabled={busy || !isTauriRuntime()} onClick={() => { void actions.clear(); }} title="Clear custom executable path" type="button"><SpotIcon name="trash" size={14} /> Clear custom path</button><button aria-label="Re-scan" className="button button-small button-quiet icon-only-button" disabled={busy || !isTauriRuntime()} onClick={() => { void actions.rescan(); }} title="Re-scan executable" type="button"><SpotIcon name="refresh" size={14} /> Re-scan</button></div>;
   }
 
   function appearanceErrorMessage(error: unknown): string {
@@ -290,19 +268,12 @@ export function SettingsPage() {
       </section>
       <WindowsIntegrationSettingsSection />
       <section className="settings-section">
-        <div className="settings-section-heading"><span className="eyebrow">SOURCE CONNECTIONS</span><p>Optional online sources augment your local library. Spotify provides catalog metadata only and never enters the playback or download path.</p></div>
+        <div className="settings-section-heading"><span className="eyebrow">SOURCE CONNECTIONS</span><p>Optional online sources augment your local library. Spotify search and source-matched MP3 downloads use spotdl; no Spotify developer app is required.</p></div>
         <div className="settings-source-list">
-          {providers.map((provider) => <div className="settings-source-row" key={provider.kind}><ProviderBadge kind={provider.kind} /><div className="settings-source-copy"><strong>{provider.label}</strong><span>{provider.detail}</span></div><span className={`source-connection-status ${provider.configured ? "connected" : "not-connected"}`}>{provider.configured ? "Connected" : provider.kind === "spotify" ? statusLabel(spotifyStatus) : "Not connected"}</span>{provider.kind === "spotify" && spotifyStatus?.state === "connected" ? <button className="button button-small" disabled={busy} onClick={() => void disconnect()} type="button">Disconnect</button> : null}</div>)}
-        </div>
-        <div className="spotify-setup-card">
-          <div className="spotify-setup-heading"><div><span className="eyebrow">SPOTIFY CATALOG</span><strong>PKCE authorization</strong></div><span className={`source-connection-status ${spotifyStatus?.state === "connected" ? "connected" : "not-connected"}`}>{statusLabel(spotifyStatus)}</span></div>
-          <p>{spotifyStatus?.detail ?? "Checking Spotify setup status."}</p>
-          {spotifyStatus?.state === "setup_required" ? <div className="spotify-setup-form"><label><span>Client ID</span><input aria-label="Spotify client ID" onChange={(event) => setClientId(event.target.value)} placeholder="Paste your Spotify client ID" value={clientId} /></label><label><span>Market</span><input aria-label="Spotify market" maxLength={2} onChange={(event) => setMarket(event.target.value.toUpperCase())} value={market} /></label><button className="button button-primary" disabled={busy || clientId.trim().length === 0} onClick={() => void setupSpotify()} type="button">{busy ? "Waiting for authorization…" : "Set up source"}</button></div> : null}
-          {actionError ? <div className="library-inline-error" role="alert"><SpotIcon name="alert" size={15} />{actionError}</div> : null}
-          {spotifyStatus?.state === "disabled" ? <span className="settings-muted-note">Enable the Spotify developer gate in the native environment before authorizing.</span> : null}
+          {providers.map((provider) => <div className="settings-source-row" key={provider.kind}><ProviderBadge kind={provider.kind} /><div className="settings-source-copy"><strong>{provider.label}</strong><span>{provider.detail}</span></div><span className={`source-connection-status ${provider.available ? "connected" : "not-connected"}`}>{provider.kind === "spotify" ? (provider.available ? "Ready" : "Unavailable") : provider.configured ? "Connected" : "Not connected"}</span></div>)}
         </div>
       </section>
-      <section className="settings-section"><div className="settings-section-heading"><span className="eyebrow">MEDIA TOOLS</span><p>Download execution uses validated local binaries. Paths stay in the native boundary; only health, version, and actionable detail are shown here.</p></div><div className="settings-tool-list">{(["ytDlp", "ffmpeg"] as const).map((key) => { const tool = appStatus.data?.mediaTools[key]; const label = key === "ytDlp" ? "yt-dlp" : "FFmpeg"; return <div className="settings-tool-row" key={key}><div><strong>{label}</strong><span>{tool?.version ?? "Version unavailable"}</span></div><span className={`source-connection-status ${tool?.status === "ready" ? "connected" : "not-connected"}`}>{runtimeToolLabel(tool?.status)}</span><p>{tool?.detail ?? "Tool health is not available yet."}</p></div>; })}</div></section>
+      <section className="settings-section"><div className="settings-section-heading"><span className="eyebrow">MEDIA TOOLS</span><p>Download and online playback use validated local binaries. Paths stay in the native boundary; only health, version, and actionable detail are shown here.</p></div><div className="settings-tool-list">{(["ytDlp", "ffmpeg", "mpv"] as const).map((key) => { const tool = appStatus.data?.mediaTools[key]; const label = key === "ytDlp" ? "yt-dlp" : key === "ffmpeg" ? "FFmpeg" : "MPV"; return <div className="settings-tool-row" key={key}><div><strong>{label}</strong><span>{tool?.version ?? "Version unavailable"}</span></div><span className={`source-connection-status ${tool?.status === "ready" ? "connected" : "not-connected"}`}>{runtimeToolLabel(tool?.status)}</span><p>{tool?.detail ?? "Tool health is not available yet."}</p>{toolActions(key)}</div>; })}</div>{actionError ? <div className="library-inline-error" role="alert"><SpotIcon name="alert" size={15} /><span>{actionError}</span></div> : null}</section>
       <BackupSection />
       <section className="settings-footer"><Link className="text-link" to="/library">Open local library <SpotIcon name="arrow" size={14} /></Link><span><span className="status-dot status-dot-active" /> No telemetry by default</span></section>
     </div>

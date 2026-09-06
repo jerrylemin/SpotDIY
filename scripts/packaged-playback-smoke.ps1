@@ -172,8 +172,8 @@ function Assert-Schema8Database {
         throw "the packaged Plan 12 database was not created: $databasePath"
     }
     $schemaVersion = (& $sqliteCommand.Source $databasePath "PRAGMA user_version;" 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $schemaVersion -ne "9") {
-        throw "the packaged Plan 12 database is not at the latest schema 9: $schemaVersion"
+    if ($LASTEXITCODE -ne 0 -or $schemaVersion -ne "11") {
+        throw "the packaged Plan 12 database is not at the latest schema 11: $schemaVersion"
     }
 }
 
@@ -209,7 +209,7 @@ function Assert-Schema9Database {
         $sqliteCommand = Get-Command sqlite3 -ErrorAction SilentlyContinue
     }
     if ($null -eq $sqliteCommand) {
-        throw "sqlite3 is required to verify the packaged Plan 14 schema-9 database"
+        throw "sqlite3 is required to verify the packaged Plan 14 schema-11 database"
     }
 
     $databasePath = Join-Path $profileRoot "SpotDIY\spotdiy.sqlite3"
@@ -217,8 +217,8 @@ function Assert-Schema9Database {
         throw "the packaged Plan 14 database was not created: $databasePath"
     }
     $schemaVersion = (& $sqliteCommand.Source $databasePath "PRAGMA user_version;" 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $schemaVersion -ne "9") {
-        throw "the packaged database schema is not version 9: $schemaVersion"
+    if ($LASTEXITCODE -ne 0 -or $schemaVersion -ne "11") {
+        throw "the packaged database schema is not version 11: $schemaVersion"
     }
 }
 
@@ -364,7 +364,7 @@ try {
     } elseif ($Plan14SmartAnalytics) {
         Write-Output "PASS: packaged Plan 14 schema migration, local history, sessions, private/temporary boundaries, smart playlist preview/mix, restart persistence, and owned-process cleanup"
     } elseif ($Plan12Windows) {
-        Write-Output "PASS: packaged Plan 12 schema 8-to-9 migration, tray, SMTC status, shortcuts, overlays, click-through recovery, output profiles, restart persistence, and owned-process cleanup"
+        Write-Output "PASS: packaged Plan 12 schema 8-to-11 migration, tray, SMTC status, shortcuts, overlays, click-through recovery, output profiles, restart persistence, and owned-process cleanup"
     } elseif ($Plan11Shell) {
         Write-Output "PASS: packaged Plan 11 schema migration, appearance persistence, shell modes, inspector, queue, lyrics, restart, and owned-process persistence"
     } elseif ($Plan09Lyrics) {

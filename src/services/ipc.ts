@@ -23,6 +23,7 @@ import type {
   LibraryStatus,
   LyricsCandidate,
   LyricsDocument,
+  LyricsWord,
   LyricsSourceKind,
   LyricsSyncKind,
   ManualLyricsMode,
@@ -34,6 +35,7 @@ import type {
   PlaybackSnapshot,
   PlaybackSourceOption,
   ProviderKind,
+  ProviderStatus,
   ProviderSearchEvent,
   ProviderSearchSection,
   QueueEntryId,
@@ -47,8 +49,6 @@ import type {
   ScanProgress,
   SettingValue,
   SettingsSnapshot,
-  SpotifyAuthorizationRequest,
-  SpotifySetupStatus,
   ClearFusionOverrideRequest,
   FusionEvaluation,
   FusionOverride,
@@ -135,6 +135,8 @@ const appStatusSchema = z.object({
   firstRun: z.boolean(),
   tracksIndexed: z.number().int().nonnegative(),
   musicFolders: z.array(z.string()),
+  downloadsDirectory: z.string().nullable(),
+  downloadDirectoryStatus: z.enum(["ready", "missing", "invalid"]),
   providers: z.array(
     z.object({
       kind: providerKindSchema,
@@ -153,6 +155,11 @@ const appStatusSchema = z.object({
       detail: z.string().nullable(),
     }).strict(),
     ffmpeg: z.object({
+      status: z.enum(["unknown", "ready", "missing", "unsupported", "broken", "disabled"]),
+      version: z.string().nullable(),
+      detail: z.string().nullable(),
+    }).strict(),
+    mpv: z.object({
       status: z.enum(["unknown", "ready", "missing", "unsupported", "broken", "disabled"]),
       version: z.string().nullable(),
       detail: z.string().nullable(),
@@ -213,19 +220,6 @@ const providerSearchEventSchema = z.object({
 }).strict();
 const searchStartedSchema = z.object({ searchId: searchIdSchema }).strict();
 const searchCompletedSchema = z.object({ searchId: searchIdSchema }).strict();
-const spotifySetupStatusSchema = z.object({
-  enabled: z.boolean(),
-  configured: z.boolean(),
-  available: z.boolean(),
-  state: z.enum(["disabled", "setup_required", "connected", "unavailable"]),
-  market: z.string().regex(/^[A-Z]{2}$/).nullable(),
-  detail: z.string().nullable(),
-}).strict();
-const spotifyAuthorizationRequestSchema = z.object({
-  authorizationUrl: z.string().url(),
-  redirectUri: z.string().url(),
-}).strict();
-
 const themeSchema = z.enum(["dark", "light", "system", "custom"]);
 const layoutProfileSchema = z.enum(["comfortable", "compact", "dense"]);
 const sourcePreferenceOrderSchema = z
@@ -244,15 +238,13 @@ const globalShortcutActionSchema = z.enum([
   "volumeDown",
   "showHideMain",
   "toggleMiniOverlay",
-  "toggleLyricsOverlay",
-  "toggleGamingOverlay",
 ]);
 const globalShortcutBindingSchema = z.object({
   action: globalShortcutActionSchema,
   accelerator: z.string().min(1),
   enabled: z.boolean(),
 }).strict();
-const overlayKindSchema = z.enum(["mini", "edge", "lyrics", "gaming"]);
+const overlayKindSchema = z.enum(["mini"]);
 const overlaySnapshotSchema = z.object({
   kind: overlayKindSchema,
   status: z.enum(["closed", "open", "error"]),
@@ -281,12 +273,7 @@ const windowsIntegrationSnapshotSchema = z.object({
     detail: z.string().nullable(),
   }).strict()),
   overlays: z.array(overlaySnapshotSchema),
-  gamingClickThrough: z.boolean(),
   outputProfiles: z.array(outputProfileSchema),
-}).strict();
-const gamingClickThroughErrorSchema = z.object({
-  code: z.enum(["rescueUnavailable", "nativeCallFailed", "overlayUnavailable"]),
-  detail: z.string().min(1),
 }).strict();
 const outputProfileApplyErrorSchema = z.object({
   code: z.enum(["invalidProfile", "deviceUnavailable", "applyFailed"]),
@@ -341,7 +328,7 @@ const importPreviewSchema = z.object({
   importId: z.string().uuid(),
   archiveVersion: z.literal(1),
   appVersion: z.string().min(1),
-  databaseSchemaVersion: z.number().int().min(0).max(9),
+  databaseSchemaVersion: z.number().int().min(0).max(11),
   sourceStorageMode: storageModeSchema,
   entryCount: z.number().int().nonnegative(),
   includedAudioCount: z.number().int().nonnegative(),
@@ -394,6 +381,10 @@ const downloadErrorCodeSchema = z.enum([
   "shuttingDown",
   "unknown",
 ]);
+const downloadCommandErrorSchema = z.object({
+  code: downloadErrorCodeSchema,
+  detail: z.string().min(1),
+}).strict();
 const downloadToolStatusSchema = z.object({
   status: z.enum(["unknown", "ready", "missing", "unsupported", "broken", "disabled"]),
   version: z.string().nullable(),
@@ -402,6 +393,7 @@ const downloadToolStatusSchema = z.object({
 const mediaToolsSnapshotSchema = z.object({
   ytDlp: downloadToolStatusSchema,
   ffmpeg: downloadToolStatusSchema,
+  mpv: downloadToolStatusSchema,
 }).strict();
 const downloadTaskSchema = z.object({
   id: downloadTaskIdSchema,
@@ -871,9 +863,14 @@ const queueSnapshotSchema = queueSnapshotSummarySchema.extend({
 
 const lyricsSourceKindSchema = z.enum(["manual", "sidecar", "embedded", "lrclib"]);
 const lyricsSyncKindSchema = z.enum(["plain", "timed", "instrumental"]);
+const lyricsWordSchema = z.object({
+  startMs: z.number().int().nonnegative(),
+  text: z.string().min(1),
+}).strict();
 const lyricsCueSchema = z.object({
   startMs: z.number().int().nonnegative(),
   lines: z.array(z.string()),
+  words: z.array(lyricsWordSchema).default([]),
 }).strict();
 const lyricsAttributionSchema = z.object({
   label: z.string().min(1),
@@ -896,7 +893,10 @@ const lyricsDocumentSchema = z.object({
   ...value,
   source: value.source as LyricsSourceKind,
   syncKind: value.syncKind as LyricsSyncKind,
-  cues: value.cues as LyricsDocument["cues"],
+  cues: value.cues.map((cue) => ({
+    ...cue,
+    words: cue.words as LyricsWord[],
+  })),
 }));
 const lyricsCandidateSchema = z.object({
   providerRecordId: z.number().int().positive(),
@@ -1274,7 +1274,7 @@ function parseSmartRule(value: unknown): SmartRule {
 }
 
 export class IpcError extends Error {
-  public constructor(message: string, public readonly cause?: unknown) {
+  public constructor(message: string, public readonly cause?: unknown, public readonly code?: string) {
     super(message);
     this.name = "IpcError";
   }
@@ -1697,10 +1697,10 @@ function seedE2EPlaybackState() {
       backendHealth: {
         ready: false,
         connected: false,
-        detail: "mpv is unavailable in the browser playback adapter.",
-        recoveryAction: "Retry the playback backend",
+        detail: "MPV is not configured. Configure it in Settings to enable local playback.",
+        recoveryAction: "Configure MPV in Settings",
       },
-      error: createPlaybackError("toolMissing", null, true),
+      error: createPlaybackError("toolMissing", null, false),
     });
     return;
   }
@@ -1927,6 +1927,92 @@ function browserPreviewMediaTools(): MediaToolsSnapshot {
       version: null,
       detail: "Downloads require the native SpotDIY desktop runtime.",
     },
+    mpv: {
+      status: "missing",
+      version: null,
+      detail: "MPV is not configured. Configure it in Settings to enable local playback.",
+    },
+  };
+}
+
+const downloadErrorLabels: Record<string, string> = {
+  invalidRequest: "Invalid download request",
+  unsupportedProvider: "Unsupported download provider",
+  invalidProviderUrl: "Provider URL was rejected",
+  downloadDirectoryNotConfigured: "Download folder is not configured",
+  downloadDirectoryInvalid: "Download folder is not usable",
+  sourceNotFound: "Download source was not found",
+  sourceTrackMismatch: "Download source does not belong to this track",
+  toolMissing: "Required download tool is not available",
+  toolBroken: "Required download tool is not usable",
+  processFailed: "Provider download failed",
+  outputInvalid: "Downloaded output is not valid",
+  finalizationFailed: "Downloaded output could not be finalized",
+  cancelled: "Download cancelled",
+  persistenceFailed: "Download state could not be saved",
+  shuttingDown: "Downloads are shutting down",
+  unknown: "Download failed",
+};
+
+function downloadCommandError(error: unknown, fallback: string): IpcError {
+  const candidates: unknown[] = [error];
+  if (error instanceof Error) {
+    candidates.push(error.message);
+  }
+  if (typeof error === "object" && error !== null && "message" in error) {
+    candidates.push((error as { message?: unknown }).message);
+  }
+  const candidate = candidates.map((value) => {
+    if (typeof value !== "string") {
+      return value;
+    }
+    const trimmed = value.trim();
+    const firstBrace = trimmed.indexOf("{");
+    const lastBrace = trimmed.lastIndexOf("}");
+    const serializedCandidates = [
+      trimmed,
+      firstBrace >= 0 && lastBrace > firstBrace ? trimmed.slice(firstBrace, lastBrace + 1) : "",
+    ];
+    for (const serialized of serializedCandidates) {
+      if (!serialized.startsWith("{") || !serialized.endsWith("}")) {
+        continue;
+      }
+      try {
+        return JSON.parse(serialized) as unknown;
+      } catch {
+        // Keep searching for a structured native error before using the safe
+        // generic fallback below.
+      }
+    }
+    return value;
+  }).find((value) => downloadCommandErrorSchema.safeParse(value).success);
+  const parsed = downloadCommandErrorSchema.safeParse(candidate);
+  if (parsed.success) {
+    const label = downloadErrorLabels[parsed.data.code] ?? "Download failed";
+    return new IpcError(`${label}: ${parsed.data.detail}`, parsed.data, parsed.data.code);
+  }
+  return new IpcError(fallback);
+}
+
+function browserPreviewSpotifyProviderStatus(): ProviderStatus {
+  return {
+    kind: "spotify",
+    label: "Spotify",
+    configured: true,
+    available: true,
+    runtimeStatus: "ready",
+    capabilities: {
+      search: true,
+      playback: false,
+      metadata: true,
+      artwork: true,
+      lyrics: false,
+      downloads: true,
+      popularity: false,
+      releaseDate: true,
+      lyricsMetadata: false,
+    },
+    detail: "spotdl is ready for Spotify search and source-matched audio downloads.",
   };
 }
 
@@ -1938,8 +2024,10 @@ function browserPreviewStatus(): AppStatus {
       storageMode: "standard",
       firstRun: false,
       tracksIndexed: e2eLibraryTracks.length,
-      musicFolders: [e2eLibraryFolder.path],
-      providers: [
+        musicFolders: [e2eLibraryFolder.path],
+        downloadsDirectory: null,
+        downloadDirectoryStatus: "missing",
+        providers: [
         {
           kind: "local",
           label: "Local library",
@@ -1997,25 +2085,7 @@ function browserPreviewStatus(): AppStatus {
           },
           detail: "Provider adapter awaits media-tool verification.",
         },
-        {
-          kind: "spotify",
-          label: "Spotify catalog",
-          configured: false,
-          available: false,
-          runtimeStatus: "disabled",
-          capabilities: {
-            search: true,
-            playback: false,
-            metadata: true,
-            artwork: true,
-            lyrics: false,
-            downloads: false,
-            popularity: false,
-            releaseDate: true,
-            lyricsMetadata: false,
-          },
-          detail: "Spotify catalog search is disabled by default.",
-        },
+        browserPreviewSpotifyProviderStatus(),
       ],
       mediaTools: browserPreviewMediaTools(),
     };
@@ -2028,6 +2098,8 @@ function browserPreviewStatus(): AppStatus {
     firstRun: true,
     tracksIndexed: 0,
     musicFolders: [],
+    downloadsDirectory: null,
+    downloadDirectoryStatus: "missing",
     providers: [
       {
         kind: "local",
@@ -2086,25 +2158,7 @@ function browserPreviewStatus(): AppStatus {
         },
         detail: "Provider adapter awaits media-tool verification.",
       },
-      {
-        kind: "spotify",
-        label: "Spotify catalog",
-        configured: false,
-        available: false,
-        runtimeStatus: "disabled",
-        capabilities: {
-          search: true,
-          playback: false,
-          metadata: true,
-          artwork: true,
-          lyrics: false,
-          downloads: false,
-          popularity: false,
-          releaseDate: true,
-          lyricsMetadata: false,
-        },
-        detail: "Spotify catalog search is disabled by default.",
-      },
+      browserPreviewSpotifyProviderStatus(),
     ],
     mediaTools: browserPreviewMediaTools(),
   };
@@ -2131,8 +2185,6 @@ const browserDefaultGlobalShortcuts: GlobalShortcutBinding[] = [
   { action: "volumeDown", accelerator: "Ctrl+Alt+Down", enabled: true },
   { action: "showHideMain", accelerator: "Ctrl+Alt+S", enabled: true },
   { action: "toggleMiniOverlay", accelerator: "Ctrl+Alt+M", enabled: true },
-  { action: "toggleLyricsOverlay", accelerator: "Ctrl+Alt+L", enabled: true },
-  { action: "toggleGamingOverlay", accelerator: "Ctrl+Alt+G", enabled: true },
 ];
 
 let browserPreviewSettingsState: SettingsSnapshot = {
@@ -2151,9 +2203,6 @@ let browserPreviewSettingsState: SettingsSnapshot = {
 let browserWindowsIntegrationRevision = 0;
 const browserOverlayStates: Record<OverlayKind, OverlaySnapshot["status"]> = {
   mini: "closed",
-  edge: "closed",
-  lyrics: "closed",
-  gaming: "closed",
 };
 
 function browserPreviewSettings(): SettingsSnapshot {
@@ -2219,7 +2268,6 @@ function browserWindowsIntegrationSnapshot(): WindowsIntegrationSnapshot {
       status: browserOverlayStates[kind],
       detail: null,
     })),
-    gamingClickThrough: false,
     outputProfiles: settings.outputProfiles.map((profile) => ({ ...profile })),
   };
 }
@@ -2365,7 +2413,7 @@ function browserPreviewTrackInspector(trackId: TrackId): TrackInspector {
         provider: "youtube",
         providerItemId: "spotdiy-e2e",
         available: true,
-        availabilityDetail: "Online playback is not implemented in Plan 11.",
+        availabilityDetail: "Online playback requires the native SpotDIY app.",
         capabilities: {
           search: true,
           metadata: true,
@@ -2391,7 +2439,6 @@ function browserPreviewTrackInspector(trackId: TrackId): TrackInspector {
 
 export const SEARCH_PROVIDER_UPDATE_EVENT = "search://provider-update";
 export const SEARCH_COMPLETED_EVENT = "search://complete";
-export const SPOTIFY_AUTH_STATE_EVENT = "spotify://auth-state";
 
 type SearchProviderUpdateListener = (event: ProviderSearchEvent) => void;
 type SearchCompletedListener = (event: SearchCompleted) => void;
@@ -2423,7 +2470,7 @@ const searchProviderOrder = (lens: SearchLens): ProviderKind[] => {
     case "albums":
       return ["local"];
     default:
-      return ["local", "youtube", "soundcloud"];
+      return ["local", "youtube", "soundcloud", "spotify"];
   }
 };
 
@@ -2477,8 +2524,8 @@ function browserSearchResult(provider: ProviderKind, query: string, track?: Libr
         ? "https://soundcloud.com/spotdiy/e2e-result"
         : "https://open.spotify.com/track/spotdiy-e2e",
     title: `${query.trim()} — ${provider === "youtube" ? "YouTube" : provider === "soundcloud" ? "SoundCloud" : "Spotify"}`,
-    artists: [provider === "spotify" ? "SpotDIY Catalog" : "SpotDIY E2E"],
-    album: provider === "spotify" ? "Catalog fixture" : null,
+    artists: [provider === "spotify" ? "SpotDIY via spotdl" : "SpotDIY E2E"],
+    album: provider === "spotify" ? "Spotify match" : null,
     durationMs: 198_000,
     artworkUrl: null,
     publishedAt: null,
@@ -2492,20 +2539,10 @@ function browserSearchResult(provider: ProviderKind, query: string, track?: Libr
 }
 
 function browserSearchSection(provider: ProviderKind, request: SearchRequest): ProviderSearchSection {
-  if (provider === "spotify") {
-    return {
-      provider,
-      state: "failed",
-      results: [],
-      error: {
-        code: "disabled",
-        detail: "Spotify catalog search is disabled by default.",
-        retryAfterSeconds: null,
-      },
-    };
-  }
-
-  if (provider === "soundcloud") {
+  // Keep the default partial-provider failure fixture while exposing one
+  // deterministic valid result for browser contract coverage of the
+  // SoundCloud audio-only action policy.
+  if (provider === "soundcloud" && request.query.trim().toLocaleLowerCase() !== "soundcloud download fixture") {
     return {
       provider,
       state: "failed",
@@ -2624,10 +2661,6 @@ export function parseSearchCompleted(value: unknown): SearchCompleted {
   return searchCompletedSchema.parse(value);
 }
 
-export function parseSpotifySetupStatus(value: unknown): SpotifySetupStatus {
-  return spotifySetupStatusSchema.parse(value);
-}
-
 export async function startSearch(request: SearchRequest): Promise<SearchStarted> {
   try {
     const parsedRequest = searchRequestSchema.parse(request) as SearchRequest;
@@ -2712,54 +2745,105 @@ export async function subscribeToSearchCompleted(
   }
 }
 
-export async function getSpotifySetupStatus(): Promise<SpotifySetupStatus> {
+export async function configureMpv(): Promise<MediaToolsSnapshot> {
   if (!isTauriRuntime()) {
-    return {
-      enabled: false,
-      configured: false,
-      available: false,
-      state: "disabled",
-      market: null,
-      detail: "Spotify catalog search is disabled by default.",
-    };
+    throw new IpcError("MPV configuration requires the native SpotDIY desktop runtime.");
   }
   try {
-    return parseSpotifySetupStatus(await invoke<unknown>("get_spotify_setup_status"));
-  } catch (error) {
-    throw new IpcError("SpotDIY could not read Spotify setup status.", error);
-  }
-}
-
-const spotifyClientIdSchema = z.string().trim().min(1).max(128);
-const spotifyMarketSchema = z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/);
-
-export async function beginSpotifyAuthorization(clientId: string, market: string): Promise<SpotifyAuthorizationRequest> {
-  try {
-    const parsedClientId = spotifyClientIdSchema.parse(clientId);
-    const parsedMarket = spotifyMarketSchema.parse(market);
-    if (!isTauriRuntime()) {
-      throw new IpcError("Spotify authorization requires the native SpotDIY runtime.");
-    }
-    return spotifyAuthorizationRequestSchema.parse(await invoke<unknown>("begin_spotify_authorization", {
-      clientId: parsedClientId,
-      market: parsedMarket,
-    }));
+    return mediaToolsSnapshotSchema.parse(await invoke<unknown>("configure_mpv"));
   } catch (error) {
     if (error instanceof IpcError) {
       throw error;
     }
-    throw new IpcError("SpotDIY could not begin Spotify authorization.", error);
+    throw new IpcError("SpotDIY could not configure MPV.", error);
   }
 }
 
-export async function disconnectSpotify(): Promise<SpotifySetupStatus> {
+export async function clearMpvPath(): Promise<MediaToolsSnapshot> {
   if (!isTauriRuntime()) {
-    throw new IpcError("Spotify disconnect requires the native SpotDIY runtime.");
+    throw new IpcError("MPV configuration requires the native SpotDIY desktop runtime.");
   }
   try {
-    return parseSpotifySetupStatus(await invoke<unknown>("disconnect_spotify"));
+    return mediaToolsSnapshotSchema.parse(await invoke<unknown>("clear_mpv_path"));
   } catch (error) {
-    throw new IpcError("SpotDIY could not disconnect Spotify.", error);
+    throw new IpcError("SpotDIY could not clear the custom MPV path.", error);
+  }
+}
+
+export async function rescanMpv(): Promise<MediaToolsSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("MPV re-scan requires the native SpotDIY desktop runtime.");
+  }
+  try {
+    return mediaToolsSnapshotSchema.parse(await invoke<unknown>("rescan_mpv"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not re-scan MPV.", error);
+  }
+}
+
+export async function configureYtDlp(): Promise<MediaToolsSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("yt-dlp configuration requires the native SpotDIY desktop runtime.");
+  }
+  try {
+    return mediaToolsSnapshotSchema.parse(await invoke<unknown>("configure_yt_dlp"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not configure yt-dlp.", error);
+  }
+}
+
+export async function clearYtDlpPath(): Promise<MediaToolsSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("yt-dlp configuration requires the native SpotDIY desktop runtime.");
+  }
+  try {
+    return mediaToolsSnapshotSchema.parse(await invoke<unknown>("clear_yt_dlp_path"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not clear the custom yt-dlp path.", error);
+  }
+}
+
+export async function rescanYtDlp(): Promise<MediaToolsSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("yt-dlp re-scan requires the native SpotDIY desktop runtime.");
+  }
+  try {
+    return mediaToolsSnapshotSchema.parse(await invoke<unknown>("rescan_yt_dlp"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not re-scan yt-dlp.", error);
+  }
+}
+
+export async function configureFfmpeg(): Promise<MediaToolsSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("FFmpeg configuration requires the native SpotDIY desktop runtime.");
+  }
+  try {
+    return mediaToolsSnapshotSchema.parse(await invoke<unknown>("configure_ffmpeg"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not configure FFmpeg.", error);
+  }
+}
+
+export async function clearFfmpegPath(): Promise<MediaToolsSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("FFmpeg configuration requires the native SpotDIY desktop runtime.");
+  }
+  try {
+    return mediaToolsSnapshotSchema.parse(await invoke<unknown>("clear_ffmpeg_path"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not clear the custom FFmpeg path.", error);
+  }
+}
+
+export async function rescanFfmpeg(): Promise<MediaToolsSnapshot> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("FFmpeg re-scan requires the native SpotDIY desktop runtime.");
+  }
+  try {
+    return mediaToolsSnapshotSchema.parse(await invoke<unknown>("rescan_ffmpeg"));
+  } catch (error) {
+    throw new IpcError("SpotDIY could not re-scan FFmpeg.", error);
   }
 }
 
@@ -2910,26 +2994,6 @@ export async function getTrackInspector(trackId: TrackId): Promise<TrackInspecto
       throw error;
     }
     throw new IpcError("SpotDIY could not read that track inspector.", error);
-  }
-}
-
-export async function subscribeToSpotifyAuthState(
-  listener: (status: SpotifySetupStatus) => void,
-  onError?: SearchEventErrorListener,
-): Promise<() => void> {
-  if (!isTauriRuntime()) {
-    return () => undefined;
-  }
-  try {
-    return await listen<unknown>(SPOTIFY_AUTH_STATE_EVENT, (event) => {
-      try {
-        listener(parseSpotifySetupStatus(event.payload));
-      } catch (error) {
-        onError?.(new IpcError("SpotDIY received an invalid Spotify auth event.", error));
-      }
-    });
-  } catch (error) {
-    throw new IpcError("SpotDIY could not subscribe to Spotify auth updates.", error);
   }
 }
 
@@ -3217,26 +3281,6 @@ export async function toggleOverlay(kind: OverlayKind): Promise<WindowsIntegrati
   return invokeWindowsSnapshot("toggle_overlay", { kind: parsedKind }, "SpotDIY could not toggle that overlay.");
 }
 
-export async function setGamingClickThrough(enabled: boolean): Promise<WindowsIntegrationSnapshot> {
-  const parsed = z.boolean().parse(enabled);
-  if (!isTauriRuntime()) {
-    if (parsed) {
-      const error = { code: "overlayUnavailable", detail: "Gaming click-through requires the native desktop app." };
-      throw new IpcError(error.detail, error);
-    }
-    return browserWindowsIntegrationSnapshot();
-  }
-  try {
-    return parseWindowsIntegrationSnapshot(await invoke<unknown>("set_gaming_click_through", { enabled: parsed }));
-  } catch (error) {
-    const typed = gamingClickThroughErrorSchema.safeParse(error);
-    if (typed.success) {
-      throw new IpcError(typed.data.detail, typed.data);
-    }
-    throw new IpcError("SpotDIY could not update Gaming click-through.", error);
-  }
-}
-
 export async function listOutputProfiles(): Promise<OutputProfile[]> {
   if (!isTauriRuntime()) {
     return browserPreviewSettingsState.outputProfiles.map((profile) => ({ ...profile }));
@@ -3356,7 +3400,7 @@ export async function queueSearchResultDownload(
     if (error instanceof IpcError) {
       throw error;
     }
-    throw new IpcError("SpotDIY could not queue that provider download.", error);
+    throw downloadCommandError(error, "SpotDIY could not queue that provider download.");
   }
 }
 
@@ -3381,7 +3425,7 @@ export async function queueSourceDownload(
     if (error instanceof IpcError) {
       throw error;
     }
-    throw new IpcError("SpotDIY could not queue that library source download.", error);
+    throw downloadCommandError(error, "SpotDIY could not queue that library source download.");
   }
 }
 
@@ -3415,6 +3459,35 @@ export async function retryDownload(taskId: DownloadTaskId): Promise<DownloadTas
   }
 }
 
+export async function clearCompletedDownload(taskId: DownloadTaskId): Promise<void> {
+  try {
+    const parsedTaskId = downloadTaskIdSchema.parse(taskId);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Download controls require the native SpotDIY runtime.");
+    }
+    await invoke("clear_completed_download", { taskId: parsedTaskId });
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not clear that completed download.", error);
+  }
+}
+
+export async function clearCompletedDownloads(): Promise<void> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Download controls require the native SpotDIY runtime.");
+  }
+  try {
+    await invoke("clear_completed_downloads");
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not clear completed downloads.", error);
+  }
+}
+
 export async function setDownloadConcurrency(maxConcurrent: number): Promise<DownloadSnapshot> {
   try {
     const parsedMaxConcurrent = z.number().int().min(1).max(4).parse(maxConcurrent);
@@ -3444,6 +3517,25 @@ export async function openDownloadLocation(taskId: DownloadTaskId): Promise<void
       throw error;
     }
     throw new IpcError("SpotDIY could not open that download folder.", error);
+  }
+}
+
+export async function renameDownload(taskId: DownloadTaskId, name: string): Promise<DownloadTask> {
+  try {
+    const parsedTaskId = downloadTaskIdSchema.parse(taskId);
+    const parsedName = z.string().trim().min(1).max(180).parse(name);
+    if (!isTauriRuntime()) {
+      throw new IpcError("Renaming downloaded files requires the native SpotDIY runtime.");
+    }
+    return downloadTaskSchema.parse(await invoke<unknown>("rename_download", {
+      taskId: parsedTaskId,
+      name: parsedName,
+    })) as DownloadTask;
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not rename that downloaded file.", error);
   }
 }
 
@@ -4002,6 +4094,20 @@ export async function revealLocalFile(sourceId: SourceId): Promise<void> {
   }
 }
 
+export async function renameLocalFile(sourceId: SourceId, name: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Renaming local files requires the native SpotDIY runtime.");
+  }
+  try {
+    await invoke("rename_local_file", {
+      sourceId: sourceIdSchema.parse(sourceId),
+      name: z.string().trim().min(1).max(180).parse(name),
+    });
+  } catch (error) {
+    throw new IpcError("SpotDIY could not rename that local file.", error);
+  }
+}
+
 export function parseScanProgress(value: unknown): ScanProgress {
   return scanProgressSchema.parse(value) as ScanProgress;
 }
@@ -4218,6 +4324,21 @@ export async function playTrack(request: TrackPlaybackRequest): Promise<Playback
       throw error;
     }
     throw new IpcError("SpotDIY could not start playback for that track.", error);
+  }
+}
+
+export async function playSearchResult(result: SearchResult): Promise<PlaybackSnapshot> {
+  try {
+    const parsedResult = searchResultSchema.parse(result) as SearchResult;
+    if (!isTauriRuntime()) {
+      throw new IpcError("Online playback requires the native SpotDIY desktop runtime.");
+    }
+    return await invokePlayback("play_search_result", { result: parsedResult }, parsePlaybackSnapshot, "SpotDIY could not start online playback.");
+  } catch (error) {
+    if (error instanceof IpcError) {
+      throw error;
+    }
+    throw new IpcError("SpotDIY could not start online playback.", error);
   }
 }
 

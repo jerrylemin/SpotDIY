@@ -134,9 +134,15 @@ export interface UnifiedTrack {
 export type LyricsSourceKind = "manual" | "sidecar" | "embedded" | "lrclib";
 export type LyricsSyncKind = "plain" | "timed" | "instrumental";
 
+export interface LyricsWord {
+  startMs: number;
+  text: string;
+}
+
 export interface LyricsCue {
   startMs: number;
   lines: string[];
+  words: LyricsWord[];
 }
 
 export interface LyricsAttribution {
@@ -434,9 +440,7 @@ export type GlobalShortcutAction =
   | "volumeUp"
   | "volumeDown"
   | "showHideMain"
-  | "toggleMiniOverlay"
-  | "toggleLyricsOverlay"
-  | "toggleGamingOverlay";
+  | "toggleMiniOverlay";
 
 export interface GlobalShortcutBinding {
   action: GlobalShortcutAction;
@@ -444,7 +448,7 @@ export interface GlobalShortcutBinding {
   enabled: boolean;
 }
 
-export type OverlayKind = "mini" | "edge" | "lyrics" | "gaming";
+export type OverlayKind = "mini";
 export type OverlayStatus = "closed" | "open" | "error";
 export type TrayStatus = "ready" | "failed";
 export type SmtcStatus = "ready" | "disabled" | "unsupported" | "failed";
@@ -482,15 +486,7 @@ export interface WindowsIntegrationSnapshot {
   globalShortcutsEnabled: boolean;
   shortcutStatuses: ShortcutStatus[];
   overlays: OverlaySnapshot[];
-  gamingClickThrough: boolean;
   outputProfiles: OutputProfile[];
-}
-
-export type GamingClickThroughErrorCode = "rescueUnavailable" | "nativeCallFailed" | "overlayUnavailable";
-
-export interface GamingClickThroughError {
-  code: GamingClickThroughErrorCode;
-  detail: string;
 }
 
 export type OutputProfileApplyErrorCode = "invalidProfile" | "deviceUnavailable" | "applyFailed";
@@ -530,6 +526,8 @@ export interface AppStatus {
   firstRun: boolean;
   tracksIndexed: number;
   musicFolders: string[];
+  downloadsDirectory: string | null;
+  downloadDirectoryStatus: DownloadDirectoryStatus;
   providers: ProviderStatus[];
   mediaTools: MediaToolsSnapshot;
 }
@@ -562,9 +560,12 @@ export interface DownloadToolStatus {
   detail: string | null;
 }
 
+export type DownloadDirectoryStatus = "ready" | "missing" | "invalid";
+
 export interface MediaToolsSnapshot {
   ytDlp: DownloadToolStatus;
   ffmpeg: DownloadToolStatus;
+  mpv: DownloadToolStatus;
 }
 
 export interface DownloadTask {
@@ -731,22 +732,6 @@ export interface SearchStarted {
 
 export interface SearchCompleted {
   searchId: SearchId;
-}
-
-export type SpotifyAuthState = "disabled" | "setup_required" | "connected" | "unavailable";
-
-export interface SpotifySetupStatus {
-  enabled: boolean;
-  configured: boolean;
-  available: boolean;
-  state: SpotifyAuthState;
-  market: string | null;
-  detail: string | null;
-}
-
-export interface SpotifyAuthorizationRequest {
-  authorizationUrl: string;
-  redirectUri: string;
 }
 
 export type LibraryFolderStatus = "idle" | "queued" | "scanning" | "complete" | "failed";

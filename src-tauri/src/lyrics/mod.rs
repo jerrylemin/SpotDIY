@@ -8,7 +8,9 @@ use std::sync::Arc;
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use strsim::jaro_winkler;
 use thiserror::Error;
+use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 use url::Url;
 
 use crate::db::repository::{RepositoryError, TrackRepository};
@@ -40,9 +42,17 @@ pub enum LyricsSyncKind {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LyricsWordDto {
+    pub start_ms: u64,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LyricsCueDto {
     pub start_ms: u64,
     pub lines: Vec<String>,
+    pub words: Vec<LyricsWordDto>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -205,6 +215,26 @@ pub(crate) struct LyricsLookup {
     pub duration_ms: Option<u64>,
 }
 
+fn is_placeholder_artist(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "unknown"
+            | "unknown artist"
+            | "artist unknown"
+            | "various artists"
+            | "n/a"
+            | "na"
+            | "none"
+    )
+}
+
+fn is_placeholder_album(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "unknown" | "unknown album" | "album unknown" | "n/a" | "na" | "none"
+    )
+}
+
 #[derive(Clone, Debug)]
 struct StoredLyrics {
     source_kind: LyricsSourceKind,
@@ -348,6 +378,11 @@ pub struct LyricsService {
     library: LibraryService,
     repository: LyricsRepository,
     provider: Arc<LrclibProvider>,
+}
+
+struct ProviderLyricsMatch {
+    record: providers::LrclibRecord,
+    require_artist_match: bool,
 }
 
 impl LyricsService {
@@ -507,12 +542,79 @@ impl LyricsService {
 
     pub async fn find_lrclib_best(&self, track_id: TrackId) -> Result<LyricsDocument, LyricsError> {
         let lookup = self.lookup(track_id)?;
-        let record = self
-            .provider
-            .find_best(&lookup)
-            .await
+        let matched = if is_placeholder_artist(&lookup.artist_name) {
+            self.find_best_search_match(&lookup).await?
+        } else {
+            match self.provider.find_best(&lookup).await {
+                Ok(record)
+                    if provider_record_has_lyrics(&record)
+                        && validate_provider_record(&record, &lookup).is_ok() =>
+                {
+                    ProviderLyricsMatch {
+                        record,
+                        require_artist_match: true,
+                    }
+                }
+                Ok(_) => self.find_best_search_match(&lookup).await?,
+                Err(LyricsProviderError::NotFound | LyricsProviderError::InvalidResponse) => {
+                    self.find_best_search_match(&lookup).await?
+                }
+                Err(error) => return Err(map_provider_error(error)),
+            }
+        };
+        self.cache_record(
+            track_id,
+            &lookup,
+            matched.record,
+            matched.require_artist_match,
+        )
+    }
+
+    async fn find_best_search_match(
+        &self,
+        lookup: &LyricsLookup,
+    ) -> Result<ProviderLyricsMatch, LyricsError> {
+        for include_artist in [true, false] {
+            if !include_artist && is_placeholder_artist(&lookup.artist_name) {
+                continue;
+            }
+            let require_artist_match =
+                include_artist && !is_placeholder_artist(&lookup.artist_name);
+            let mut candidates = if include_artist {
+                self.provider.search(lookup).await
+            } else {
+                self.provider.search_by_title(lookup).await
+            }
             .map_err(map_provider_error)?;
-        self.cache_record(track_id, &lookup, record)
+            candidates.retain(|candidate| {
+                candidate_has_lyrics(candidate)
+                    && metadata_matches(&candidate.track_name, &lookup.track_name)
+                    && (!require_artist_match
+                        || metadata_matches(&candidate.artist_name, &lookup.artist_name))
+            });
+            candidates.sort_by_key(|candidate| lrclib_candidate_score(candidate, lookup));
+
+            for candidate in candidates.into_iter().take(10) {
+                let record = match self.provider.get(candidate.provider_record_id).await {
+                    Ok(record) => record,
+                    Err(LyricsProviderError::NotFound | LyricsProviderError::InvalidResponse) => {
+                        continue;
+                    }
+                    Err(error) => return Err(map_provider_error(error)),
+                };
+                if validate_provider_record_with_artist(&record, lookup, require_artist_match)
+                    .is_err()
+                    || !provider_record_has_lyrics(&record)
+                {
+                    continue;
+                }
+                return Ok(ProviderLyricsMatch {
+                    record,
+                    require_artist_match,
+                });
+            }
+        }
+        Err(LyricsError::NotFound)
     }
 
     pub async fn search_lrclib(
@@ -520,10 +622,24 @@ impl LyricsService {
         track_id: TrackId,
     ) -> Result<Vec<LyricsCandidate>, LyricsError> {
         let lookup = self.lookup(track_id)?;
-        self.provider
+        let mut candidates = self
+            .provider
             .search(&lookup)
             .await
-            .map_err(map_provider_error)
+            .map_err(map_provider_error)?;
+        let has_matching_lyrics = candidates.iter().any(|candidate| {
+            candidate_has_lyrics(candidate)
+                && metadata_matches(&candidate.track_name, &lookup.track_name)
+        });
+        if !has_matching_lyrics && !is_placeholder_artist(&lookup.artist_name) {
+            candidates = self
+                .provider
+                .search_by_title(&lookup)
+                .await
+                .map_err(map_provider_error)?;
+        }
+        candidates.sort_by_key(|candidate| lrclib_candidate_score(candidate, &lookup));
+        Ok(candidates)
     }
 
     pub async fn select_lrclib_candidate(
@@ -537,7 +653,13 @@ impl LyricsService {
             .get(provider_record_id)
             .await
             .map_err(map_provider_error)?;
-        self.cache_record(track_id, &lookup, record)
+        let require_artist_match = if validate_provider_record(&record, &lookup).is_ok() {
+            true
+        } else {
+            validate_provider_record_with_artist(&record, &lookup, false)?;
+            false
+        };
+        self.cache_record(track_id, &lookup, record, require_artist_match)
     }
 
     pub fn clear_cached_lrclib(&self, track_id: TrackId) -> Result<(), LyricsError> {
@@ -550,8 +672,9 @@ impl LyricsService {
         track_id: TrackId,
         lookup: &LyricsLookup,
         record: providers::LrclibRecord,
+        require_artist_match: bool,
     ) -> Result<LyricsDocument, LyricsError> {
-        validate_provider_record(&record, lookup)?;
+        validate_provider_record_with_artist(&record, lookup, require_artist_match)?;
         let provider_record_id = record.id.ok_or(LyricsError::InvalidCandidate)?;
         let synced_lrc = record
             .synced_lyrics
@@ -600,8 +723,11 @@ impl LyricsService {
                 .first()
                 .map(|artist| artist.name.clone())
                 .unwrap_or_else(|| "Unknown Artist".to_owned()),
-            album_name: track.album.map(|album| album.title),
-            duration_ms: track.duration_ms,
+            album_name: track
+                .album
+                .map(|album| album.title)
+                .filter(|album| !is_placeholder_album(album)),
+            duration_ms: track.duration_ms.filter(|duration| *duration > 0),
         })
     }
 
@@ -719,23 +845,26 @@ fn parse_source_kind(value: String) -> Result<LyricsSourceKind, ()> {
 }
 
 fn read_sidecar(media_path: &Path) -> Result<Option<ParsedLyrics>, LyricsError> {
-    let sidecar = media_path.with_extension("lrc");
-    let metadata = match fs::symlink_metadata(&sidecar) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(LyricsError::Local("sidecar is unavailable".to_owned())),
-    };
-    if metadata.file_type().is_symlink() || is_reparse_point(&metadata) || !metadata.is_file() {
-        return Err(LyricsError::Local(
-            "sidecar is not a regular file".to_owned(),
-        ));
+    for extension in ["lrc", "txt"] {
+        let sidecar = media_path.with_extension(extension);
+        let metadata = match fs::symlink_metadata(&sidecar) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Err(LyricsError::Local("sidecar is unavailable".to_owned())),
+        };
+        if metadata.file_type().is_symlink() || is_reparse_point(&metadata) || !metadata.is_file() {
+            return Err(LyricsError::Local(
+                "sidecar is not a regular file".to_owned(),
+            ));
+        }
+        if metadata.len() > MAX_LYRICS_BYTES as u64 {
+            return Err(LyricsError::InputTooLarge);
+        }
+        let bytes = fs::read(&sidecar)
+            .map_err(|_| LyricsError::Local("sidecar could not be read".to_owned()))?;
+        return parse_lrc_bytes(&bytes).map(Some).map_err(map_parse_error);
     }
-    if metadata.len() > MAX_LYRICS_BYTES as u64 {
-        return Err(LyricsError::InputTooLarge);
-    }
-    let bytes = fs::read(&sidecar)
-        .map_err(|_| LyricsError::Local("sidecar could not be read".to_owned()))?;
-    parse_lrc_bytes(&bytes).map(Some).map_err(map_parse_error)
+    Ok(None)
 }
 
 fn document_from_parsed(
@@ -764,6 +893,14 @@ fn document_from_parsed(
             .map(|cue| LyricsCueDto {
                 start_ms: cue.start_ms,
                 lines: cue.lines,
+                words: cue
+                    .words
+                    .into_iter()
+                    .map(|word| LyricsWordDto {
+                        start_ms: word.start_ms,
+                        text: word.text,
+                    })
+                    .collect(),
             })
             .collect(),
         instrumental,
@@ -874,14 +1011,24 @@ fn validate_provider_record(
     record: &providers::LrclibRecord,
     lookup: &LyricsLookup,
 ) -> Result<(), LyricsError> {
+    validate_provider_record_with_artist(record, lookup, true)
+}
+
+fn validate_provider_record_with_artist(
+    record: &providers::LrclibRecord,
+    lookup: &LyricsLookup,
+    require_artist_match: bool,
+) -> Result<(), LyricsError> {
     let Some(track_name) = record.track_name.as_deref() else {
         return Err(LyricsError::InvalidCandidate);
     };
     let Some(artist_name) = record.artist_name.as_deref() else {
         return Err(LyricsError::InvalidCandidate);
     };
-    if normalize_lookup_text(track_name) != normalize_lookup_text(&lookup.track_name)
-        || normalize_lookup_text(artist_name) != normalize_lookup_text(&lookup.artist_name)
+    if !metadata_matches(track_name, &lookup.track_name)
+        || (require_artist_match
+            && !is_placeholder_artist(&lookup.artist_name)
+            && !metadata_matches(artist_name, &lookup.artist_name))
     {
         return Err(LyricsError::InvalidCandidate);
     }
@@ -899,10 +1046,82 @@ fn validate_provider_record(
 
 fn normalize_lookup_text(value: &str) -> String {
     value
+        .nfkd()
+        .filter(|character| !is_combining_mark(*character))
+        .flat_map(char::to_lowercase)
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-        .to_lowercase()
+}
+
+fn metadata_matches(actual: &str, expected: &str) -> bool {
+    let actual = normalize_lookup_text(actual);
+    let expected = normalize_lookup_text(expected);
+    !actual.is_empty()
+        && !expected.is_empty()
+        && (actual == expected
+            || actual.contains(&expected)
+            || expected.contains(&actual)
+            || jaro_winkler(&actual, &expected) >= 0.90)
+}
+
+fn candidate_has_lyrics(candidate: &LyricsCandidate) -> bool {
+    candidate.has_synced || candidate.has_plain || candidate.instrumental
+}
+
+fn provider_record_has_lyrics(record: &providers::LrclibRecord) -> bool {
+    record.instrumental.unwrap_or(false)
+        || record
+            .synced_lyrics
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        || record
+            .plain_lyrics
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn metadata_similarity(actual: &str, expected: &str) -> u32 {
+    let actual = normalize_lookup_text(actual);
+    let expected = normalize_lookup_text(expected);
+    if actual == expected {
+        0
+    } else if actual.starts_with(&expected) || expected.starts_with(&actual) {
+        1
+    } else {
+        2
+    }
+}
+
+fn lrclib_candidate_score(candidate: &LyricsCandidate, lookup: &LyricsLookup) -> u32 {
+    let mut score = metadata_similarity(&candidate.track_name, &lookup.track_name) * 100;
+    score += metadata_similarity(&candidate.artist_name, &lookup.artist_name) * 100;
+    match (&candidate.album_name, &lookup.album_name) {
+        (Some(actual), Some(expected)) if metadata_matches(actual, expected) => {
+            score += metadata_similarity(actual, expected) * 20;
+        }
+        (Some(_), Some(_)) => score += 60,
+        (None, Some(_)) => score += 80,
+        _ => {}
+    }
+    if let (Some(expected), Some(actual)) = (lookup.duration_ms, candidate.duration_ms) {
+        score += expected.abs_diff(actual).min(60_000) as u32 / 1_000;
+    }
+    if candidate.has_synced {
+        score
+    } else if candidate.has_plain {
+        score + 10
+    } else {
+        score + 20
+    }
 }
 
 #[cfg(test)]
@@ -938,5 +1157,61 @@ mod tests {
             map_parse_error(LyricsParseError::TooManyCues),
             LyricsError::InvalidLyrics
         ));
+    }
+
+    #[test]
+    fn placeholder_artist_can_accept_a_title_matched_record() {
+        let record = providers::LrclibRecord {
+            id: Some(7),
+            track_name: Some("Synthetic Track".to_owned()),
+            artist_name: Some("Synthetic Artist".to_owned()),
+            album_name: None,
+            duration: Some(181.0),
+            instrumental: Some(false),
+            plain_lyrics: Some("plain".to_owned()),
+            synced_lyrics: None,
+        };
+        let lookup = LyricsLookup {
+            track_name: "Synthetic Track".to_owned(),
+            artist_name: "Unknown Artist".to_owned(),
+            album_name: None,
+            duration_ms: Some(181_000),
+        };
+
+        assert!(validate_provider_record(&record, &lookup).is_ok());
+    }
+
+    #[test]
+    fn title_only_fallback_accepts_a_provider_artist_alias() {
+        let record = providers::LrclibRecord {
+            id: Some(7),
+            track_name: Some("Một bài hát Việt".to_owned()),
+            artist_name: Some("Tên nghệ sĩ thật".to_owned()),
+            album_name: None,
+            duration: Some(181.0),
+            instrumental: Some(false),
+            plain_lyrics: Some("plain".to_owned()),
+            synced_lyrics: None,
+        };
+        let lookup = LyricsLookup {
+            track_name: "Một bài hát Việt".to_owned(),
+            artist_name: "Kênh chính thức".to_owned(),
+            album_name: None,
+            duration_ms: Some(181_000),
+        };
+
+        assert!(validate_provider_record(&record, &lookup).is_err());
+        assert!(validate_provider_record_with_artist(&record, &lookup, false).is_ok());
+    }
+
+    #[test]
+    fn plain_text_sidecar_is_available_when_lrc_is_absent() {
+        let directory = tempfile::tempdir().unwrap();
+        let media = directory.path().join("Artist - Title.webm");
+        std::fs::write(media.with_extension("txt"), "Một dòng lyric").unwrap();
+
+        let parsed = read_sidecar(&media).unwrap().unwrap();
+        assert_eq!(parsed.plain_text, "Một dòng lyric".to_owned());
+        assert!(parsed.cues.is_empty());
     }
 }

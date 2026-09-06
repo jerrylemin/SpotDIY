@@ -34,7 +34,6 @@ export function Sidebar() {
         <SpotLogo size={34} />
         <div>
           <span className="brand-name">SpotDIY</span>
-          <span className="brand-caption">music / operating environment</span>
         </div>
       </div>
 

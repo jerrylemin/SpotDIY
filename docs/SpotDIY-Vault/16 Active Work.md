@@ -1,5 +1,15 @@
 # Active work
 
+## Current Spotify source-matching correction — 2026-09-05
+
+The active application no longer uses Spotify catalog, Client ID, market, PKCE,
+token, or disconnect setup. Spotify search runs through the local `spotdl`
+CLI; a canonical track result can queue an audio-only download after `spotdl`
+resolves a validated YouTube/SoundCloud source for the existing yt-dlp/FFmpeg
+worker. Spotify remains outside in-app playback and persisted library-source
+downloads. The historical Plan 05–16 snapshots below are retained as records,
+not as the current Spotify boundary.
+
 ## Current boundary
 
 Plans 01–03 and Plan 04 are implemented. The native core owns the typed music
@@ -206,3 +216,15 @@ Frontend gates pass locally. Native/package/RustSec/installer gates are
 blocked by missing MSVC headers/libraries, so Plan 16 is not marked complete
 and no release artifact or commit SHA is claimed. See the final verification
 session and performance research note.
+
+## Current Plan 16 runtime usability repair — 2026-09-04
+
+The current working tree adds the requested runtime fixes: validated
+YouTube/SoundCloud URL and capability behavior, truthful native download
+readiness and structured errors, persisted Spotify opt-in with schema 11,
+case-insensitive WebM recognition, persisted/configurable MPV, yt-dlp, and
+FFmpeg resolution, native online playback, and deterministic missing-tool
+playback failure. Focused native/frontend tests,
+the full browser matrix, local Tauri/NSIS packaging, real-MPV smoke, packaged
+search smoke, and Plan 15 packaged visual smoke pass. Performance remains
+`PARTIAL`; do not mark Plan 16 complete.

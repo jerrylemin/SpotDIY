@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use url::Url;
 
-use super::{LyricsCandidate, LyricsLookup};
+use super::{is_placeholder_artist, LyricsCandidate, LyricsLookup};
 
 pub const LRCLIB_BASE_URL: &str = "https://lrclib.net";
 pub const LRCLIB_BODY_LIMIT: usize = 2 * 1024 * 1024;
@@ -171,14 +171,33 @@ impl LrclibProvider {
         &self,
         lookup: &LyricsLookup,
     ) -> Result<Vec<LyricsCandidate>, LyricsProviderError> {
+        self.search_with_artist(lookup, true).await
+    }
+
+    pub(crate) async fn search_by_title(
+        &self,
+        lookup: &LyricsLookup,
+    ) -> Result<Vec<LyricsCandidate>, LyricsProviderError> {
+        self.search_with_artist(lookup, false).await
+    }
+
+    async fn search_with_artist(
+        &self,
+        lookup: &LyricsLookup,
+        include_artist: bool,
+    ) -> Result<Vec<LyricsCandidate>, LyricsProviderError> {
         let mut url = endpoint("/api/search")?;
-        append_lookup(&mut url, lookup, false);
-        let records: Vec<LrclibRecord> = self.request_json(url).await?;
-        records
+        append_search_lookup(&mut url, lookup, include_artist);
+        let records: Vec<LrclibRecord> = match self.request_json(url).await {
+            Ok(records) => records,
+            Err(LyricsProviderError::NotFound) => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        Ok(records
             .into_iter()
             .take(20)
-            .map(LrclibRecord::candidate)
-            .collect()
+            .filter_map(|record| record.candidate().ok())
+            .collect())
     }
 
     pub(crate) async fn get(
@@ -332,7 +351,9 @@ fn append_lookup(url: &mut Url, lookup: &LyricsLookup, include_duration: bool) {
     {
         let mut query = url.query_pairs_mut();
         query.append_pair("track_name", &lookup.track_name);
-        query.append_pair("artist_name", &lookup.artist_name);
+        if !is_placeholder_artist(&lookup.artist_name) {
+            query.append_pair("artist_name", &lookup.artist_name);
+        }
         if let Some(album_name) = lookup.album_name.as_deref() {
             query.append_pair("album_name", album_name);
         }
@@ -341,6 +362,15 @@ fn append_lookup(url: &mut Url, lookup: &LyricsLookup, include_duration: bool) {
                 query.append_pair("duration", &(duration_ms as f64 / 1_000.0).to_string());
             }
         }
+    }
+}
+
+fn append_search_lookup(url: &mut Url, lookup: &LyricsLookup, include_artist: bool) {
+    let mut query = url.query_pairs_mut();
+    query.append_pair("q", &lookup.track_name);
+    query.append_pair("track_name", &lookup.track_name);
+    if include_artist && !is_placeholder_artist(&lookup.artist_name) {
+        query.append_pair("artist_name", &lookup.artist_name);
     }
 }
 
@@ -427,10 +457,16 @@ mod tests {
             200,
             r#"[{"id":7,"trackName":"Synthetic Track","artistName":"Synthetic Artist","plainLyrics":"secret"}]"#,
         ));
-        let provider = LrclibProvider::with_transport(transport).unwrap();
+        let provider = LrclibProvider::with_transport(transport.clone()).unwrap();
         let candidates = provider.search(&lookup()).await.unwrap();
         assert_eq!(candidates[0].provider_record_id, 7);
         assert!(candidates[0].has_plain);
+        let request = &transport.requests.lock().unwrap()[0].0;
+        assert_eq!(
+            request.query_pairs().find(|(key, _)| key == "q").unwrap().1,
+            "Synthetic Track"
+        );
+        assert!(!request.query_pairs().any(|(key, _)| key == "album_name"));
 
         let transport = Arc::new(MockTransport::default());
         transport
@@ -443,6 +479,69 @@ mod tests {
             provider.find_best(&lookup()).await,
             Err(LyricsProviderError::NotFound)
         );
+    }
+
+    #[tokio::test]
+    async fn search_omits_placeholder_artist_metadata() {
+        let transport = Arc::new(MockTransport::default());
+        transport
+            .responses
+            .lock()
+            .unwrap()
+            .push(response(200, "[]"));
+        let provider = LrclibProvider::with_transport(transport.clone()).unwrap();
+        let mut lookup = lookup();
+        lookup.artist_name = "Unknown Artist".to_owned();
+
+        provider.search(&lookup).await.unwrap();
+
+        let requests = transport.requests.lock().unwrap();
+        assert!(!requests[0]
+            .0
+            .query_pairs()
+            .any(|(key, _)| key == "artist_name"));
+        assert!(requests[0]
+            .0
+            .query_pairs()
+            .any(|(key, value)| key == "q" && value == "Synthetic Track"));
+        assert!(!requests[0]
+            .0
+            .query_pairs()
+            .any(|(key, _)| key == "album_name"));
+    }
+
+    #[tokio::test]
+    async fn search_treats_provider_404_as_no_candidates() {
+        let transport = Arc::new(MockTransport::default());
+        transport
+            .responses
+            .lock()
+            .unwrap()
+            .push(response(404, "{}"));
+        let provider = LrclibProvider::with_transport(transport).unwrap();
+
+        assert_eq!(provider.search(&lookup()).await.unwrap(), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn title_only_search_omits_artist_and_album() {
+        let transport = Arc::new(MockTransport::default());
+        transport
+            .responses
+            .lock()
+            .unwrap()
+            .push(response(200, "[]"));
+        let provider = LrclibProvider::with_transport(transport.clone()).unwrap();
+
+        provider.search_by_title(&lookup()).await.unwrap();
+
+        let request = &transport.requests.lock().unwrap()[0].0;
+        assert!(request
+            .query_pairs()
+            .any(|(key, value)| key == "q" && value == "Synthetic Track"));
+        assert!(!request
+            .query_pairs()
+            .any(|(key, _)| key == "artist_name" || key == "album_name"));
     }
 
     #[tokio::test]

@@ -44,6 +44,28 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [toggleCommandPalette]);
 
+  useEffect(() => {
+    const timers = new WeakMap<HTMLElement, number>();
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || target.scrollHeight <= target.clientHeight) {
+        return;
+      }
+      target.classList.add("is-scrolling");
+      const timer = timers.get(target);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+      timers.set(target, window.setTimeout(() => {
+        target.classList.remove("is-scrolling");
+        timers.delete(target);
+      }, 850));
+    };
+
+    document.addEventListener("scroll", onScroll, true);
+    return () => document.removeEventListener("scroll", onScroll, true);
+  }, []);
+
   const inspector = useUiStore((state) => state.inspector);
   const closeInspector = useUiStore((state) => state.closeInspector);
 

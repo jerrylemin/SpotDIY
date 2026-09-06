@@ -1,7 +1,6 @@
 pub mod analytics;
 pub mod backup;
 pub mod bookmarks;
-pub mod credentials;
 pub mod db;
 pub mod domain;
 pub mod downloads;
@@ -37,7 +36,10 @@ use analytics::{
 use backup::{BackupService, ImportCommitResult, ImportPreview};
 use bookmarks::{AbLoopPreset, Bookmark, BookmarkErrorDto, BookmarkService};
 use db::Database;
-use downloads::{DownloadMode, DownloadService, DownloadSnapshot, DownloadTask, DownloadTaskId};
+use downloads::{
+    media_tools_snapshot, DownloadErrorDto, DownloadMode, DownloadService, DownloadSnapshot,
+    DownloadTask, DownloadTaskId, MediaToolsSnapshot,
+};
 use fusion::{FusionEvaluation, FusionOverride, FusionOverrideDecision, SourceFusionService};
 use inspector::{TrackInspector, TrackInspectorService};
 use ipc::{app_status_with_runtime, source_capabilities, AppStatus, ProviderCapabilities};
@@ -45,8 +47,8 @@ use library::{LibraryService, ProgressSink, LIBRARY_PROGRESS_EVENT};
 use lyrics::{LyricsCandidate, LyricsDocument, LyricsErrorDto, LyricsService, ManualLyricsMode};
 use media_tools::MediaToolManager;
 use playback::{
-    AudioDevice, PlaybackErrorDto, PlaybackService, PlaybackSnapshot, QueueSection, RepeatMode,
-    TrackPlaybackRequest, PLAYBACK_STATE_EVENT, QUEUE_STATE_EVENT,
+    AudioDevice, PlaybackError, PlaybackErrorDto, PlaybackService, PlaybackSnapshot, QueueSection,
+    RepeatMode, TrackPlaybackRequest, PLAYBACK_STATE_EVENT, QUEUE_STATE_EVENT,
 };
 use playlists::{PlaylistErrorDto, PlaylistService};
 use preview::{PreviewService, PreviewState};
@@ -68,20 +70,20 @@ use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 use visual_explorer::{VisualDatasetRequest, VisualExplorerService, VisualLibraryDataset};
 
-use crate::db::repository::TrackRepository;
-use crate::domain::{ProviderKind, TrackId};
+use crate::db::repository::{SourceRepository, TrackRepository};
+use crate::domain::{
+    Album, AlbumId, Artist, ArtistId, ProviderKind, SourceId, TrackId, TrackSource, UnifiedTrack,
+    VersionInfo,
+};
 use crate::search::{SearchEvent, SearchEventSink, SearchRequest, SearchResult, SearchStarted};
 use crate::sources::{
-    LocalSourceAdapter, SoundcloudSourceAdapter, SourceAdapter, SourceResolution, SourceResolver,
-    SpotifySourceAdapter, YoutubeSourceAdapter,
+    validate_provider_url, LocalSourceAdapter, SoundcloudSourceAdapter, SourceAdapter,
+    SourceResolution, SourceResolver, SpotifySourceAdapter, YoutubeSourceAdapter,
 };
-use crate::windows::{
-    GamingClickThroughError, WindowsIntegrationService, WindowsIntegrationSnapshot,
-};
+use crate::windows::{WindowsIntegrationService, WindowsIntegrationSnapshot};
 
 pub const SEARCH_PROVIDER_UPDATE_EVENT: &str = "search://provider-update";
 pub const SEARCH_COMPLETED_EVENT: &str = "search://complete";
-pub const SPOTIFY_AUTH_STATE_EVENT: &str = "spotify://auth-state";
 
 struct AppState {
     database: Database,
@@ -97,7 +99,6 @@ struct AppState {
     bookmarks: BookmarkService,
     playlists: PlaylistService,
     search: search::SearchService,
-    spotify_auth: sources::spotify::SpotifyAuthService,
     fusion: SourceFusionService,
     source_resolver: SourceResolver,
     inspector: TrackInspectorService,
@@ -111,7 +112,6 @@ fn get_app_status(state: State<'_, AppState>) -> Result<AppStatus, String> {
         env!("CARGO_PKG_VERSION"),
         &state.database,
         &state.media_tools,
-        &state.spotify_auth,
     )
     .map_err(|error| error.to_string())
 }
@@ -277,48 +277,6 @@ fn cancel_search(state: State<'_, AppState>) -> Option<crate::search::SearchId> 
 }
 
 #[tauri::command]
-fn get_spotify_setup_status(state: State<'_, AppState>) -> sources::spotify::SpotifySetupStatus {
-    state.spotify_auth.setup_status()
-}
-
-#[tauri::command]
-async fn begin_spotify_authorization(
-    client_id: String,
-    market: String,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<sources::spotify::SpotifyAuthorizationRequest, String> {
-    let request = state
-        .spotify_auth
-        .begin_authorization(client_id, &market)
-        .await
-        .map_err(|error| error.to_string())?;
-    app.opener()
-        .open_url(request.authorization_url.clone(), None::<&str>)
-        .map_err(|error| error.to_string())?;
-    let auth = state.spotify_auth.clone();
-    let app_handle = app.clone();
-    tokio::spawn(async move {
-        let status = match auth.complete_authorization().await {
-            Ok(status) => status,
-            Err(_) => auth.setup_status(),
-        };
-        let _ = app_handle.emit(SPOTIFY_AUTH_STATE_EVENT, status);
-    });
-    Ok(request)
-}
-
-#[tauri::command]
-fn disconnect_spotify(
-    state: State<'_, AppState>,
-) -> Result<sources::spotify::SpotifySetupStatus, String> {
-    state
-        .spotify_auth
-        .disconnect()
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 fn open_provider_result(
     provider: crate::domain::ProviderKind,
     url: String,
@@ -431,6 +389,135 @@ fn set_setting(
 }
 
 #[tauri::command]
+fn configure_mpv(app: AppHandle, state: State<'_, AppState>) -> Result<MediaToolsSnapshot, String> {
+    let Some(file) = app
+        .dialog()
+        .file()
+        .set_title("Choose mpv.exe")
+        .add_filter("MPV executable", &["exe"])
+        .blocking_pick_file()
+    else {
+        return Err("MPV configuration cancelled".to_owned());
+    };
+    let path = file.into_path().map_err(|error| error.to_string())?;
+    state
+        .media_tools
+        .validate_mpv_path(&path)
+        .map_err(|detail| format!("MPV could not be configured: {detail}"))?;
+    SettingsRepository::new(&state.database)
+        .set_mpv_path(Some(path.clone()))
+        .map_err(|error| error.to_string())?;
+    state.media_tools.set_configured_mpv_path(Some(path));
+    restart_playback_if_backend_unavailable(&state);
+    Ok(media_tools_snapshot(&state.media_tools))
+}
+
+#[tauri::command]
+fn clear_mpv_path(state: State<'_, AppState>) -> Result<MediaToolsSnapshot, String> {
+    SettingsRepository::new(&state.database)
+        .set_mpv_path(None)
+        .map_err(|error| error.to_string())?;
+    state.media_tools.set_configured_mpv_path(None);
+    restart_playback_if_backend_unavailable(&state);
+    Ok(media_tools_snapshot(&state.media_tools))
+}
+
+#[tauri::command]
+fn rescan_mpv(state: State<'_, AppState>) -> Result<MediaToolsSnapshot, String> {
+    state.media_tools.refresh_mpv();
+    restart_playback_if_backend_unavailable(&state);
+    Ok(media_tools_snapshot(&state.media_tools))
+}
+
+#[tauri::command]
+fn configure_yt_dlp(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<MediaToolsSnapshot, String> {
+    let Some(file) = app
+        .dialog()
+        .file()
+        .set_title("Choose yt-dlp.exe")
+        .add_filter("yt-dlp executable", &["exe"])
+        .blocking_pick_file()
+    else {
+        return Err("yt-dlp configuration cancelled".to_owned());
+    };
+    let path = file.into_path().map_err(|error| error.to_string())?;
+    state
+        .media_tools
+        .validate_yt_dlp_path(&path)
+        .map_err(|detail| format!("yt-dlp could not be configured: {detail}"))?;
+    SettingsRepository::new(&state.database)
+        .set_yt_dlp_path(Some(path.clone()))
+        .map_err(|error| error.to_string())?;
+    state.media_tools.set_configured_yt_dlp_path(Some(path));
+    Ok(media_tools_snapshot(&state.media_tools))
+}
+
+#[tauri::command]
+fn clear_yt_dlp_path(state: State<'_, AppState>) -> Result<MediaToolsSnapshot, String> {
+    SettingsRepository::new(&state.database)
+        .set_yt_dlp_path(None)
+        .map_err(|error| error.to_string())?;
+    state.media_tools.set_configured_yt_dlp_path(None);
+    Ok(media_tools_snapshot(&state.media_tools))
+}
+
+#[tauri::command]
+fn rescan_yt_dlp(state: State<'_, AppState>) -> Result<MediaToolsSnapshot, String> {
+    state.media_tools.refresh_yt_dlp();
+    Ok(media_tools_snapshot(&state.media_tools))
+}
+
+#[tauri::command]
+fn configure_ffmpeg(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<MediaToolsSnapshot, String> {
+    let Some(file) = app
+        .dialog()
+        .file()
+        .set_title("Choose ffmpeg.exe")
+        .add_filter("FFmpeg executable", &["exe"])
+        .blocking_pick_file()
+    else {
+        return Err("FFmpeg configuration cancelled".to_owned());
+    };
+    let path = file.into_path().map_err(|error| error.to_string())?;
+    state
+        .media_tools
+        .validate_ffmpeg_path(&path)
+        .map_err(|detail| format!("FFmpeg could not be configured: {detail}"))?;
+    SettingsRepository::new(&state.database)
+        .set_ffmpeg_path(Some(path.clone()))
+        .map_err(|error| error.to_string())?;
+    state.media_tools.set_configured_ffmpeg_path(Some(path));
+    Ok(media_tools_snapshot(&state.media_tools))
+}
+
+#[tauri::command]
+fn clear_ffmpeg_path(state: State<'_, AppState>) -> Result<MediaToolsSnapshot, String> {
+    SettingsRepository::new(&state.database)
+        .set_ffmpeg_path(None)
+        .map_err(|error| error.to_string())?;
+    state.media_tools.set_configured_ffmpeg_path(None);
+    Ok(media_tools_snapshot(&state.media_tools))
+}
+
+#[tauri::command]
+fn rescan_ffmpeg(state: State<'_, AppState>) -> Result<MediaToolsSnapshot, String> {
+    state.media_tools.refresh_ffmpeg();
+    Ok(media_tools_snapshot(&state.media_tools))
+}
+
+fn restart_playback_if_backend_unavailable(state: &AppState) {
+    if !state.playback.snapshot().backend_health.ready {
+        let _ = state.playback.retry_playback_backend();
+    }
+}
+
+#[tauri::command]
 fn get_windows_integration_snapshot(
     state: State<'_, WindowsIntegrationService>,
 ) -> WindowsIntegrationSnapshot {
@@ -493,14 +580,6 @@ async fn toggle_overlay(
 }
 
 #[tauri::command]
-fn set_gaming_click_through(
-    enabled: bool,
-    state: State<'_, WindowsIntegrationService>,
-) -> Result<WindowsIntegrationSnapshot, GamingClickThroughError> {
-    state.set_gaming_click_through(enabled)
-}
-
-#[tauri::command]
 fn list_output_profiles(
     state: State<'_, WindowsIntegrationService>,
 ) -> Vec<playback::OutputProfile> {
@@ -552,11 +631,11 @@ fn queue_search_result_download(
     result: SearchResult,
     mode: DownloadMode,
     state: State<'_, AppState>,
-) -> Result<DownloadTask, String> {
+) -> Result<DownloadTask, DownloadErrorDto> {
     state
         .downloads
         .queue_search_result_download(result, mode)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_dto())
 }
 
 #[tauri::command]
@@ -565,11 +644,11 @@ fn queue_source_download(
     source_id: crate::domain::SourceId,
     mode: DownloadMode,
     state: State<'_, AppState>,
-) -> Result<DownloadTask, String> {
+) -> Result<DownloadTask, DownloadErrorDto> {
     state
         .downloads
         .queue_source_download(track_id, source_id, mode)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_dto())
 }
 
 #[tauri::command]
@@ -591,6 +670,25 @@ fn retry_download(
     state
         .downloads
         .retry_download(task_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_completed_download(
+    task_id: DownloadTaskId,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .downloads
+        .clear_completed_download(task_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_completed_downloads(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .downloads
+        .clear_completed_downloads()
         .map_err(|error| error.to_string())
 }
 
@@ -617,6 +715,18 @@ fn open_download_location(
         .map_err(|error| error.to_string())?;
     app.opener()
         .reveal_item_in_dir(path)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn rename_download(
+    task_id: DownloadTaskId,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<DownloadTask, String> {
+    state
+        .downloads
+        .rename_output(task_id, &name)
         .map_err(|error| error.to_string())
 }
 
@@ -1161,6 +1271,18 @@ fn reveal_local_file(
 }
 
 #[tauri::command]
+fn rename_local_file(
+    source_id: crate::domain::SourceId,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .library
+        .rename_path(source_id, &name)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_playback_snapshot(state: State<'_, AppState>) -> PlaybackSnapshot {
     state.playback.snapshot()
 }
@@ -1186,6 +1308,175 @@ fn cancel_preview(state: State<'_, AppState>) -> PreviewState {
     state.preview.cancel_preview()
 }
 
+fn ensure_online_search_result(
+    database: &Database,
+    result: &SearchResult,
+) -> Result<TrackPlaybackRequest, PlaybackError> {
+    if result.entity_kind != search::types::SearchEntityKind::Track {
+        return Err(PlaybackError::new(
+            playback::PlaybackErrorCode::SourceNotPlayable,
+            "only track search results can be played",
+            false,
+        ));
+    }
+    let provider = match result.provider {
+        ProviderKind::Youtube | ProviderKind::Soundcloud => result.provider,
+        ProviderKind::Local => {
+            return Err(PlaybackError::new(
+                playback::PlaybackErrorCode::SourceNotPlayable,
+                "local search results must be played from the library",
+                false,
+            ));
+        }
+        ProviderKind::Spotify => {
+            return Err(PlaybackError::new(
+                playback::PlaybackErrorCode::SourceNotPlayable,
+                "Spotify search results do not support in-app playback; open Spotify or download audio",
+                false,
+            ));
+        }
+    };
+    let source_url = result.canonical_url.as_ref().ok_or_else(|| {
+        PlaybackError::new(
+            playback::PlaybackErrorCode::SourceUnavailable,
+            "the search result has no validated provider URL",
+            false,
+        )
+    })?;
+    let source_url =
+        validate_provider_url(provider, source_url.as_url().as_str()).map_err(|_| {
+            PlaybackError::new(
+                playback::PlaybackErrorCode::SourceUnavailable,
+                "the search result provider URL is invalid",
+                false,
+            )
+        })?;
+    if result.provider_item_id.trim().is_empty() {
+        return Err(PlaybackError::new(
+            playback::PlaybackErrorCode::SourceUnavailable,
+            "the search result has no provider item ID",
+            false,
+        ));
+    }
+
+    let sources = SourceRepository::new(database);
+    if let Some(source) = sources
+        .find_by_provider_identity(provider, &result.provider_item_id)
+        .map_err(|error| {
+            PlaybackError::new(
+                playback::PlaybackErrorCode::PersistenceFailed,
+                format!("could not find the provider source: {error}"),
+                true,
+            )
+        })?
+    {
+        return Ok(TrackPlaybackRequest {
+            track_id: source.track_id,
+            source_id: Some(source.id),
+        });
+    }
+
+    let track_id = TrackId::new();
+    let artist_names = result
+        .artists
+        .iter()
+        .map(|artist| artist.trim())
+        .filter(|artist| !artist.is_empty())
+        .collect::<Vec<_>>();
+    let artist_names = if artist_names.is_empty() {
+        vec!["Unknown Artist"]
+    } else {
+        artist_names
+    };
+    let artists = artist_names
+        .into_iter()
+        .map(|name| {
+            Artist::new(ArtistId::new(), name).map_err(|error| {
+                PlaybackError::new(
+                    playback::PlaybackErrorCode::PersistenceFailed,
+                    format!("could not create the provider artist: {error}"),
+                    false,
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let album = result
+        .album
+        .as_deref()
+        .map(str::trim)
+        .filter(|album| !album.is_empty())
+        .map(|album| {
+            Album::new(AlbumId::new(), album).map_err(|error| {
+                PlaybackError::new(
+                    playback::PlaybackErrorCode::PersistenceFailed,
+                    format!("could not create the provider album: {error}"),
+                    false,
+                )
+            })
+        })
+        .transpose()?;
+    let source_id = SourceId::new();
+    let mut source = TrackSource::new(
+        source_id,
+        track_id,
+        provider,
+        result.provider_item_id.clone(),
+        ipc::provider_capabilities(provider),
+    )
+    .map_err(|error| {
+        PlaybackError::new(
+            playback::PlaybackErrorCode::PersistenceFailed,
+            format!("could not create the provider source: {error}"),
+            false,
+        )
+    })?;
+    source.source_uri = Some(source_url.as_url().clone());
+    source.duration_ms = result.duration_ms;
+    let track = UnifiedTrack::new(
+        track_id,
+        result.title.trim(),
+        artists,
+        album,
+        result.duration_ms,
+        VersionInfo::standard(),
+        vec![source],
+    )
+    .map_err(|error| {
+        PlaybackError::new(
+            playback::PlaybackErrorCode::PersistenceFailed,
+            format!("could not create the provider track: {error}"),
+            false,
+        )
+    })?;
+    if let Err(error) = TrackRepository::new(database).create(&track) {
+        if let Some(source) = SourceRepository::new(database)
+            .find_by_provider_identity(provider, &result.provider_item_id)
+            .map_err(|lookup_error| {
+                PlaybackError::new(
+                    playback::PlaybackErrorCode::PersistenceFailed,
+                    format!("could not recover the provider source: {lookup_error}"),
+                    true,
+                )
+            })?
+        {
+            return Ok(TrackPlaybackRequest {
+                track_id: source.track_id,
+                source_id: Some(source.id),
+            });
+        }
+        return Err(PlaybackError::new(
+            playback::PlaybackErrorCode::PersistenceFailed,
+            format!("could not persist the provider track: {error}"),
+            true,
+        ));
+    }
+
+    Ok(TrackPlaybackRequest {
+        track_id,
+        source_id: Some(source_id),
+    })
+}
+
 #[tauri::command]
 fn play_track(
     track_id: crate::domain::TrackId,
@@ -1199,6 +1490,21 @@ fn play_track(
                 track_id,
                 source_id,
             })
+            .map_err(|error| error.dto())
+    })
+}
+
+#[tauri::command]
+fn play_search_result(
+    result: SearchResult,
+    state: State<'_, AppState>,
+) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    state.preview.with_preview_stopped(|| {
+        let request =
+            ensure_online_search_result(&state.database, &result).map_err(|error| error.dto())?;
+        state
+            .playback
+            .play_track(request)
             .map_err(|error| error.dto())
     })
 }
@@ -1848,7 +2154,11 @@ pub fn run() {
             let artwork_root = layout.artwork_cache_root.clone();
             let library = LibraryService::new(database.clone(), artwork_root)?;
             let sink = Some(progress_sink(app.handle()));
-            let media_tools = MediaToolManager::new();
+            let media_tools = MediaToolManager::with_persisted_paths(
+                settings.get_mpv_path()?,
+                settings.get_yt_dlp_path()?,
+                settings.get_ffmpeg_path()?,
+            );
             let download_cache_root = layout.downloads_cache_root.clone();
             let downloads = DownloadService::with_task_root(
                 database.clone(),
@@ -1857,12 +2167,11 @@ pub fn run() {
                 Some(download_snapshot_sink(app.handle())),
             )?;
             downloads.start()?;
-            let spotify_auth = sources::spotify::SpotifyAuthService::production();
             let adapters: Vec<Arc<dyn SourceAdapter>> = vec![
                 Arc::new(LocalSourceAdapter::new(database.clone())),
                 Arc::new(YoutubeSourceAdapter::new(media_tools.clone())),
                 Arc::new(SoundcloudSourceAdapter::new(media_tools.clone())),
-                Arc::new(SpotifySourceAdapter::new(spotify_auth.clone())),
+                Arc::new(SpotifySourceAdapter::new()),
             ];
             let search = search::SearchService::new(adapters);
             let fusion = SourceFusionService::new(database.clone());
@@ -1932,7 +2241,6 @@ pub fn run() {
                 bookmarks,
                 playlists,
                 search,
-                spotify_auth,
                 fusion,
                 source_resolver,
                 inspector,
@@ -1968,9 +2276,6 @@ pub fn run() {
             get_source_capabilities,
             start_search,
             cancel_search,
-            get_spotify_setup_status,
-            begin_spotify_authorization,
-            disconnect_spotify,
             open_provider_result,
             evaluate_fusion_candidate,
             accept_fusion_candidate,
@@ -1980,6 +2285,15 @@ pub fn run() {
             get_track_inspector,
             get_settings_snapshot,
             set_setting,
+            configure_mpv,
+            clear_mpv_path,
+            rescan_mpv,
+            configure_yt_dlp,
+            clear_yt_dlp_path,
+            rescan_yt_dlp,
+            configure_ffmpeg,
+            clear_ffmpeg_path,
+            rescan_ffmpeg,
             get_windows_integration_snapshot,
             set_windows_integration_settings,
             set_global_shortcuts_enabled,
@@ -1988,7 +2302,6 @@ pub fn run() {
             open_overlay,
             close_overlay,
             toggle_overlay,
-            set_gaming_click_through,
             list_output_profiles,
             create_output_profile,
             update_output_profile,
@@ -1999,8 +2312,11 @@ pub fn run() {
             queue_source_download,
             cancel_download,
             retry_download,
+            clear_completed_download,
+            clear_completed_downloads,
             set_download_concurrency,
             open_download_location,
+            rename_download,
             get_library_folders,
             add_library_folders,
             remove_library_folder,
@@ -2010,6 +2326,7 @@ pub fn run() {
             get_library_page,
             get_visual_library_dataset,
             reveal_local_file,
+            rename_local_file,
             list_playlists,
             get_playlist,
             create_playlist,
@@ -2052,6 +2369,7 @@ pub fn run() {
             start_preview,
             cancel_preview,
             play_track,
+            play_search_result,
             enqueue_track,
             play_track_next,
             toggle_play_pause,

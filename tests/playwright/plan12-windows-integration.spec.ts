@@ -24,14 +24,8 @@ test.describe("Plan 12 Windows integration browser contract", () => {
     await expect(mini).toContainText("Closed");
     await mini.click();
     await expect(mini).toContainText("Open");
-
-    const gaming = section.getByRole("button", { name: /^Gaming/ });
-    await gaming.click();
-    const clickThrough = section.getByRole("checkbox", { name: "Gaming click-through" });
-    await expect(clickThrough).toBeEnabled();
-    await clickThrough.click();
-    await expect(clickThrough).not.toBeChecked();
-    await expect(section.getByRole("alert")).toContainText("native desktop app");
+    await expect(section.getByText("Gaming", { exact: true })).toHaveCount(0);
+    await expect(section.getByText("Lyrics", { exact: true })).toHaveCount(0);
 
     await section.getByLabel("New output profile name").fill("Desk");
     await section.getByRole("button", { name: "Create from current output" }).click();

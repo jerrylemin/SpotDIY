@@ -10,6 +10,7 @@ pub fn all_provider_kinds_for_lens(lens: SearchLens) -> &'static [ProviderKind] 
         ProviderKind::Local,
         ProviderKind::Youtube,
         ProviderKind::Soundcloud,
+        ProviderKind::Spotify,
     ];
     const LOCAL: &[ProviderKind] = &[ProviderKind::Local];
     const YOUTUBE: &[ProviderKind] = &[ProviderKind::Youtube];
@@ -152,18 +153,19 @@ mod tests {
     use crate::domain::ProviderKind;
 
     #[test]
-    fn all_lens_excludes_spotify() {
-        assert!(!all_provider_kinds_for_lens(SearchLens::All).contains(&ProviderKind::Spotify));
+    fn all_lens_includes_spotify() {
+        assert!(all_provider_kinds_for_lens(SearchLens::All).contains(&ProviderKind::Spotify));
     }
 
     #[test]
-    fn tracks_lens_uses_local_youtube_and_soundcloud() {
+    fn tracks_lens_uses_all_track_providers() {
         assert_eq!(
             all_provider_kinds_for_lens(SearchLens::Tracks),
             &[
                 ProviderKind::Local,
                 ProviderKind::Youtube,
-                ProviderKind::Soundcloud
+                ProviderKind::Soundcloud,
+                ProviderKind::Spotify,
             ]
         );
     }

@@ -1,8 +1,11 @@
 # ADR-0011: Spotify PKCE and compliance isolation
 
-- Status: Accepted
+- Status: Superseded on 2026-09-05 by the local `spotdl` source-matching boundary
 - Date: 2026-09-01
 - Scope: Plan 05
+
+This ADR is retained as a historical record of the removed Spotify catalog
+implementation. It is no longer an active application boundary.
 
 ## Context
 

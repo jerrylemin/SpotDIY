@@ -7,6 +7,13 @@ pub const MAX_TIMED_CUES: usize = 20_000;
 pub struct LyricsCue {
     pub start_ms: u64,
     pub lines: Vec<String>,
+    pub words: Vec<LyricsWord>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LyricsWord {
+    pub start_ms: u64,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,10 +34,11 @@ pub enum LyricsParseError {
     TimestampOverflow,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct TimedLine {
     start_ms: u64,
     order: usize,
+    words: Vec<LyricsWord>,
 }
 
 /// Parse the small, deliberately bounded subset of LRC used by SpotDIY.
@@ -60,7 +68,10 @@ pub fn parse_lrc(input: &str) -> Result<ParsedLyrics, LyricsParseError> {
         }
 
         let (timestamps, visible_start) = leading_timestamps(line)?;
-        let visible = strip_inline_timing_markers(&line[visible_start..]);
+        let (visible, inline_words) = parse_inline_timed_words(
+            &line[visible_start..],
+            timestamps.first().copied().unwrap_or(0),
+        );
         let visible = visible.trim_end().to_owned();
         if !timestamps.is_empty() {
             if timestamps.len() > MAX_TIMED_CUES.saturating_sub(timed_line_count) {
@@ -70,13 +81,24 @@ pub fn parse_lrc(input: &str) -> Result<ParsedLyrics, LyricsParseError> {
             if !visible.trim().is_empty() {
                 plain_lines.push(visible.clone());
                 for timestamp in timestamps {
-                    let shifted = i128::from(timestamp)
-                        .checked_add(i128::from(offset_ms))
-                        .ok_or(LyricsParseError::TimestampOverflow)?;
-                    let shifted = shifted.max(0);
-                    let start_ms =
-                        u64::try_from(shifted).map_err(|_| LyricsParseError::TimestampOverflow)?;
-                    timed.push((TimedLine { start_ms, order }, visible.clone()));
+                    let start_ms = shift_timestamp(timestamp, offset_ms)?;
+                    let words = inline_words
+                        .iter()
+                        .map(|word| {
+                            Ok(LyricsWord {
+                                start_ms: shift_timestamp(word.start_ms, offset_ms)?,
+                                text: word.text.clone(),
+                            })
+                        })
+                        .collect::<Result<Vec<_>, LyricsParseError>>()?;
+                    timed.push((
+                        TimedLine {
+                            start_ms,
+                            order,
+                            words,
+                        },
+                        visible.clone(),
+                    ));
                     order = order
                         .checked_add(1)
                         .ok_or(LyricsParseError::TimestampOverflow)?;
@@ -99,12 +121,14 @@ pub fn parse_lrc(input: &str) -> Result<ParsedLyrics, LyricsParseError> {
         if let Some(cue) = cues.last_mut() {
             if cue.start_ms == timed_line.start_ms {
                 cue.lines.push(text);
+                cue.words.extend(timed_line.words);
                 continue;
             }
         }
         cues.push(LyricsCue {
             start_ms: timed_line.start_ms,
             lines: vec![text],
+            words: timed_line.words,
         });
     }
 
@@ -216,15 +240,25 @@ fn parse_timestamp(value: &str) -> Result<Option<u64>, LyricsParseError> {
         .map(Some)
 }
 
-fn strip_inline_timing_markers(value: &str) -> String {
+fn shift_timestamp(timestamp: u64, offset_ms: i64) -> Result<u64, LyricsParseError> {
+    let shifted = i128::from(timestamp)
+        .checked_add(i128::from(offset_ms))
+        .ok_or(LyricsParseError::TimestampOverflow)?
+        .max(0);
+    u64::try_from(shifted).map_err(|_| LyricsParseError::TimestampOverflow)
+}
+
+fn parse_inline_timed_words(value: &str, fallback_start_ms: u64) -> (String, Vec<LyricsWord>) {
     let mut output = String::with_capacity(value.len());
+    let mut markers = Vec::<(usize, u64)>::new();
     let mut cursor = 0;
     while cursor < value.len() {
         let remaining = &value[cursor..];
         if remaining.as_bytes().first() == Some(&b'<') {
             if let Some(relative_end) = remaining.find('>') {
                 let body = &remaining[1..relative_end];
-                if parse_timestamp(body).is_ok_and(|value| value.is_some()) {
+                if let Ok(Some(timestamp)) = parse_timestamp(body) {
+                    markers.push((output.len(), timestamp));
                     cursor += relative_end + 1;
                     continue;
                 }
@@ -237,7 +271,37 @@ fn strip_inline_timing_markers(value: &str) -> String {
         output.push(character);
         cursor += character.len_utf8();
     }
-    output
+
+    let mut words = Vec::with_capacity(markers.len());
+    if let Some((first_start, _)) = markers.first() {
+        if let Some(prefix) = output
+            .get(..*first_start)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            words.push(LyricsWord {
+                start_ms: fallback_start_ms,
+                text: prefix.to_owned(),
+            });
+        }
+    }
+    for (index, (start, timestamp)) in markers.iter().enumerate() {
+        let end = markers
+            .get(index + 1)
+            .map(|(next_start, _)| *next_start)
+            .unwrap_or(output.len());
+        if let Some(text) = output
+            .get(*start..end)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            words.push(LyricsWord {
+                start_ms: *timestamp,
+                text: text.to_owned(),
+            });
+        }
+    }
+    (output, words)
 }
 
 #[cfg(test)]
@@ -253,11 +317,13 @@ mod tests {
             vec![
                 LyricsCue {
                     start_ms: 1_000,
-                    lines: vec!["first".to_owned()]
+                    lines: vec!["first".to_owned()],
+                    words: Vec::new(),
                 },
                 LyricsCue {
                     start_ms: 2_500,
-                    lines: vec!["later".to_owned(), "same".to_owned(), "third".to_owned()]
+                    lines: vec!["later".to_owned(), "same".to_owned(), "third".to_owned()],
+                    words: Vec::new(),
                 },
             ]
         );
@@ -268,7 +334,39 @@ mod tests {
         let parsed = parse_lrc("\u{feff}[ar:Synthetic]\r\n[offset:-1500]\r\n[00:01.00]one <00:01.20>word\r\n[00:02.00]two").unwrap();
         assert_eq!(parsed.cues[0].start_ms, 0);
         assert_eq!(parsed.cues[0].lines[0], "one word");
+        assert_eq!(
+            parsed.cues[0].words,
+            vec![
+                LyricsWord {
+                    start_ms: 0,
+                    text: "one".to_owned(),
+                },
+                LyricsWord {
+                    start_ms: 0,
+                    text: "word".to_owned(),
+                },
+            ]
+        );
         assert_eq!(parsed.plain_text, "one word\ntwo");
+    }
+
+    #[test]
+    fn parses_enhanced_lrc_word_boundaries_and_applies_offset() {
+        let parsed = parse_lrc("[offset:100]\n[00:01.00]<00:01.00>Hello <00:01.40>world").unwrap();
+        assert_eq!(parsed.cues[0].start_ms, 1_100);
+        assert_eq!(
+            parsed.cues[0].words,
+            vec![
+                LyricsWord {
+                    start_ms: 1_100,
+                    text: "Hello".to_owned(),
+                },
+                LyricsWord {
+                    start_ms: 1_500,
+                    text: "world".to_owned(),
+                },
+            ]
+        );
     }
 
     #[test]

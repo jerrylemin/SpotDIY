@@ -15,6 +15,7 @@ import {
   isTauriRuntime,
   parseScanProgress,
   removeLibraryFolder,
+  renameLocalFile,
   rescanAllLibraryFolders,
   rescanLibraryFolder,
   revealLocalFile,
@@ -90,6 +91,14 @@ export function useRescanAllLibraryFolders() {
 
 export function useRevealLocalFile() {
   return useMutation({ mutationFn: (sourceId: SourceId) => revealLocalFile(sourceId) });
+}
+
+export function useRenameLocalFile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sourceId, name }: { sourceId: SourceId; name: string }) => renameLocalFile(sourceId, name),
+    onSuccess: () => invalidateLibraryQueries(queryClient),
+  });
 }
 
 export function useLibraryProgress(): ScanProgress | null {

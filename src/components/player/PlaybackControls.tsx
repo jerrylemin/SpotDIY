@@ -96,11 +96,13 @@ export function PlaybackControls({
       <div className="player-controls-meta">
         <span>{snapshot.queueLength === 0 ? "Queue empty" : `Queue ${snapshot.queueIndex === null ? "—" : snapshot.queueIndex + 1} of ${snapshot.queueLength}`}</span>
         <button
-          className="player-meta-action"
+          aria-label="Clear queue"
+          className="player-meta-action icon-only-button"
           disabled={disabled || pending || snapshot.queueLength === 0}
           onClick={onClearQueue}
           type="button"
         >
+          <SpotIcon name="trash" size={13} />
           Clear queue
         </button>
       </div>

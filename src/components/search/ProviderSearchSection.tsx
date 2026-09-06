@@ -1,11 +1,13 @@
 import { ProviderBadge } from "../common/ProviderBadge";
 import { SpotIcon } from "../icons/SpotIcon";
 import { SearchResultCard } from "./SearchResultCard";
+import type { DownloadReadiness } from "../../features/actions/track-actions";
 import type { ProviderSearchSection as ProviderSearchSectionDto, ProviderStatus } from "../../types/domain";
 
 interface ProviderSearchSectionProps {
   section: ProviderSearchSectionDto;
   status?: ProviderStatus;
+  downloadReadiness?: DownloadReadiness;
   onRetry: () => void;
 }
 
@@ -35,7 +37,7 @@ function detailMessage(section: ProviderSearchSectionDto, status?: ProviderStatu
   return section.error?.detail ?? status?.detail ?? "This provider did not return a result.";
 }
 
-export function ProviderSearchSection({ section, status, onRetry }: ProviderSearchSectionProps) {
+export function ProviderSearchSection({ downloadReadiness, section, status, onRetry }: ProviderSearchSectionProps) {
   const hasResults = section.state === "ready" && section.results.length > 0;
   const canRetry = section.state === "failed" && section.error?.code !== "disabled";
 
@@ -48,14 +50,14 @@ export function ProviderSearchSection({ section, status, onRetry }: ProviderSear
       {section.state === "loading" ? (
         <div aria-live="polite" className="provider-result-empty provider-result-loading"><SpotIcon name="spark" size={18} /><span>Searching this source independently…</span></div>
       ) : hasResults ? (
-        <div className="provider-result-list">{section.results.map((result) => <SearchResultCard capabilities={status?.capabilities} key={`${result.providerItemId}-${result.originalRank}`} result={result} />)}</div>
+        <div className="provider-result-list">{section.results.map((result) => <SearchResultCard capabilities={status?.capabilities} downloadReadiness={downloadReadiness} key={`${result.providerItemId}-${result.originalRank}`} result={result} />)}</div>
       ) : section.state === "ready" ? (
         <div className="provider-result-empty"><SpotIcon name="search" size={18} /><span>No results for this source.</span></div>
       ) : (
         <div className="provider-result-empty provider-result-message" role={section.state === "failed" ? "alert" : undefined}>
           <SpotIcon name={section.state === "cancelled" ? "close" : section.error?.code === "disabled" ? "settings" : "alert"} size={18} />
           <span>{detailMessage(section, status)}</span>
-          {canRetry ? <button className="button button-small" onClick={onRetry} type="button">Retry</button> : null}
+          {canRetry ? <button aria-label="Retry" className="button button-small icon-only-button" onClick={onRetry} title="Retry search" type="button"><SpotIcon name="refresh" size={14} /></button> : null}
         </div>
       )}
     </article>

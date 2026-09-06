@@ -76,9 +76,6 @@ export function CommandPalette() {
     }
     return [
       { id: "overlay-mini", label: "Toggle Mini Overlay", hint: "Show or hide the native Mini overlay", icon: "collapse", action: () => { void windows.toggleOverlay("mini"); } },
-      { id: "overlay-edge", label: "Toggle Edge Overlay", hint: "Show or hide the native Edge overlay", icon: "expand", action: () => { void windows.toggleOverlay("edge"); } },
-      { id: "overlay-lyrics", label: "Toggle Lyrics Overlay", hint: "Show or hide the native Lyrics overlay", icon: "lyrics", action: () => { void windows.toggleOverlay("lyrics"); } },
-      { id: "overlay-gaming", label: "Toggle Gaming Overlay", hint: "Show or hide the native Gaming overlay", icon: "play", action: () => { void windows.toggleOverlay("gaming"); } },
       { id: "show-spotdiy", label: "Show SpotDIY", hint: "Bring the main SpotDIY window to the front", icon: "home", action: () => { void windows.showMain(); } },
     ];
   }, [windows]);

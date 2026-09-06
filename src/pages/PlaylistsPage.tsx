@@ -114,7 +114,7 @@ function SortablePlaylistItem({ item, selected, editable, onSelect, onRemove, on
         <strong>{item.trackId}</strong>
         <span>{item.requestedSourceId ? `Requested source ${item.requestedSourceId}` : "Source resolved at playback"}</span>
       </div>
-      <button aria-label={`Remove track ${item.trackId}`} className="queue-entry-action queue-entry-remove" disabled={!editable} onClick={() => onRemove(item)} type="button">Remove</button>
+      <button aria-label={`Delete track ${item.trackId}`} className="queue-entry-action queue-entry-remove" disabled={!editable} onClick={() => onRemove(item)} type="button"><SpotIcon name="trash" size={13} /> Delete</button>
     </div>
     </ContextActionMenu>
   );

@@ -101,7 +101,7 @@ test.describe("design system browser contract", () => {
     await page.getByRole("radio", { name: "Dense" }).click();
     await expect(root).toHaveAttribute("data-layout", "dense");
     await page.getByRole("link", { name: "Your library", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Your collection, in focus." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Connected locations" })).toBeVisible();
     await expect(page.getByText(longTitle, { exact: true }).first()).toBeVisible();
     await assertNoHorizontalOverflow(page);
     await page.screenshot({ path: testInfo.outputPath(`library-dense-${testInfo.project.name}.png`) });

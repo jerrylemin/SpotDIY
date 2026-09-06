@@ -9,6 +9,8 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: listenMock }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: openMock }));
 
 import {
+  clearCompletedDownload,
+  clearCompletedDownloads,
   DOWNLOAD_STATE_EVENT,
   getDownloadSnapshot,
   parseDownloadSnapshot,
@@ -64,6 +66,7 @@ function snapshot() {
     tools: {
       ytDlp: { status: "ready", version: "2026.08.19", detail: null },
       ffmpeg: { status: "missing", version: null, detail: "Install FFmpeg for video downloads." },
+      mpv: { status: "ready", version: "0.41.0", detail: null },
     },
   };
 }
@@ -101,7 +104,11 @@ describe("download IPC contracts", () => {
     await expect(getDownloadSnapshot()).resolves.toMatchObject({
       tasks: [],
       downloadsDirectory: null,
-      tools: { ytDlp: { status: "missing" }, ffmpeg: { status: "missing" } },
+      tools: {
+        ytDlp: { status: "missing" },
+        ffmpeg: { status: "missing" },
+        mpv: { status: "missing" },
+      },
     });
   });
 
@@ -121,6 +128,39 @@ describe("download IPC contracts", () => {
     expect(invokeMock).toHaveBeenCalledWith("queue_search_result_download", {
       result: result(),
       mode: "video",
+    });
+  });
+
+  it("forwards completed-download clear commands", async () => {
+    enableNativeRuntime();
+    invokeMock.mockResolvedValue(undefined);
+
+    await clearCompletedDownload("download-1" as never);
+    await clearCompletedDownloads();
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "clear_completed_download", { taskId: "download-1" });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "clear_completed_downloads");
+  });
+
+  it("surfaces a structured native queue error without collapsing its code", async () => {
+    enableNativeRuntime();
+    invokeMock.mockRejectedValueOnce(JSON.stringify({
+      code: "downloadDirectoryNotConfigured",
+      detail: "choose a download directory before starting a download",
+    }));
+
+    await expect(queueSearchResultDownload(result(), "audio")).rejects.toMatchObject({
+      code: "downloadDirectoryNotConfigured",
+      message: "Download folder is not configured: choose a download directory before starting a download",
+    });
+  });
+
+  it("uses a safe fallback instead of exposing raw provider command errors", async () => {
+    enableNativeRuntime();
+    invokeMock.mockRejectedValueOnce(new Error("yt-dlp --username secret@example.com --password secret"));
+
+    await expect(queueSearchResultDownload(result(), "audio")).rejects.toMatchObject({
+      message: "SpotDIY could not queue that provider download.",
     });
   });
 

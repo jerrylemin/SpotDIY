@@ -51,3 +51,23 @@ packaged acceptance are blocked by missing MSVC headers/libraries. The primary
 worktree intentionally retains the three unrelated pre-existing changes.
 No migration 10, updater, tag, GitHub Release, root LICENSE, or reviewer loop
 was added. Plan 16 is committed and pushed as `5dfdd1e`.
+
+## Final execution record — 2026-09-03
+
+The release blockers were repaired in `39b79bc63396897b6ddfaf81cce3cb2bd3180c2a`:
+preview stale-state/reaper ordering, deterministic visual genre ordering,
+capability-positive coverage, exact Rust toolchain alignment, CSP, the
+`windows 0.62.2` notice, and the packaged search harness race. The repair SHA
+passed GitHub Actions run `33769072435`, including Rust, RustSec, frontend, and
+NSIS package jobs.
+
+The exact CI installer was clean-installed, exercised, uninstalled, and used
+for regular, provider, Plans 08/09/11/12/13/14/15, and Standard/Portable
+packaged smokes. The full 27-group acceptance matrix is recorded in
+`docs/SpotDIY-Vault/Sessions/full-feature-acceptance.md`.
+
+Plan 16 remains `PARTIAL`, not complete: the broad process-tree idle and
+60-second playback samples exceed their CPU/memory budgets, while native
+VisualExplorer SQL and timed packaged render readiness remain unmeasured. No
+tag, release, email, reviewer loop, speculative refactor, or Plan 17 was
+created.

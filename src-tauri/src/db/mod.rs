@@ -22,8 +22,14 @@ const WINDOWS_INTEGRATION_SETTINGS_MIGRATION_SQL: &str =
     include_str!("../../migrations/0008_windows_integration_settings.sql");
 const SMART_ANALYTICS_MIGRATION_SQL: &str =
     include_str!("../../migrations/0009_smart_analytics.sql");
+const RUNTIME_USABILITY_SETTINGS_MIGRATION_SQL: &str =
+    include_str!("../../migrations/0010_runtime_usability_settings.sql");
+const RUNTIME_TOOL_PATHS_MIGRATION_SQL: &str =
+    include_str!("../../migrations/0011_runtime_tool_paths.sql");
+const SPOTIFY_SOURCE_MATCHING_MIGRATION_SQL: &str =
+    include_str!("../../migrations/0012_spotify_source_matching.sql");
 
-pub const LATEST_SCHEMA_VERSION: u32 = 9;
+pub const LATEST_SCHEMA_VERSION: u32 = 12;
 pub const DATABASE_FILE_NAME: &str = "spotdiy.sqlite3";
 pub const APPLICATION_DATA_DIRECTORY: &str = "SpotDIY";
 
@@ -96,6 +102,24 @@ const MIGRATIONS: &[Migration] = &[
         name: "0009_smart_analytics",
         sql: SMART_ANALYTICS_MIGRATION_SQL,
         destructive: false,
+    },
+    Migration {
+        version: 10,
+        name: "0010_runtime_usability_settings",
+        sql: RUNTIME_USABILITY_SETTINGS_MIGRATION_SQL,
+        destructive: true,
+    },
+    Migration {
+        version: 11,
+        name: "0011_runtime_tool_paths",
+        sql: RUNTIME_TOOL_PATHS_MIGRATION_SQL,
+        destructive: true,
+    },
+    Migration {
+        version: 12,
+        name: "0012_spotify_source_matching",
+        sql: SPOTIFY_SOURCE_MATCHING_MIGRATION_SQL,
+        destructive: true,
     },
 ];
 
@@ -961,7 +985,7 @@ mod tests {
             .is_err());
 
         run_migrations(&mut connection, None, &MIGRATIONS[7..]).unwrap();
-        assert_eq!(current_schema_version(&connection).unwrap(), 9);
+        assert_eq!(current_schema_version(&connection).unwrap(), 12);
         let after: Vec<(String, String, String, i64, String)> = {
             let mut statement = connection
                 .prepare(
@@ -1023,7 +1047,7 @@ mod tests {
         }
 
         run_migrations(&mut connection, None, &MIGRATIONS[8..]).unwrap();
-        assert_eq!(current_schema_version(&connection).unwrap(), 9);
+        assert_eq!(current_schema_version(&connection).unwrap(), 12);
         for table in [
             "track_genres",
             "listening_sessions",
@@ -1039,6 +1063,136 @@ mod tests {
                 .unwrap();
             assert_eq!(exists, 1, "migration nine is missing {table}");
         }
+    }
+
+    #[test]
+    fn schema_nine_migrates_to_ten_preserving_rows_foreign_keys_and_runtime_settings() {
+        let (path, mut connection) =
+            open_legacy_schema_six_fixture("migration-nine-to-ten-runtime-settings");
+        replace_settings_with_plan10_shape(&connection);
+        run_migrations(&mut connection, None, &MIGRATIONS[6..9]).unwrap();
+        assert_eq!(current_schema_version(&connection).unwrap(), 9);
+
+        let now = "2026-09-04T00:00:00Z";
+        let track_id = uuid::Uuid::new_v4().to_string();
+        let source_id = uuid::Uuid::new_v4().to_string();
+        connection
+            .execute(
+                "INSERT INTO tracks (id, title, normalized_title, created_at, updated_at)
+                 VALUES (?1, 'Runtime Track', 'runtime track', ?2, ?2)",
+                params![track_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO track_sources
+                    (id, track_id, provider_kind, provider_item_id, created_at, updated_at)
+                 VALUES (?1, ?2, 'local', 'runtime-source', ?3, ?3)",
+                params![source_id, track_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO local_files (source_id, path, created_at, updated_at)
+                 VALUES (?1, 'C:\\\\Runtime\\\\track.webm', ?2, ?2)",
+                params![source_id, now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO settings_metadata
+                    (setting_key, value_json, value_type, schema_version, updated_at)
+                 VALUES ('downloads_directory', '\"C:\\\\Runtime Downloads\"',
+                         'downloads_directory', 1, ?1)
+                 ON CONFLICT(setting_key) DO UPDATE SET
+                    value_json = excluded.value_json,
+                    value_type = excluded.value_type,
+                    schema_version = excluded.schema_version,
+                    updated_at = excluded.updated_at",
+                params![now],
+            )
+            .unwrap();
+
+        let settings_before: Vec<(String, String, String, i64, String)> = connection
+            .prepare(
+                "SELECT setting_key, value_json, value_type, schema_version, updated_at
+                 FROM settings_metadata ORDER BY setting_key",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        run_migrations(&mut connection, None, &MIGRATIONS[9..]).unwrap();
+        assert_eq!(current_schema_version(&connection).unwrap(), 12);
+        let settings_after: Vec<(String, String, String, i64, String)> = connection
+            .prepare(
+                "SELECT setting_key, value_json, value_type, schema_version, updated_at
+                 FROM settings_metadata ORDER BY setting_key",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(settings_after, settings_before);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM tracks WHERE id = ?1",
+                    params![track_id],
+                    |row| { row.get::<_, i64>(0) }
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM local_files WHERE source_id = ?1",
+                    params![source_id],
+                    |row| { row.get::<_, i64>(0) }
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        drop(connection);
+
+        let database = Database::open(path.path()).unwrap();
+        let settings = SettingsRepository::new(&database);
+        assert_eq!(
+            settings.get_downloads_directory().unwrap(),
+            Some(PathBuf::from(r"C:\Runtime Downloads"))
+        );
+        assert_eq!(database.schema_version().unwrap(), LATEST_SCHEMA_VERSION);
+        assert!(database
+            .with_connection(foreign_key_check_is_clean)
+            .unwrap());
     }
 
     #[test]

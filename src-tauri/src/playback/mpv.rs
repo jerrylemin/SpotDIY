@@ -27,6 +27,27 @@ const CRITICAL_EVENT_RESERVE: usize = 16;
 const BACKEND_WORKER_TICK: Duration = Duration::from_millis(5);
 const SESSION_EVENT_CAPACITY: usize = BACKEND_EVENT_CAPACITY;
 
+fn is_remote_media_target(path: &Path) -> bool {
+    let Some(value) = path.to_str() else {
+        return false;
+    };
+    let Ok(url) = url::Url::parse(value) else {
+        return false;
+    };
+    url.scheme() == "https"
+        && matches!(
+            url.host_str(),
+            Some(
+                "youtube.com"
+                    | "www.youtube.com"
+                    | "music.youtube.com"
+                    | "youtu.be"
+                    | "soundcloud.com"
+                    | "www.soundcloud.com"
+            )
+        )
+}
+
 const OBSERVED_PROPERTIES: &[(i64, &str)] = &[
     (1, "pause"),
     (2, "time-pos"),
@@ -278,6 +299,7 @@ impl MpvWorker {
                 .ok_or_else(|| BackendError::Unavailable {
                     detail: "mpv is not available".to_owned(),
                 })?;
+            let yt_dlp_path = self.manager.yt_dlp_path();
             let runtime = self
                 .runtime
                 .as_ref()
@@ -288,6 +310,7 @@ impl MpvWorker {
                 &executable,
                 generation,
                 self.config.clone(),
+                yt_dlp_path.as_deref(),
                 &mut self.shutdown_rx,
             )) {
                 Ok(session) => {
@@ -322,9 +345,11 @@ impl MpvWorker {
             if self.session.is_none() {
                 return Err(BackendError::NotStarted);
             }
-            if !path.is_absolute() || !path.is_file() {
+            if !is_remote_media_target(path) && (!path.is_absolute() || !path.is_file()) {
                 return Err(BackendError::Operation {
-                    detail: "the local media path is not an existing regular file".to_owned(),
+                    detail:
+                        "the media target is not an existing local file or an allowed provider URL"
+                            .to_owned(),
                 });
             }
             let path = path.to_str().ok_or_else(|| BackendError::Operation {
@@ -1149,6 +1174,7 @@ mod windows_session {
         executable: &Path,
         generation: u64,
         config: SessionConfig,
+        yt_dlp_path: Option<&Path>,
         shutdown_rx: &mut watch::Receiver<bool>,
     ) -> Result<Session, BackendError> {
         let pipe_name = fresh_pipe_name();
@@ -1159,6 +1185,15 @@ mod windows_session {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .kill_on_drop(true);
+        if let Some(parent) = yt_dlp_path.and_then(Path::parent) {
+            let mut path_entries = vec![parent.to_path_buf()];
+            if let Some(existing) = std::env::var_os("PATH") {
+                path_entries.extend(std::env::split_paths(&existing));
+            }
+            if let Ok(path) = std::env::join_paths(path_entries) {
+                command.env("PATH", path);
+            }
+        }
         command.as_std_mut().creation_flags(CREATE_NO_WINDOW);
         let child = command.spawn().map_err(|_| BackendError::Unavailable {
             detail: "mpv could not be started".to_owned(),
@@ -1984,11 +2019,14 @@ mod windows_session {
     }
 
     fn mpv_args(pipe_name: &str) -> Vec<OsString> {
+        // ponytail: keep one native mpv process and force yt-dlp to resolve audio only.
         vec![
             "--no-config".into(),
             "--idle=yes".into(),
             "--terminal=no".into(),
             "--input-terminal=no".into(),
+            "--no-video".into(),
+            "--ytdl-format=bestaudio".into(),
             "--audio-display=no".into(),
             format!("--input-ipc-server={pipe_name}").into(),
         ]
@@ -2182,6 +2220,23 @@ mod tests {
     }
 
     #[test]
+    fn remote_media_targets_are_limited_to_https_provider_hosts() {
+        assert!(is_remote_media_target(Path::new(
+            "https://www.youtube.com/watch?v=video"
+        )));
+        assert!(is_remote_media_target(Path::new(
+            "https://soundcloud.com/artist/track"
+        )));
+        assert!(!is_remote_media_target(Path::new(
+            "http://www.youtube.com/watch?v=video"
+        )));
+        assert!(!is_remote_media_target(Path::new(
+            "https://example.com/track"
+        )));
+        assert!(!is_remote_media_target(Path::new("C:\\Music\\track.webm")));
+    }
+
+    #[test]
     fn observation_registration_is_limited_to_product_state() {
         assert_eq!(
             OBSERVED_PROPERTIES,
@@ -2254,6 +2309,8 @@ mod tests {
                     OsString::from("--idle=yes"),
                     OsString::from("--terminal=no"),
                     OsString::from("--input-terminal=no"),
+                    OsString::from("--no-video"),
+                    OsString::from("--ytdl-format=bestaudio"),
                     OsString::from("--audio-display=no"),
                     OsString::from(format!("--input-ipc-server={pipe_name}")),
                 ]

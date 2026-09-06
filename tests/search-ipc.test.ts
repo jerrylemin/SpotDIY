@@ -8,8 +8,6 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: listenMock }));
 
 import {
   IpcError,
-  beginSpotifyAuthorization,
-  getSpotifySetupStatus,
   openProviderResult,
   parseProviderSearchEvent,
   startSearch,
@@ -81,19 +79,7 @@ describe("search IPC contracts", () => {
   });
 });
 
-describe("Spotify IPC contracts", () => {
-  it("keeps setup status normalized and sends no client secret", async () => {
-    enableNativeRuntime();
-    invokeMock
-      .mockResolvedValueOnce({ enabled: true, configured: false, available: false, state: "setup_required", market: null, detail: "setup" })
-      .mockResolvedValueOnce({ authorizationUrl: "https://accounts.spotify.com/authorize", redirectUri: "http://127.0.0.1:3210/callback" });
-
-    await expect(getSpotifySetupStatus()).resolves.toMatchObject({ state: "setup_required" });
-    await beginSpotifyAuthorization("client-id", "us");
-    expect(invokeMock).toHaveBeenLastCalledWith("begin_spotify_authorization", { clientId: "client-id", market: "US" });
-    expect(JSON.stringify(invokeMock.mock.calls)).not.toContain("secret");
-  });
-
+describe("provider IPC contracts", () => {
   it("rejects unsafe provider URLs before native IPC", async () => {
     enableNativeRuntime();
     await expect(openProviderResult("youtube", "https://evil.example/video")).rejects.toBeInstanceOf(IpcError);

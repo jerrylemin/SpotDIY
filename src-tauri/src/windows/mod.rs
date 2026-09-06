@@ -34,27 +34,6 @@ pub enum TrayStatus {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum GamingClickThroughErrorCode {
-    RescueUnavailable,
-    NativeCallFailed,
-    OverlayUnavailable,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GamingClickThroughError {
-    pub code: GamingClickThroughErrorCode,
-    pub detail: String,
-}
-
-impl std::fmt::Display for GamingClickThroughError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.detail)
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WindowsAction {
     PlayPause,
@@ -64,7 +43,6 @@ pub enum WindowsAction {
     VolumeDown,
     ShowHideMain,
     ToggleOverlay(OverlayKind),
-    DisableGamingClickThrough,
     ApplyOutputProfile(String),
     Quit,
 }
@@ -81,7 +59,6 @@ pub struct WindowsIntegrationSnapshot {
     pub global_shortcuts_enabled: bool,
     pub shortcut_statuses: Vec<ShortcutStatus>,
     pub overlays: Vec<OverlaySnapshot>,
-    pub gaming_click_through: bool,
     pub output_profiles: Vec<OutputProfile>,
 }
 
@@ -108,7 +85,6 @@ struct WindowsIntegrationState {
     smtc: smtc::SmtcController,
     tray_status: TrayStatus,
     tray_detail: Option<String>,
-    gaming_click_through: bool,
     revision: u64,
     last_smtc_key: Option<SmtcKey>,
 }
@@ -147,7 +123,6 @@ impl WindowsIntegrationService {
                     smtc: smtc::SmtcController::default(),
                     tray_status: TrayStatus::Failed,
                     tray_detail: None,
-                    gaming_click_through: false,
                     revision: 0,
                     last_smtc_key: None,
                 }),
@@ -178,11 +153,7 @@ impl WindowsIntegrationService {
     pub fn handle_shortcut(&self, id: u32) {
         let action = {
             let state = self.state_lock();
-            if state.shortcuts.is_rescue(id) {
-                Some(WindowsAction::DisableGamingClickThrough)
-            } else {
-                state.shortcuts.action_for_id(id).map(action_for_shortcut)
-            }
+            state.shortcuts.action_for_id(id).map(action_for_shortcut)
         };
         if let Some(action) = action {
             let _ = self.dispatch(action);
@@ -283,10 +254,6 @@ impl WindowsIntegrationService {
             }
             WindowsAction::ShowHideMain => self.toggle_main(),
             WindowsAction::ToggleOverlay(kind) => self.toggle_overlay(kind).map(|_| ()),
-            WindowsAction::DisableGamingClickThrough => self
-                .set_gaming_click_through(false)
-                .map(|_| ())
-                .map_err(|error| error.to_string()),
             WindowsAction::ApplyOutputProfile(id) => self
                 .apply_output_profile(&id)
                 .map(|_| ())
@@ -313,79 +280,14 @@ impl WindowsIntegrationService {
     }
 
     pub fn close_overlay(&self, kind: OverlayKind) -> Result<WindowsIntegrationSnapshot, String> {
-        if kind == OverlayKind::Gaming {
-            self.disable_gaming_click_through_no_publish();
-        }
         self.inner.overlays.close(kind)?;
         self.publish_state();
         Ok(self.snapshot())
     }
 
     pub fn toggle_overlay(&self, kind: OverlayKind) -> Result<WindowsIntegrationSnapshot, String> {
-        if kind == OverlayKind::Gaming && self.inner.overlays.is_open(kind) {
-            self.disable_gaming_click_through_no_publish();
-        }
         self.inner.overlays.toggle(kind)?;
         self.publish_state();
-        Ok(self.snapshot())
-    }
-
-    pub fn set_gaming_click_through(
-        &self,
-        enabled: bool,
-    ) -> Result<WindowsIntegrationSnapshot, GamingClickThroughError> {
-        if enabled {
-            if !self.inner.overlays.is_open(OverlayKind::Gaming) {
-                return Err(gaming_error(
-                    GamingClickThroughErrorCode::OverlayUnavailable,
-                    "the Gaming overlay must be open before click-through can be enabled",
-                ));
-            }
-            if self.state_lock().gaming_click_through {
-                return Ok(self.snapshot());
-            }
-            if let Err(detail) = self.register_gaming_rescue() {
-                return Err(gaming_error(
-                    GamingClickThroughErrorCode::RescueUnavailable,
-                    detail,
-                ));
-            }
-            let Some(window) = self
-                .inner
-                .app
-                .get_webview_window(OverlayKind::Gaming.label())
-            else {
-                self.disable_gaming_click_through_no_publish();
-                return Err(gaming_error(
-                    GamingClickThroughErrorCode::OverlayUnavailable,
-                    "the Gaming overlay window is unavailable",
-                ));
-            };
-            if let Err(error) = window.set_ignore_cursor_events(true) {
-                self.disable_gaming_click_through_no_publish();
-                return Err(gaming_error(
-                    GamingClickThroughErrorCode::NativeCallFailed,
-                    format!("could not enable Gaming click-through: {error}"),
-                ));
-            }
-            self.state_lock().gaming_click_through = true;
-            self.publish_state();
-            return Ok(self.snapshot());
-        }
-
-        let native_error = self
-            .inner
-            .app
-            .get_webview_window(OverlayKind::Gaming.label())
-            .and_then(|window| window.set_ignore_cursor_events(false).err());
-        self.disable_gaming_click_through_no_publish();
-        self.publish_state();
-        if let Some(error) = native_error {
-            return Err(gaming_error(
-                GamingClickThroughErrorCode::NativeCallFailed,
-                format!("could not disable Gaming click-through: {error}"),
-            ));
-        }
         Ok(self.snapshot())
     }
 
@@ -568,7 +470,6 @@ impl WindowsIntegrationService {
     }
 
     pub fn shutdown(&self) {
-        self.disable_gaming_click_through_no_publish();
         {
             let mut state = self.state_lock();
             state.shortcuts.unregister_all(&self.inner.app);
@@ -704,24 +605,6 @@ impl WindowsIntegrationService {
         state.last_smtc_key = None;
     }
 
-    fn register_gaming_rescue(&self) -> Result<(), String> {
-        let mut state = self.state_lock();
-        state.shortcuts.register_rescue(&self.inner.app)
-    }
-
-    fn disable_gaming_click_through_no_publish(&self) {
-        if let Some(window) = self
-            .inner
-            .app
-            .get_webview_window(OverlayKind::Gaming.label())
-        {
-            let _ = window.set_ignore_cursor_events(false);
-        }
-        let mut state = self.state_lock();
-        state.shortcuts.unregister_rescue(&self.inner.app);
-        state.gaming_click_through = false;
-    }
-
     fn toggle_main(&self) -> Result<(), String> {
         let Some(window) = self.inner.app.get_webview_window("main") else {
             return Err("the main window is unavailable".to_owned());
@@ -755,7 +638,6 @@ impl WindowsIntegrationService {
                 .shortcuts
                 .statuses(&state.bindings, state.settings.global_shortcuts_enabled),
             overlays: self.inner.overlays.snapshots(),
-            gaming_click_through: state.gaming_click_through,
             output_profiles: state.output_profiles.clone(),
         }
     }
@@ -777,22 +659,6 @@ fn action_for_shortcut(action: GlobalShortcutAction) -> WindowsAction {
         GlobalShortcutAction::VolumeDown => WindowsAction::VolumeDown,
         GlobalShortcutAction::ShowHideMain => WindowsAction::ShowHideMain,
         GlobalShortcutAction::ToggleMiniOverlay => WindowsAction::ToggleOverlay(OverlayKind::Mini),
-        GlobalShortcutAction::ToggleLyricsOverlay => {
-            WindowsAction::ToggleOverlay(OverlayKind::Lyrics)
-        }
-        GlobalShortcutAction::ToggleGamingOverlay => {
-            WindowsAction::ToggleOverlay(OverlayKind::Gaming)
-        }
-    }
-}
-
-fn gaming_error(
-    code: GamingClickThroughErrorCode,
-    detail: impl Into<String>,
-) -> GamingClickThroughError {
-    GamingClickThroughError {
-        code,
-        detail: detail.into(),
     }
 }
 
@@ -837,26 +703,14 @@ mod tests {
     }
 
     #[test]
-    fn shortcut_actions_map_to_the_declared_native_actions() {
+    fn mini_overlay_shortcut_maps_to_the_declared_native_action() {
         assert_eq!(
-            action_for_shortcut(GlobalShortcutAction::ToggleGamingOverlay),
-            WindowsAction::ToggleOverlay(OverlayKind::Gaming)
+            action_for_shortcut(GlobalShortcutAction::ToggleMiniOverlay),
+            WindowsAction::ToggleOverlay(OverlayKind::Mini)
         );
         assert_eq!(
             action_for_shortcut(GlobalShortcutAction::VolumeDown),
             WindowsAction::VolumeDown
-        );
-    }
-
-    #[test]
-    fn click_through_errors_are_stable_dtos() {
-        let error = gaming_error(
-            GamingClickThroughErrorCode::RescueUnavailable,
-            "shortcut conflict",
-        );
-        assert_eq!(
-            serde_json::to_value(error).unwrap()["code"],
-            "rescueUnavailable"
         );
     }
 

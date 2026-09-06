@@ -7,6 +7,7 @@ use thiserror::Error;
 use crate::domain::{ProviderKind, SourceId, TrackSource, UnifiedTrack};
 use crate::library::{LibraryError, LibraryService};
 use crate::settings::{SettingsError, SettingsRepository};
+use crate::sources::validate_provider_url;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -28,7 +29,7 @@ impl SourceResolutionReason {
             Self::LocalFileMissing => Some("local file is missing or unavailable"),
             Self::SourceDoesNotSupportPlayback => Some("source does not support playback"),
             Self::ProviderPlaybackNotImplemented => {
-                Some("online provider playback is not implemented yet")
+                Some("online provider playback requires a validated provider URL")
             }
             Self::MetadataOnly => Some("provider is metadata-only"),
         }
@@ -281,16 +282,30 @@ impl SourceReadinessProbe for ProductionSourceReadinessProbe {
                     Err(error) => local_error_readiness(error),
                 }
             }
-            ProviderKind::Youtube | ProviderKind::Soundcloud => SourceReadiness::unavailable(
-                SourceResolutionReason::ProviderPlaybackNotImplemented,
-                Some(format!(
-                    "{} playback is not implemented yet",
-                    source.provider_kind
-                )),
-            ),
+            ProviderKind::Youtube | ProviderKind::Soundcloud => {
+                if !source.capabilities.playback {
+                    return SourceReadiness::unavailable(
+                        SourceResolutionReason::SourceDoesNotSupportPlayback,
+                        Some("source does not advertise playback capability".to_owned()),
+                    );
+                }
+                let Some(source_uri) = source.source_uri.as_ref() else {
+                    return SourceReadiness::unavailable(
+                        SourceResolutionReason::ProviderPlaybackNotImplemented,
+                        Some("online source does not have a provider URL".to_owned()),
+                    );
+                };
+                if validate_provider_url(source.provider_kind, source_uri.as_str()).is_err() {
+                    return SourceReadiness::unavailable(
+                        SourceResolutionReason::Unavailable,
+                        Some("online source has an invalid provider URL".to_owned()),
+                    );
+                }
+                SourceReadiness::playable()
+            }
             ProviderKind::Spotify => SourceReadiness::unavailable(
                 SourceResolutionReason::MetadataOnly,
-                Some("Spotify is metadata-only".to_owned()),
+                Some("Spotify online playback is unavailable; open Spotify or download audio via spotdl".to_owned()),
             ),
         }
     }
@@ -372,6 +387,7 @@ mod tests {
         TrackId, VersionInfo,
     };
     use std::path::PathBuf;
+    use url::Url;
 
     fn library() -> (Database, LibraryService) {
         let database = Database::open(TempDatabasePath::new("resolver").path()).unwrap();
@@ -490,6 +506,24 @@ mod tests {
                 .reason,
             SourceResolutionReason::MetadataOnly
         );
+    }
+
+    #[test]
+    fn production_resolver_accepts_valid_online_provider_urls() {
+        let (database, library) = library();
+        let track_id = TrackId::new();
+        let mut youtube = remote(track_id, ProviderKind::Youtube, "video");
+        youtube.source_uri = Some(Url::parse("https://www.youtube.com/watch?v=video").unwrap());
+        let track = track_with_sources(&database, track_id, vec![youtube.clone()]);
+
+        let resolution = SourceResolver::new(library).resolve(&track).unwrap();
+
+        assert_eq!(resolution.selected_source_id, Some(youtube.id));
+        assert_eq!(
+            resolution.candidates[0].reason,
+            SourceResolutionReason::Playable
+        );
+        assert!(resolution.candidates[0].playable);
     }
 
     #[test]

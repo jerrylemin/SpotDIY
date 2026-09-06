@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveSearchResultActions } from "../src/features/actions/track-actions";
+import { deriveSearchResultActions, downloadModesForResult } from "../src/features/actions/track-actions";
 import type { SearchResult } from "../src/types/domain";
 
 const baseResult: SearchResult = {
@@ -23,18 +23,56 @@ const baseResult: SearchResult = {
 };
 
 describe("capability-aware search actions", () => {
-  it("keeps online playback visible but disabled and enables native provider downloads", () => {
-    const actions = deriveSearchResultActions(baseResult, { nativeRuntime: true });
-    expect(actions.find((action) => action.id === "play")).toMatchObject({ enabled: false, reason: "Online playback is not implemented" });
+  it("enables online playback and native provider downloads when the runtime is ready", () => {
+    const actions = deriveSearchResultActions(baseResult, {
+      nativeRuntime: true,
+      downloadsAvailable: true,
+      downloadReadiness: { ytDlpStatus: "ready", ffmpegStatus: "ready", mpvStatus: "ready", downloadDirectoryStatus: "ready" },
+    });
+    expect(actions.find((action) => action.id === "play")).toMatchObject({ enabled: true, reason: undefined });
     expect(actions.find((action) => action.id === "download")).toMatchObject({ enabled: true });
   });
 
-  it("treats Spotify as metadata-only and keeps browser downloads disabled", () => {
+  it("keeps Spotify playback external and enables native source-matched audio downloads", () => {
     const spotify = { ...baseResult, provider: "spotify" as const, canonicalUrl: "https://open.spotify.com/track/1" };
-    const actions = deriveSearchResultActions(spotify, { nativeRuntime: false });
-    expect(actions.find((action) => action.id === "play")?.reason).toBe("Spotify is metadata-only");
-    expect(actions.find((action) => action.id === "download")?.reason).toBe("Spotify downloads are not supported");
-    expect(actions.find((action) => action.id === "download")?.enabled).toBe(false);
+    expect(downloadModesForResult(spotify)).toEqual(["audio"]);
+    const actions = deriveSearchResultActions(spotify, {
+      nativeRuntime: true,
+      downloadsAvailable: true,
+      downloadReadiness: {
+        ytDlpStatus: "ready",
+        ffmpegStatus: "ready",
+        mpvStatus: "ready",
+        spotifyStatus: "ready",
+        downloadDirectoryStatus: "ready",
+      },
+    });
+    expect(actions.find((action) => action.id === "play")?.reason).toBe("Spotify results are not playable online; open Spotify to listen.");
+    expect(actions.find((action) => action.id === "download")).toMatchObject({ enabled: true, downloadModes: ["audio"] });
+  });
+
+  it("keeps SoundCloud audio-only and reports native readiness failures", () => {
+    const soundcloud = {
+      ...baseResult,
+      provider: "soundcloud" as const,
+      canonicalUrl: "https://soundcloud.com/artist/track",
+    };
+    expect(downloadModesForResult(soundcloud)).toEqual(["audio"]);
+    const actions = deriveSearchResultActions(soundcloud, {
+      nativeRuntime: true,
+      downloadsAvailable: true,
+      downloadReadiness: {
+        ytDlpStatus: "missing",
+        ffmpegStatus: "ready",
+        downloadDirectoryStatus: "ready",
+      },
+    });
+    expect(actions.find((action) => action.id === "download")).toMatchObject({
+      label: "Download audio",
+      enabled: false,
+      reason: "yt-dlp is not available.",
+      downloadModes: ["audio"],
+    });
   });
 
   it("offers persisted local actions without treating a search result as online media", () => {

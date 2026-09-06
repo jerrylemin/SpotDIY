@@ -16,11 +16,11 @@ use crate::sources::{
 const SUPPORTED_ENTITIES: &[SearchEntityKind] = &[SearchEntityKind::Track];
 const YOUTUBE_CAPABILITIES: SourceCapabilities = SourceCapabilities {
     search: true,
-    playback: false,
+    playback: true,
     metadata: true,
     artwork: true,
     lyrics: false,
-    downloads: false,
+    downloads: true,
     popularity: true,
     release_date: false,
     lyrics_metadata: false,
@@ -185,7 +185,22 @@ fn safe_canonical_url(
     entry: &Map<String, Value>,
     provider: ProviderKind,
 ) -> Option<crate::search::types::SafeUrl> {
-    string(entry, "webpage_url").and_then(|url| validate_provider_url(provider, url).ok())
+    if let Some(url) = string(entry, "webpage_url") {
+        if let Ok(url) = validate_provider_url(provider, url) {
+            return Some(url);
+        }
+    }
+
+    let video_id = string(entry, "id")?;
+    if video_id.len() != 11
+        || !video_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return None;
+    }
+    let fallback = format!("https://www.youtube.com/watch?v={video_id}");
+    validate_provider_url(provider, &fallback).ok()
 }
 
 #[cfg(test)]
@@ -325,6 +340,68 @@ mod tests {
                 .as_str(),
             "https://www.youtube.com/watch?v=v1"
         );
+    }
+
+    #[test]
+    fn youtube_advertises_task_creation_download_capability() {
+        assert!(
+            youtube_with(FakeYtDlpRunner::json(r#"{"entries":[]}"#))
+                .capabilities()
+                .downloads
+        );
+    }
+
+    #[tokio::test]
+    async fn youtube_flat_result_without_webpage_url_uses_validated_video_id() {
+        let section = youtube_with(FakeYtDlpRunner::json(
+            r#"{"_type":"playlist","entries":[{"_type":"url","ie_key":"Youtube","id":"dQw4w9WgXcQ","title":"Signal"}]}"#,
+        ))
+        .search(test_request(), SearchCancellation::new())
+        .await;
+
+        assert_eq!(
+            section.results[0]
+                .canonical_url
+                .as_ref()
+                .unwrap()
+                .as_url()
+                .as_str(),
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        );
+    }
+
+    #[tokio::test]
+    async fn youtube_rejects_wrong_host_and_uses_safe_id_fallback() {
+        let section = youtube_with(FakeYtDlpRunner::json(
+            r#"{"entries":[{"id":"dQw4w9WgXcQ","title":"Signal","webpage_url":"https://evil.example/video"}]}"#,
+        ))
+        .search(test_request(), SearchCancellation::new())
+        .await;
+
+        assert_eq!(
+            section.results[0]
+                .canonical_url
+                .as_ref()
+                .unwrap()
+                .as_url()
+                .as_str(),
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        );
+    }
+
+    #[tokio::test]
+    async fn youtube_does_not_synthesize_from_malformed_video_id() {
+        let section = youtube_with(FakeYtDlpRunner::json(
+            r#"{"entries":[{"id":"not a video id","title":"Unsafe"},{"id":"short","title":"Short"}]}"#,
+        ))
+        .search(test_request(), SearchCancellation::new())
+        .await;
+
+        assert_eq!(section.results.len(), 2);
+        assert!(section
+            .results
+            .iter()
+            .all(|result| result.canonical_url.is_none()));
     }
 
     #[tokio::test]

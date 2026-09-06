@@ -4,7 +4,7 @@ const longTitle = "Night Drive - Neon Over Water (Extended Live Session)";
 
 async function openLibrary(page: Page, scenario = "default") {
   await page.goto(`/library?playbackScenario=${scenario}`);
-  await expect(page.getByRole("heading", { name: "Your collection, in focus." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected locations" })).toBeVisible();
   await expect(page.getByText(longTitle, { exact: true }).first()).toBeVisible();
 }
 
@@ -96,12 +96,10 @@ test.describe("playback engine browser contract", () => {
 
   test("renders missing-tool, recovering, failed, and retry states", async ({ page }) => {
     await openLibrary(page, "toolMissing");
-    await expect(page.getByText("Player engine unavailable", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Install mpv to play local music/)).toBeVisible();
-    const retryButton = page.getByRole("button", { name: "Retry Player Engine", exact: true });
-    await expect(retryButton).toBeEnabled();
-    await retryButton.click();
-    await expect(page.getByText("Nothing queued", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("PLAYBACK ENGINE REQUIRED", { exact: true })).toBeVisible();
+    await expect(page.getByText(/MPV is not configured/)).toBeVisible();
+    await expect(page.getByRole("link", { name: "Configure" })).toHaveAttribute("href", "/settings");
+    await expect(page.getByRole("button", { name: "Retry Player Engine", exact: true })).toHaveCount(0);
 
     await openLibrary(page, "recovering");
     await expect(page.getByText("Recovering playback", { exact: true })).toBeVisible();

@@ -2,14 +2,18 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { useTrackInspector } from "../../hooks/useTrackInspector";
+import { useAppStatus } from "../../hooks/useAppStatus";
 import { usePlayback } from "../../hooks/usePlayback";
 import {
   IpcError,
   isTauriRuntime,
   openProviderResult,
+  pickDownloadDirectory,
+  playSearchResult,
   queueSearchResultDownload,
   queueSourceDownload,
   revealLocalFile,
+  setSetting,
 } from "../../services/ipc";
 import type {
   DownloadMode,
@@ -19,6 +23,7 @@ import type {
   TrackInspector as TrackInspectorDto,
   TrackInspectorSource,
 } from "../../types/domain";
+import { deriveSearchResultActions, downloadModesForProvider, downloadReadinessReason, isDownloadFolderReadinessReason, type DownloadReadiness } from "../../features/actions/track-actions";
 import { InspectorPanel, type InspectorSection } from "./InspectorPanel";
 import { ProviderBadge } from "../common/ProviderBadge";
 import { SpotIcon } from "../icons/SpotIcon";
@@ -97,7 +102,7 @@ function sourceAvailability(source: TrackInspectorSource): string {
     return source.availabilityDetail ?? "Source unavailable.";
   }
   if (!source.capabilities.playback && source.provider !== "local") {
-    return source.availabilityDetail ?? "Online playback is not implemented.";
+    return source.availabilityDetail ?? "Provider playback is unavailable.";
   }
   return "Available";
 }
@@ -120,20 +125,32 @@ function CapabilityList({ source }: { source: TrackInspectorSource }) {
 
 function SourceCard({
   current,
+  downloadMode,
+  downloadReadiness,
   onAction,
   source,
 }: {
   current: boolean;
+  downloadMode: DownloadMode;
+  downloadReadiness?: DownloadReadiness;
   onAction: (source: TrackInspectorSource, action: "play" | "play-next" | "queue" | "switch" | "reveal" | "open" | "download" | "lyrics") => void;
   source: TrackInspectorSource;
 }) {
-  const canPlay = source.available && source.capabilities.playback && (isTauriRuntime() || previewPlaybackEnabled());
+  const mpvReady = source.provider === "local" || previewPlaybackEnabled() || downloadReadiness?.mpvStatus === "ready";
+  const canPlay = source.available && source.capabilities.playback && mpvReady && (isTauriRuntime() || previewPlaybackEnabled());
   const canReveal = source.provider === "local" && source.available && isTauriRuntime();
   const canOpen = source.provider !== "local" && source.canonicalUrl !== null;
-  const canDownload = (source.provider === "youtube" || source.provider === "soundcloud")
-    && source.capabilities.downloads
-    && source.canonicalUrl !== null
-    && isTauriRuntime();
+  const downloadModes = downloadModesForProvider(source.provider);
+  const sourceDownloadMode = downloadModes.includes(downloadMode) ? downloadMode : "audio";
+  const downloadReason = downloadModes.length > 0
+    ? downloadReadinessReason(source.provider, sourceDownloadMode, {
+      canonicalUrl: source.canonicalUrl,
+      nativeRuntime: isTauriRuntime(),
+      downloadsAvailable: source.capabilities.downloads,
+      downloadReadiness,
+    })
+    : undefined;
+  const canDownload = downloadModes.length > 0 && (downloadReason === undefined || isDownloadFolderReadinessReason(downloadReason));
   const canLyrics = current && source.capabilities.lyrics;
   const playReason = !source.available
     ? sourceAvailability(source)
@@ -141,6 +158,8 @@ function SourceCard({
       ? sourceAvailability(source)
       : !isTauriRuntime() && !previewPlaybackEnabled()
         ? "Playback controls require the native app."
+        : source.provider !== "local" && downloadReadiness?.mpvStatus !== "ready"
+          ? "The online playback engine is not ready."
         : undefined;
 
   return (
@@ -159,16 +178,16 @@ function SourceCard({
       <CapabilityList source={source} />
       <div className="inspector-source-actions">
         {current ? (
-          <button className="button button-primary button-small" disabled={!canPlay} onClick={() => onAction(source, "play")} title={canPlay ? "Play this source now" : playReason} type="button"><SpotIcon name="play" size={13} /> Play now</button>
+          <button aria-label="Play now" className="button button-primary button-small icon-only-button" disabled={!canPlay} onClick={() => onAction(source, "play")} title={canPlay ? "Play this source now" : playReason} type="button"><SpotIcon name="play" size={13} /> Play now</button>
         ) : (
-          <button className="button button-primary button-small" disabled={!canPlay} onClick={() => onAction(source, "switch")} title={canPlay ? "Switch the current track to this source" : playReason} type="button">Switch source</button>
+          <button aria-label="Switch source" className="button button-primary button-small icon-only-button" disabled={!canPlay} onClick={() => onAction(source, "switch")} title={canPlay ? "Switch the current track to this source" : playReason} type="button"><SpotIcon name="refresh" size={13} /> Switch source</button>
         )}
-        <button className="button button-quiet button-small" disabled={!canPlay} onClick={() => onAction(source, "play-next")} title={canPlay ? "Play this source after the current track" : playReason} type="button">Play next</button>
-        <button className="button button-quiet button-small" disabled={!canPlay} onClick={() => onAction(source, "queue")} title={canPlay ? "Add this source to the persistent queue" : playReason} type="button">Add to queue</button>
-        <button className="button button-quiet button-small" disabled={!canReveal} onClick={() => onAction(source, "reveal")} title={canReveal ? "Reveal this managed local file" : source.provider === "local" ? "Local file reveal requires the native app and an available file." : "Only local sources have managed file locations."} type="button">Open location</button>
-        <button className="button button-quiet button-small" disabled={!canOpen} onClick={() => onAction(source, "open")} title={canOpen ? "Open the validated provider source" : "No validated provider URL is available."} type="button">Open source</button>
-        <button className="button button-quiet button-small" disabled={!canDownload} onClick={() => onAction(source, "download")} title={canDownload ? "Queue this managed provider download" : "Downloads require a supported YouTube or SoundCloud source in the native app."} type="button"><SpotIcon name="download" size={13} /> Download</button>
-        <button className="button button-quiet button-small" disabled={!canLyrics} onClick={() => onAction(source, "lyrics")} title={canLyrics ? "Open lyrics for the current source" : current ? "This source does not advertise lyrics." : "Play this source first to open synchronized lyrics."} type="button"><SpotIcon name="lyrics" size={13} /> Lyrics</button>
+        <button aria-label="Play next" className="button button-quiet button-small icon-only-button" disabled={!canPlay} onClick={() => onAction(source, "play-next")} title={canPlay ? "Play this source after the current track" : playReason} type="button"><SpotIcon name="next" size={13} /> Play next</button>
+        <button aria-label="Add to queue" className="button button-quiet button-small icon-only-button" disabled={!canPlay} onClick={() => onAction(source, "queue")} title={canPlay ? "Add this source to the persistent queue" : playReason} type="button"><SpotIcon name="queue" size={13} /> Add to queue</button>
+        <button aria-label="Open location" className="button button-quiet button-small icon-only-button" disabled={!canReveal} onClick={() => onAction(source, "reveal")} title={canReveal ? "Reveal this managed local file" : source.provider === "local" ? "Local file reveal requires the native app and an available file." : "Only local sources have managed file locations."} type="button"><SpotIcon name="folder" size={13} /> Open location</button>
+        <button aria-label="Open source" className="button button-quiet button-small icon-only-button" disabled={!canOpen} onClick={() => onAction(source, "open")} title={canOpen ? "Open the validated provider source" : "No validated provider URL is available."} type="button"><SpotIcon name="arrow" size={13} /> Open source</button>
+        {downloadModes.length > 0 ? <button aria-label={downloadModes.length === 1 ? "Download audio" : "Download"} className="button button-quiet button-small icon-only-button" disabled={!canDownload} onClick={() => onAction(source, "download")} title={canDownload ? (isDownloadFolderReadinessReason(downloadReason) ? "Choose a download folder, then queue this download" : "Queue this managed provider download") : downloadReason} type="button"><SpotIcon name="download" size={13} /> {downloadModes.length === 1 ? "Download audio" : "Download"}</button> : null}
+        <button aria-label="Lyrics" className="button button-quiet button-small icon-only-button" disabled={!canLyrics} onClick={() => onAction(source, "lyrics")} title={canLyrics ? "Open lyrics for the current source" : current ? "This source does not advertise lyrics." : "Play this source first to open synchronized lyrics."} type="button"><SpotIcon name="lyrics" size={13} /> Lyrics</button>
       </div>
     </article>
   );
@@ -214,10 +233,11 @@ function QualityState({ inspector, currentSourceId }: { inspector: TrackInspecto
   );
 }
 
-function inspectorSections(inspector: TrackInspectorDto, currentSourceId: string | null, sourceAction: (source: TrackInspectorSource, action: "play" | "play-next" | "queue" | "switch" | "reveal" | "open" | "download" | "lyrics") => void, downloadMode: DownloadMode, onDownloadModeChange: (mode: DownloadMode) => void): InspectorSection[] {
+function inspectorSections(inspector: TrackInspectorDto, currentSourceId: string | null, sourceAction: (source: TrackInspectorSource, action: "play" | "play-next" | "queue" | "switch" | "reveal" | "open" | "download" | "lyrics") => void, downloadMode: DownloadMode, onDownloadModeChange: (mode: DownloadMode) => void, downloadReadiness?: DownloadReadiness): InspectorSection[] {
+  const hasVideoDownload = inspector.sources.some((source) => source.capabilities.downloads && downloadModesForProvider(source.provider).length > 1);
   return [
     { id: "overview", title: "OVERVIEW", content: <Overview inspector={inspector} /> },
-    { id: "sources", title: "SOURCES", content: <div className="inspector-source-list"><label className="inspector-download-control">Provider download format<select aria-label="Download mode" onChange={(event) => onDownloadModeChange(event.target.value as DownloadMode)} value={downloadMode}><option value="audio">Audio</option><option value="video">Video</option></select></label>{inspector.sources.map((source) => <SourceCard current={source.sourceId === currentSourceId} key={source.sourceId} onAction={sourceAction} source={source} />)}</div> },
+    { id: "sources", title: "SOURCES", content: <div className="inspector-source-list">{hasVideoDownload ? <label className="inspector-download-control">Provider download format<select aria-label="Download mode" onChange={(event) => onDownloadModeChange(event.target.value as DownloadMode)} value={downloadMode}><option value="audio">Audio</option><option value="video">Video</option></select></label> : null}{inspector.sources.map((source) => <SourceCard current={source.sourceId === currentSourceId} downloadMode={downloadMode} downloadReadiness={downloadReadiness} key={source.sourceId} onAction={sourceAction} source={source} />)}</div> },
     { id: "quality", title: "QUALITY", content: <QualityState currentSourceId={currentSourceId} inspector={inspector} /> },
     { id: "collection", title: "COLLECTION", content: <CollectionState inspector={inspector} /> },
     { id: "capabilities", title: "CAPABILITIES", content: <div className="inspector-capability-source-list">{inspector.sources.map((source) => <div className="inspector-capability-source" key={source.sourceId}><div><ProviderBadge kind={source.provider} /><strong>{providerName(source.provider)}</strong></div><CapabilityList source={source} /></div>)}</div> },
@@ -227,12 +247,20 @@ function inspectorSections(inspector: TrackInspectorDto, currentSourceId: string
 export function TrackInspector({ manageEscape = false, onClose, trackId }: TrackInspectorProps) {
   const navigate = useNavigate();
   const playback = usePlayback();
+  const appStatus = useAppStatus();
   const query = useTrackInspector(trackId);
   const [actionError, setActionError] = useState<string | null>(null);
   const [downloadMode, setDownloadMode] = useState<DownloadMode>("audio");
   const inspector = query.data;
   const currentTrack = playback.snapshot.currentTrackId === trackId;
   const currentSourceId = currentTrack ? playback.snapshot.currentSourceId : null;
+  const downloadReadiness = useMemo<DownloadReadiness | undefined>(() => appStatus.data ? {
+    ytDlpStatus: appStatus.data.mediaTools.ytDlp.status,
+    ffmpegStatus: appStatus.data.mediaTools.ffmpeg.status,
+    downloadDirectoryStatus: appStatus.data.downloadDirectoryStatus,
+    mpvStatus: appStatus.data.mediaTools.mpv.status,
+    spotifyStatus: appStatus.data.providers.find((provider) => provider.kind === "spotify")?.runtimeStatus,
+  } : undefined, [appStatus.data]);
 
   const sourceAction = useCallback(async (source: TrackInspectorSource, action: "play" | "play-next" | "queue" | "switch" | "reveal" | "open" | "download" | "lyrics") => {
     setActionError(null);
@@ -250,16 +278,31 @@ export function TrackInspector({ manageEscape = false, onClose, trackId }: Track
       } else if (action === "open" && source.canonicalUrl) {
         await openProviderResult(source.provider, source.canonicalUrl);
       } else if (action === "download") {
-        await queueSourceDownload(trackId, source.sourceId, downloadMode);
+        const modes = downloadModesForProvider(source.provider);
+        const mode = modes.includes(downloadMode) ? downloadMode : "audio";
+        const reason = downloadReadinessReason(source.provider, mode, {
+          canonicalUrl: source.canonicalUrl,
+          nativeRuntime: isTauriRuntime(),
+          downloadsAvailable: source.capabilities.downloads,
+          downloadReadiness,
+        });
+        if (isDownloadFolderReadinessReason(reason)) {
+          const directory = await pickDownloadDirectory();
+          if (!directory) {
+            return;
+          }
+          await setSetting({ key: "downloadsDirectory", value: directory });
+        }
+        await queueSourceDownload(trackId, source.sourceId, mode);
       } else if (action === "lyrics") {
         navigate({ to: "/lyrics" });
       }
     } catch (error) {
       setActionError(errorMessage(error, "SpotDIY could not complete that inspector action."));
     }
-  }, [downloadMode, navigate, playback, trackId]);
+  }, [downloadMode, downloadReadiness, navigate, playback, trackId]);
 
-  const sections = useMemo(() => inspector ? inspectorSections(inspector, currentSourceId, sourceAction, downloadMode, setDownloadMode) : [], [currentSourceId, downloadMode, inspector, sourceAction]);
+  const sections = useMemo(() => inspector ? inspectorSections(inspector, currentSourceId, sourceAction, downloadMode, setDownloadMode, downloadReadiness) : [], [currentSourceId, downloadMode, downloadReadiness, inspector, sourceAction]);
 
   if (query.isLoading) {
     return <InspectorPanel manageEscape={manageEscape} onClose={onClose} sections={[{ id: "loading", title: "OVERVIEW", content: <div className="inspector-pending" role="status"><SpotIcon name="spark" size={17} /> Reading track details…</div> }]} subtitle="Local track" title="Track Inspector" />;
@@ -284,11 +327,33 @@ function searchResultDate(result: SearchResult): string | null {
 }
 
 export function SearchResultInspector({ manageEscape = false, onClose, result }: SearchResultInspectorProps) {
+  const appStatus = useAppStatus();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloadMode, setDownloadMode] = useState<DownloadMode>("audio");
-  const canDownload = (result.provider === "youtube" || result.provider === "soundcloud") && result.canonicalUrl !== null;
-  const nativeDownload = canDownload && isTauriRuntime();
+  const downloadModes = downloadModesForProvider(result.provider);
+  const downloadReadiness: DownloadReadiness | undefined = appStatus.data ? {
+    ytDlpStatus: appStatus.data.mediaTools.ytDlp.status,
+    ffmpegStatus: appStatus.data.mediaTools.ffmpeg.status,
+    downloadDirectoryStatus: appStatus.data.downloadDirectoryStatus,
+    mpvStatus: appStatus.data.mediaTools.mpv.status,
+    spotifyStatus: appStatus.data.providers.find((provider) => provider.kind === "spotify")?.runtimeStatus,
+  } : undefined;
+  const downloadReason = downloadModes.length > 0
+    ? downloadReadinessReason(result.provider, downloadMode, {
+      canonicalUrl: result.canonicalUrl,
+      nativeRuntime: isTauriRuntime(),
+      downloadsAvailable: true,
+      downloadReadiness,
+    })
+    : undefined;
+  const nativeDownload = downloadModes.length > 0 && (downloadReason === undefined || isDownloadFolderReadinessReason(downloadReason));
+  const searchActions = deriveSearchResultActions(result, {
+    nativeRuntime: isTauriRuntime(),
+    downloadsAvailable: true,
+    downloadReadiness,
+  });
+  const playAction = searchActions.find((action) => action.id === "play");
   const provider = providerName(result.provider);
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -301,6 +366,23 @@ export function SearchResultInspector({ manageEscape = false, onClose, result }:
       setBusy(false);
     }
   };
+
+  async function queueDownload(mode: DownloadMode) {
+    const reason = downloadReadinessReason(result.provider, mode, {
+      canonicalUrl: result.canonicalUrl,
+      nativeRuntime: isTauriRuntime(),
+      downloadsAvailable: true,
+      downloadReadiness,
+    });
+    if (isDownloadFolderReadinessReason(reason)) {
+      const directory = await pickDownloadDirectory();
+      if (!directory) {
+        return;
+      }
+      await setSetting({ key: "downloadsDirectory", value: directory });
+    }
+    await queueSearchResultDownload(result, mode);
+  }
 
   const sections: InspectorSection[] = [
     {
@@ -326,13 +408,14 @@ export function SearchResultInspector({ manageEscape = false, onClose, result }:
       content: (
         <div className="inspector-search-actions">
           {error ? <div className="inspector-error" role="alert"><SpotIcon name="alert" size={15} /><span>{error}</span></div> : null}
-          <p className="inspector-muted">Online results are ephemeral. Opening this panel does not persist a Track, create a source, or change the local library.</p>
+          <p className="inspector-muted">Online results stay ephemeral until playback starts. Playing a result saves its validated provider source so the native player can load it and the queue can restore it.</p>
           <div className="inspector-source-actions">
-            <button className="button button-primary button-small" disabled={!result.canonicalUrl || busy} onClick={() => { if (result.canonicalUrl) void run(() => openProviderResult(result.provider, result.canonicalUrl!)); }} title={result.canonicalUrl ? "Open the validated provider source" : "No validated provider URL is available."} type="button">{result.provider === "spotify" ? "Open on Spotify" : "Open source"}</button>
-            <select aria-label="Download mode" disabled={!nativeDownload || busy} onChange={(event) => setDownloadMode(event.target.value as DownloadMode)} title={nativeDownload ? "Choose the managed download format" : "Downloads require the native SpotDIY app"} value={downloadMode}><option value="audio">Audio</option><option value="video">Video</option></select>
-            <button className="button button-quiet button-small" disabled={!nativeDownload || busy} onClick={() => void run(() => queueSearchResultDownload(result, downloadMode))} title={nativeDownload ? "Queue a managed provider download" : canDownload ? "Downloads require the native SpotDIY desktop runtime." : "This provider does not advertise downloads."} type="button"><SpotIcon name="download" size={13} /> Download</button>
+            {result.provider !== "spotify" ? <button aria-label="Play online" className="button button-primary button-small icon-only-button" disabled={!playAction?.enabled || busy} onClick={() => void run(() => playSearchResult(result))} title={playAction?.enabled ? "Play this provider result" : playAction?.reason} type="button"><SpotIcon name="play" size={13} /> Play online</button> : null}
+            <button aria-label={result.provider === "spotify" ? "Open on Spotify" : "Open source"} className="button button-primary button-small icon-only-button" disabled={!result.canonicalUrl || busy} onClick={() => { if (result.canonicalUrl) void run(() => openProviderResult(result.provider, result.canonicalUrl!)); }} title={result.canonicalUrl ? "Open the validated provider source" : "No validated provider URL is available."} type="button"><SpotIcon name="arrow" size={13} /> {result.provider === "spotify" ? "Open on Spotify" : "Open source"}</button>
+            {downloadModes.length > 1 ? <select aria-label="Download mode" disabled={busy || !downloadModes.length} onChange={(event) => setDownloadMode(event.target.value as DownloadMode)} title={downloadReason ?? "Choose the managed download format"} value={downloadMode}>{downloadModes.map((mode) => { const modeReason = downloadReadinessReason(result.provider, mode, { canonicalUrl: result.canonicalUrl, nativeRuntime: isTauriRuntime(), downloadsAvailable: true, downloadReadiness }); return <option disabled={Boolean(modeReason && !isDownloadFolderReadinessReason(modeReason))} key={mode} value={mode}>{mode === "audio" ? "Audio" : "Video"}</option>; })}</select> : null}
+            {downloadModes.length > 0 ? <button aria-label={downloadModes.length === 1 ? "Download audio" : "Download"} className="button button-quiet button-small icon-only-button" disabled={!nativeDownload || busy} onClick={() => void run(() => queueDownload(downloadModes.includes(downloadMode) ? downloadMode : "audio"))} title={nativeDownload ? (isDownloadFolderReadinessReason(downloadReason) ? "Choose a download folder, then queue this download" : "Queue a managed provider download") : downloadReason} type="button"><SpotIcon name="download" size={13} /> {downloadModes.length === 1 ? "Download audio" : "Download"}</button> : null}
           </div>
-          <div className="inspector-disabled-explanation">Online playback is not implemented for search results. Spotify remains metadata-only, and Spotify downloads are not supported.</div>
+          <div className="inspector-disabled-explanation">{result.provider === "spotify" ? "Spotify audio is source-matched through spotdl; playback still opens Spotify." : playAction?.enabled ? "Online playback uses the validated provider URL." : playAction?.reason}</div>
         </div>
       ),
     },

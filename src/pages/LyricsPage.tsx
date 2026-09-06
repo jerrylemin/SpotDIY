@@ -4,8 +4,9 @@ import { Link } from "@tanstack/react-router";
 import { EmptyState } from "../components/common/EmptyState";
 import { LyricsPanel } from "../components/lyrics/LyricsPanel";
 import { SpotIcon } from "../components/icons/SpotIcon";
-import { useAbLoopPresets, useBookmarks, useLyrics } from "../hooks/useLyrics";
+import { formatLyricsOffset, MAX_LYRICS_OFFSET_MS, LYRICS_OFFSET_STEP_MS, useAbLoopPresets, useBookmarks, useLyrics, useLyricsOffset } from "../hooks/useLyrics";
 import { usePlayback } from "../hooks/usePlayback";
+import { usePlaybackClock } from "../hooks/usePlaybackClock";
 import { IpcError } from "../services/ipc";
 import type { BookmarkId, LyricsDocument, ManualLyricsMode } from "../types/domain";
 
@@ -16,16 +17,23 @@ function formatClock(positionMs: number): string {
   return `${minutes}:${seconds}`;
 }
 
+function formatLyricsTimestamp(positionMs: number): string {
+  const minutes = Math.floor(positionMs / 60_000);
+  const seconds = Math.floor(positionMs / 1_000) % 60;
+  const milliseconds = positionMs % 1_000;
+  const fraction = milliseconds === 0 ? "" : `.${String(milliseconds).padStart(3, "0").replace(/0+$/, "")}`;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}${fraction}`;
+}
+
 function formatEditableLyrics(document: LyricsDocument): string {
   if (document.syncKind !== "timed") {
     return document.plainText ?? "";
   }
   return document.cues.map((cue) => {
-    const minutes = Math.floor(cue.startMs / 60_000);
-    const seconds = Math.floor(cue.startMs / 1_000) % 60;
-    const milliseconds = cue.startMs % 1_000;
-    const fraction = milliseconds === 0 ? "" : `.${String(milliseconds).padStart(3, "0").replace(/0+$/, "")}`;
-    return cue.lines.map((line) => `[${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}${fraction}]${line}`).join("\n");
+    if (cue.words.length > 0 && cue.lines.length === 1) {
+      return `[${formatLyricsTimestamp(cue.startMs)}]${cue.words.map((word) => `<${formatLyricsTimestamp(word.startMs)}>${word.text}`).join(" ")}`;
+    }
+    return cue.lines.map((line) => `[${formatLyricsTimestamp(cue.startMs)}]${line}`).join("\n");
   }).join("\n");
 }
 
@@ -75,9 +83,11 @@ function sourceLabel(source: LyricsDocument["source"]): string {
 
 export function LyricsPage() {
   const playback = usePlayback();
+  const visualPositionMs = usePlaybackClock(playback.snapshot);
   const trackId = playback.snapshot.currentTrackId;
   const sourceId = playback.snapshot.currentSourceId;
   const lyrics = useLyrics(trackId, sourceId);
+  const lyricsOffset = useLyricsOffset(trackId);
   const bookmarks = useBookmarks(trackId);
   const presets = useAbLoopPresets(trackId);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -163,7 +173,7 @@ export function LyricsPage() {
 
   async function addBookmark() {
     if (await runAction(
-      () => bookmarks.create.mutateAsync({ positionMs: playback.snapshot.positionMs, note: bookmarkNote }),
+      () => bookmarks.create.mutateAsync({ positionMs: Math.round(visualPositionMs), note: bookmarkNote }),
       "Bookmark added at the current playback position.",
     )) {
       setBookmarkNote("");
@@ -191,7 +201,7 @@ export function LyricsPage() {
   return (
     <div className="page-stack lyrics-page">
       <section className="page-intro">
-        <div><span className="eyebrow">LYRICS & NOTES</span><h1>{playback.snapshot.title ?? "Current track"} <em>in context.</em></h1><p>{playback.snapshot.artists.join(" · ") || "Unknown artist"}{playback.snapshot.album ? ` · ${playback.snapshot.album}` : ""} · position {formatClock(playback.snapshot.positionMs)}</p></div>
+        <div><span className="eyebrow">LYRICS & NOTES</span><h1>{playback.snapshot.title ?? "Current track"} <em>in context.</em></h1><p>{playback.snapshot.artists.join(" · ") || "Unknown artist"}{playback.snapshot.album ? ` · ${playback.snapshot.album}` : ""} · position {formatClock(visualPositionMs)}</p></div>
         <div className="page-intro-stat"><strong>{bookmarks.data?.length ?? 0}</strong><span>Bookmarks</span></div>
       </section>
 
@@ -204,8 +214,25 @@ export function LyricsPage() {
           {document?.attribution ? <div className="lyrics-attribution">{document.attribution.label}{document.attribution.url ? <> · <a href={document.attribution.url} rel="noreferrer" target="_blank">Open provider</a></> : null}</div> : null}
           {lyrics.isLoading ? <div className="lyrics-empty-inline">Reading local lyrics sources…</div> : null}
           {lyricsError ? <div className="lyrics-action-error" role="alert">{lyricsError}</div> : null}
-          {!lyrics.isLoading && !lyricsError && !document ? <div className="lyrics-instrumental">No lyrics are available for this track. Try an explicit LRCLIB lookup or import a local file.</div> : null}
-          {document ? <LyricsPanel document={document} onSeek={(positionMs) => { void playback.seekPlayback(positionMs); }} positionMs={playback.snapshot.positionMs} /> : null}
+          {!lyrics.isLoading && !lyricsError && lyrics.findBest.isPending ? <div className="lyrics-empty-inline">Finding the closest LRCLIB lyrics match…</div> : null}
+          {!lyrics.isLoading && !lyrics.findBest.isPending && !lyricsError && !document ? <div className="lyrics-instrumental">No lyrics are available for this track. You can retry the online lookup or import a local file.</div> : null}
+          {document?.syncKind === "timed" ? (
+            <div className="lyrics-sync-controls" aria-label="Lyrics synchronization">
+              <span>Sync offset</span>
+              <input
+                aria-label="Lyrics sync offset in milliseconds"
+                max={MAX_LYRICS_OFFSET_MS}
+                min={-MAX_LYRICS_OFFSET_MS}
+                onChange={(event) => lyricsOffset.setOffset(Number(event.target.value))}
+                step={LYRICS_OFFSET_STEP_MS / 5}
+                type="range"
+                value={lyricsOffset.offsetMs}
+              />
+              <output>{formatLyricsOffset(lyricsOffset.offsetMs)}</output>
+              <button className="button button-small button-quiet" disabled={lyricsOffset.offsetMs === 0} onClick={lyricsOffset.reset} type="button">Reset</button>
+            </div>
+          ) : null}
+          {document ? <LyricsPanel document={document} durationMs={playback.snapshot.durationMs} lyricOffsetMs={lyricsOffset.offsetMs} onSeek={(positionMs) => { void playback.seekPlayback(positionMs); }} positionMs={visualPositionMs} /> : null}
           {editorOpen ? (
             <div className="lyrics-editor">
               <div className="lyrics-editor-heading"><strong>Edit a manual copy</strong><span>Source files and embedded tags remain read-only.</span></div>
@@ -221,7 +248,7 @@ export function LyricsPage() {
         <div className="lyrics-tool-stack">
           <section className="lyrics-tools-card">
             <div className="lyrics-tool-heading"><div><span className="eyebrow">SOURCE ACTIONS</span><h3>Keep local first</h3></div><SpotIcon name="lyrics" size={20} /></div>
-            <p className="lyrics-help">Sidecars and embedded tags are read on demand. Online lookup never happens automatically.</p>
+            <p className="lyrics-help">Sidecars and embedded tags stay first. If they are unavailable, SpotDIY automatically searches LRCLIB and syncs timed lyrics to playback.</p>
             <div className="lyrics-tool-actions"><button className="button button-primary" disabled={busy} onClick={() => void runAction(() => lyrics.findBest.mutateAsync(), "LRCLIB lyrics cached for this track.")} type="button">{lyrics.findBest.isPending ? "Finding…" : "Find online"}</button><button className="button button-quiet" disabled={busy} onClick={() => void runAction(() => lyrics.searchOnline.mutateAsync(), "LRCLIB candidates loaded.")} type="button">{lyrics.searchOnline.isPending ? "Searching…" : "Search online"}</button><button className="button button-quiet" disabled={busy} onClick={() => void runAction(() => lyrics.importFile.mutateAsync(), "Lyrics imported as a manual copy.")} type="button">{lyrics.importFile.isPending ? "Importing…" : "Import file"}</button></div>
             <div className="lyrics-tool-actions"><button className="button button-small" disabled={busy || !document} onClick={openEditor} type="button">Edit</button><button className="button button-small" disabled={busy || document?.source !== "manual"} onClick={() => void runAction(() => lyrics.removeManual.mutateAsync(), "Manual override deleted; normal local precedence is active again.")} type="button">Delete manual override</button><button className="button button-small" disabled={busy} onClick={() => void runAction(() => lyrics.clearCache.mutateAsync(), "Cached LRCLIB lyrics cleared.")} type="button">Clear LRCLIB cache</button></div>
             {onlineError ? <div className="lyrics-action-error" role="alert">{onlineError}</div> : null}
@@ -230,7 +257,7 @@ export function LyricsPage() {
 
           <section className="lyrics-tools-card">
             <div className="lyrics-tool-heading"><div><span className="eyebrow">BOOKMARKS</span><h3>Mark the useful moments</h3></div><SpotIcon name="spark" size={20} /></div>
-            <div className="lyrics-inline-form"><input aria-label="Bookmark note" maxLength={500} onChange={(event) => setBookmarkNote(event.target.value)} placeholder={`At ${formatClock(playback.snapshot.positionMs)} · optional note`} value={bookmarkNote} /><button className="button button-small" disabled={busy} onClick={() => void addBookmark()} type="button">Add</button></div>
+            <div className="lyrics-inline-form"><input aria-label="Bookmark note" maxLength={500} onChange={(event) => setBookmarkNote(event.target.value)} placeholder={`At ${formatClock(visualPositionMs)} · optional note`} value={bookmarkNote} /><button className="button button-small" disabled={busy} onClick={() => void addBookmark()} type="button">Add</button></div>
             {bookmarks.isLoading ? <div className="lyrics-empty-inline">Loading bookmarks…</div> : bookmarks.data && bookmarks.data.length > 0 ? <div className="lyrics-bookmark-list">{bookmarks.data.map((bookmark) => <div className="lyrics-bookmark-row" key={bookmark.id}><button className="lyrics-row-action" onClick={() => { void playback.seekPlayback(bookmark.positionMs); }} type="button">{formatClock(bookmark.positionMs)}</button><div className="lyrics-bookmark-main">{editingBookmarkId === bookmark.id ? <input aria-label={`Edit bookmark note at ${formatClock(bookmark.positionMs)}`} maxLength={500} onChange={(event) => setEditingBookmarkNote(event.target.value)} value={editingBookmarkNote} /> : <span>{bookmark.note || "No note"}</span>}</div><div className="lyrics-row-actions">{editingBookmarkId === bookmark.id ? <><button className="lyrics-row-action" onClick={() => void saveBookmarkNote(bookmark.id, bookmark.positionMs)} type="button">Save</button><button className="lyrics-row-action" onClick={() => setEditingBookmarkId(null)} type="button">Cancel</button></> : <button className="lyrics-row-action" onClick={() => { setEditingBookmarkId(bookmark.id); setEditingBookmarkNote(bookmark.note); }} type="button">Edit</button>}<button className="lyrics-row-action lyrics-row-action-danger" onClick={() => void runAction(() => bookmarks.remove.mutateAsync(bookmark.id), "Bookmark deleted.")} type="button">Delete</button></div></div>)}</div> : <div className="lyrics-empty-inline">No bookmarks yet.</div>}
           </section>
 

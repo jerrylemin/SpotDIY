@@ -33,8 +33,9 @@ volume, mute, and seeking at approximately 250 ms and normalizes mpv events to
 product-level events. Lifecycle queues are bounded; critical events await
 capacity and position samples may be coalesced at approximately 4 Hz. The
 `--no-config --version` probe has a finite process/output budget and cleans up
-only its own child. mpv health is discovered through `SPOTDIY_MPV_PATH`, then
-PATH; missing or broken mpv leaves the library usable.
+only its own child. MPV health is discovered through the persisted Settings
+path, `SPOTDIY_MPV_PATH`, the app-owned packaged/development binary, then PATH;
+missing or broken mpv leaves the library usable.
 
 ## State and queue policy
 
@@ -182,3 +183,36 @@ shutdown-safe. Loss of hover/focus, route or track selection, explicit cancel,
 main playback, or app shutdown stops the owned process. Preview has no queue,
 history, analytics, session, SMTC, provider, or playback-position side effects;
 the backend seam is injectable for bounded native tests.
+
+## Plan 16 MPV runtime usability — 2026-09-04
+
+MPV resolution is persisted Settings path, developer environment override,
+approved app-owned `mpv\mpv.exe`, then PATH. Settings uses a native picker and
+validates a regular `mpv.exe`/`mpv` file whose reported version is at least
+0.41.0; configure, clear, and rescan are native commands. Missing or broken
+MPV is an actionable Settings state. Deterministic ToolMissing/ToolBroken
+failures do not start retry or file-loaded recovery cycles, while genuine
+backend crashes/disconnects retain recovery behavior. Local real-MPV and
+packaged playback/search smokes pass.
+
+## Current online playback boundary — 2026-09-04
+
+Validated YouTube and SoundCloud sources are playable through the same MPV
+backend as local files. The resolver accepts only HTTPS URLs on the provider
+allowlist, the backend accepts only those remote targets, and MPV receives the
+configured yt-dlp directory through its child environment. Search-result
+playback first persists the validated source, which makes queue/restart
+behavior deterministic; Spotify remains metadata-only.
+
+## Timed lyric presentation boundary — 2026-09-04
+
+Timed lyrics remain presentation data keyed by the current `TrackId` and
+`SourceId`; `PlaybackService` stays the only authoritative audio clock. The
+frontend renders line cues from `startMs`, infers cue ends from the next cue or
+known duration, and interpolates between approximately 250 ms playback samples
+with `requestAnimationFrame`. Pause, seek, track changes, and backend phases
+reset the interpolation anchor so lyric highlighting cannot continue on a stale
+track. Enhanced LRC inline `<mm:ss.xx>` markers are preserved as optional
+word-level timestamps; ordinary line-level LRC falls back without word
+highlighting. A bounded per-track lyric offset is stored in the webview local
+storage for hardware/provider latency correction.

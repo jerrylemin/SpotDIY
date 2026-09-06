@@ -3,6 +3,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use rusqlite::{params, Row};
+use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
 use crate::db::Database;
 use crate::domain::{ProviderKind, SourceCapabilities, SourceId, TrackId};
@@ -142,6 +143,28 @@ const ALBUM_SQL: &str = r#"
     LIMIT ?2
 "#;
 
+const LOCAL_ALL_SQL: &str = r#"
+    SELECT t.id, ts.id, ts.provider_item_id, t.title,
+           COALESCE((
+               SELECT json_group_array(artist_name)
+               FROM (
+                   SELECT a.name AS artist_name
+                   FROM track_artists ta
+                   INNER JOIN artists a ON a.id = ta.artist_id
+                   WHERE ta.track_id = t.id
+                   ORDER BY ta.artist_order ASC, a.id ASC
+               )
+           ), '[]'),
+           al.title, COALESCE(ts.duration_ms, t.duration_ms)
+    FROM local_files lf
+    INNER JOIN track_sources ts ON ts.id = lf.source_id
+    INNER JOIN tracks t ON t.id = ts.track_id
+    LEFT JOIN albums al ON al.id = t.album_id
+    WHERE ts.provider_kind = 'local'
+      AND lf.library_folder_id IS NOT NULL
+      AND lf.index_status = 'indexed'
+"#;
+
 #[derive(Clone)]
 pub struct LocalSourceAdapter {
     database: Database,
@@ -173,14 +196,29 @@ impl LocalSourceAdapter {
 
         let pattern = format!("%{}%", escape_like(&query.to_lowercase()));
         let mut rows = Vec::new();
+        let mut entities_without_direct_matches = Vec::new();
         for entity in SUPPORTED_ENTITIES {
             if request.entities.contains(entity) {
-                rows.extend(self.query_entity(
-                    *entity,
-                    &pattern,
-                    MAX_LOCAL_CANDIDATES_PER_ENTITY,
-                )?);
+                let entity_rows =
+                    self.query_entity(*entity, &pattern, MAX_LOCAL_CANDIDATES_PER_ENTITY)?;
+                if entity_rows.is_empty() {
+                    entities_without_direct_matches.push(*entity);
+                }
+                rows.extend(entity_rows);
             }
+        }
+
+        // SQLite's case folding does not remove Vietnamese diacritics. Only
+        // broaden to the bounded in-memory fallback when the direct indexed
+        // queries found nothing at all; this preserves the one-query-per-
+        // entity fast path for ordinary searches.
+        if rows.is_empty() && !entities_without_direct_matches.is_empty() {
+            let fallback_rows = self.query_all_rows()?;
+            rows.extend(fallback_rows.into_iter().filter(|row| {
+                entities_without_direct_matches
+                    .iter()
+                    .any(|entity| row_matches_entity(row, *entity, &query))
+            }));
         }
 
         let mut seen_source_ids = HashSet::new();
@@ -215,6 +253,21 @@ impl LocalSourceAdapter {
                 let mut statement = connection.prepare(sql)?;
                 let rows = statement
                     .query_map(params![pattern, limit], map_local_search_row)?
+                    .collect::<Result<Vec<_>, _>>()?;
+                #[cfg(test)]
+                self.executed_queries
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Ok(rows)
+            })
+            .map_err(|_| "local library search failed".to_owned())
+    }
+
+    fn query_all_rows(&self) -> Result<Vec<LocalSearchRow>, String> {
+        self.database
+            .with_connection(|connection| {
+                let mut statement = connection.prepare(LOCAL_ALL_SQL)?;
+                let rows = statement
+                    .query_map([], map_local_search_row)?
                     .collect::<Result<Vec<_>, _>>()?;
                 #[cfg(test)]
                 self.executed_queries
@@ -348,11 +401,11 @@ fn local_result_order(
 }
 
 fn local_match_rank(result: &SearchResult, query: &str) -> u8 {
-    let query = query.to_lowercase();
+    let query = normalize_search_text(query);
     std::iter::once(result.title.as_str())
         .chain(result.artists.iter().map(String::as_str))
         .chain(result.album.iter().map(String::as_str))
-        .map(|value| value.to_lowercase())
+        .map(normalize_search_text)
         .filter_map(|value| {
             (value == query)
                 .then_some(0)
@@ -361,6 +414,36 @@ fn local_match_rank(result: &SearchResult, query: &str) -> u8 {
         })
         .min()
         .unwrap_or(3)
+}
+
+fn row_matches_entity(row: &LocalSearchRow, entity: SearchEntityKind, query: &str) -> bool {
+    let query = normalize_search_text(query);
+    let title_matches = normalize_search_text(&row.title).contains(&query);
+    let artist_matches = serde_json::from_str::<Vec<String>>(&row.artists_json)
+        .map(|artists| {
+            artists
+                .iter()
+                .any(|artist| normalize_search_text(artist).contains(&query))
+        })
+        .unwrap_or(false);
+    let album_matches = row
+        .album
+        .as_deref()
+        .is_some_and(|album| normalize_search_text(album).contains(&query));
+    match entity {
+        SearchEntityKind::Track => title_matches,
+        SearchEntityKind::Artist => artist_matches,
+        SearchEntityKind::Album => album_matches,
+        SearchEntityKind::Playlist => false,
+    }
+}
+
+fn normalize_search_text(value: &str) -> String {
+    value
+        .nfkd()
+        .filter(|character| !is_combining_mark(*character))
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn escape_like(value: &str) -> String {
@@ -473,6 +556,18 @@ mod tests {
         let section = fixture.search("signal", SearchLens::Local).await;
 
         assert_eq!(section.results[0].title, "SiGnAl");
+    }
+
+    #[tokio::test]
+    async fn local_matching_ignores_diacritics_for_existing_rows() {
+        let fixture = LocalFixture::new("diacritics");
+        fixture.add_track("Là Anh", &["Sơn Tùng M-TP"], Some("M-TP"), true);
+
+        let section = fixture.search("la anh", SearchLens::Local).await;
+
+        assert_eq!(section.results.len(), 1);
+        assert_eq!(section.results[0].title, "Là Anh");
+        assert_eq!(section.results[0].artists, vec!["Sơn Tùng M-TP"]);
     }
 
     #[tokio::test]

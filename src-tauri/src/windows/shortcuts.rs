@@ -7,8 +7,6 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use crate::settings::{is_valid_accelerator, GlobalShortcutAction, GlobalShortcutBinding};
 
-pub const GAMING_RESCUE_ACCELERATOR: &str = "Ctrl+Alt+Shift+G";
-
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ShortcutRegistrationStatus {
@@ -39,7 +37,6 @@ struct RegisteredShortcut {
 pub struct ShortcutController {
     registered: HashMap<GlobalShortcutAction, RegisteredShortcut>,
     actions_by_id: HashMap<u32, GlobalShortcutAction>,
-    rescue: Option<Shortcut>,
     statuses: HashMap<GlobalShortcutAction, ShortcutStatus>,
 }
 
@@ -325,29 +322,6 @@ impl ShortcutController {
         self.actions_by_id.get(&id).copied()
     }
 
-    pub fn register_rescue(&mut self, app: &AppHandle) -> Result<(), String> {
-        if self.rescue.is_some() {
-            return Ok(());
-        }
-        let shortcut = Shortcut::from_str(GAMING_RESCUE_ACCELERATOR)
-            .map_err(|error| format!("invalid gaming rescue shortcut: {error}"))?;
-        app.global_shortcut()
-            .register(shortcut)
-            .map_err(|error| error.to_string())?;
-        self.rescue = Some(shortcut);
-        Ok(())
-    }
-
-    pub fn unregister_rescue(&mut self, app: &AppHandle) {
-        if let Some(shortcut) = self.rescue.take() {
-            let _ = app.global_shortcut().unregister(shortcut);
-        }
-    }
-
-    pub fn is_rescue(&self, id: u32) -> bool {
-        self.rescue.is_some_and(|shortcut| shortcut.id() == id)
-    }
-
     pub fn unregister_all(&mut self, app: &AppHandle) {
         for registered in self.registered.values() {
             let _ = app.global_shortcut().unregister(registered.shortcut);
@@ -401,8 +375,6 @@ pub fn action_label(action: GlobalShortcutAction) -> &'static str {
         GlobalShortcutAction::VolumeDown => "Volume -5%",
         GlobalShortcutAction::ShowHideMain => "Show/Hide main",
         GlobalShortcutAction::ToggleMiniOverlay => "Mini overlay",
-        GlobalShortcutAction::ToggleLyricsOverlay => "Lyrics overlay",
-        GlobalShortcutAction::ToggleGamingOverlay => "Gaming overlay",
     }
 }
 
@@ -419,7 +391,7 @@ mod tests {
     #[test]
     fn defaults_have_unique_valid_accelerators() {
         let bindings = default_global_shortcuts();
-        assert_eq!(bindings.len(), 9);
+        assert_eq!(bindings.len(), 7);
         assert!(bindings
             .iter()
             .all(|binding| is_valid_accelerator(&binding.accelerator)));
@@ -443,8 +415,6 @@ mod tests {
             GlobalShortcutAction::VolumeDown,
             GlobalShortcutAction::ShowHideMain,
             GlobalShortcutAction::ToggleMiniOverlay,
-            GlobalShortcutAction::ToggleLyricsOverlay,
-            GlobalShortcutAction::ToggleGamingOverlay,
         ] {
             assert!(!action_label(action).is_empty());
         }

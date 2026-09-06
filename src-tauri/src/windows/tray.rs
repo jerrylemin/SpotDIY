@@ -13,7 +13,6 @@ const SHOW_HIDE_ID: &str = "tray-show-hide-main";
 const PLAY_PAUSE_ID: &str = "tray-play-pause";
 const PREVIOUS_ID: &str = "tray-previous";
 const NEXT_ID: &str = "tray-next";
-const CLICK_THROUGH_ID: &str = "tray-disable-gaming-click-through";
 const QUIT_ID: &str = "tray-quit";
 
 pub fn build_tray<R: Runtime>(
@@ -56,9 +55,6 @@ pub fn build_menu<R: Runtime>(
 ) -> tauri::Result<tauri::menu::Menu<R>> {
     let overlays = SubmenuBuilder::new(app, "Overlays")
         .text("tray-overlay-mini", "Mini")
-        .text("tray-overlay-edge", "Edge")
-        .text("tray-overlay-lyrics", "Lyrics")
-        .text("tray-overlay-gaming", "Gaming")
         .build()?;
 
     let mut profile_builder = SubmenuBuilder::new(app, "Output Profiles");
@@ -75,7 +71,6 @@ pub fn build_menu<R: Runtime>(
         .text(NEXT_ID, "Next")
         .separator()
         .item(&overlays)
-        .text(CLICK_THROUGH_ID, "Disable Gaming click-through")
         .item(&profiles_menu)
         .separator()
         .text(QUIT_ID, "Quit")
@@ -92,12 +87,8 @@ pub fn action_for_menu_id(id: &str) -> Option<WindowsAction> {
         PLAY_PAUSE_ID => WindowsAction::PlayPause,
         PREVIOUS_ID => WindowsAction::Previous,
         NEXT_ID => WindowsAction::Next,
-        CLICK_THROUGH_ID => WindowsAction::DisableGamingClickThrough,
         QUIT_ID => WindowsAction::Quit,
         "tray-overlay-mini" => WindowsAction::ToggleOverlay(OverlayKind::Mini),
-        "tray-overlay-edge" => WindowsAction::ToggleOverlay(OverlayKind::Edge),
-        "tray-overlay-lyrics" => WindowsAction::ToggleOverlay(OverlayKind::Lyrics),
-        "tray-overlay-gaming" => WindowsAction::ToggleOverlay(OverlayKind::Gaming),
         value if value.starts_with("tray-output-profile-") => WindowsAction::ApplyOutputProfile(
             value.trim_start_matches("tray-output-profile-").to_owned(),
         ),
@@ -117,8 +108,8 @@ mod tests {
             Some(WindowsAction::PlayPause)
         );
         assert_eq!(
-            action_for_menu_id("tray-overlay-gaming"),
-            Some(WindowsAction::ToggleOverlay(OverlayKind::Gaming))
+            action_for_menu_id("tray-overlay-mini"),
+            Some(WindowsAction::ToggleOverlay(OverlayKind::Mini))
         );
         assert_eq!(
             action_for_menu_id("tray-output-profile-desk"),

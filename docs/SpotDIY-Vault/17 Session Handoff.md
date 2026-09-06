@@ -2,6 +2,15 @@
 
 The authoritative handoff is the repository-root [session_handoff.md](../../session_handoff.md).
 
+## Current Spotify source matching — 2026-09-05
+
+The active checkout supersedes the historical Spotify PKCE notes below.
+Catalog/Client ID/market setup and authorization UI are removed. Search uses
+local `spotdl`, and Spotify search-result downloads resolve a validated
+YouTube/SoundCloud source before the existing yt-dlp/FFmpeg worker creates an
+audio-only MP3. Spotify remains unavailable for in-app playback and persisted
+source downloads; no private SpotMate endpoint or CAPTCHA bypass is embedded.
+
 Plans 01–03 provide the Tauri/React shell, typed unified domain, SQLite/WAL
 storage through schema version 2, durable settings, persistent local library,
 metadata/artwork/fingerprints, watcher recovery, typed library IPC, and safe
@@ -256,3 +265,18 @@ edges, and 268 communities; CodeGraph is unavailable. Build output remains at
 ## Next atomic task
 
 STOPPED AFTER PLAN 15. Do not start Plan 16 in this task.
+
+## Plan 16 runtime usability handoff — 2026-09-04
+
+The current uncommitted checkout is based on
+`eceabb3c4a898c8de3abf409811e60eb78cc9171`. Runtime repairs cover provider
+canonicalization/capabilities, download readiness and structured errors,
+persistent Spotify opt-in/schema 11, case-insensitive WebM scanning, online
+MPV playback, and MPV/yt-dlp/FFmpeg Settings resolution/actionable failure.
+Local Rust all-target tests (457 unit tests plus the real-MPV integration test),
+Vitest (97), Playwright (82), frontend quality gates, external-target
+Tauri/NSIS packaging, real-MPV smoke, packaged search smoke, and Plan 15
+packaged visual smoke pass. Live provider/download acceptance is skipped
+without yt-dlp, Spotify authorization, and an approved legal fixture.
+Performance budgets remain unresolved, so Plan 16 is still partial. No commit
+or push was made.

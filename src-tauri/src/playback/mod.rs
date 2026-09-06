@@ -30,8 +30,8 @@ use crate::media_tools::MediaToolManager;
 use crate::sessions::{ListeningModeChange, ListeningModeService};
 use crate::smart::{SmartPlaylistService, SmartShuffleOptions, SmartShufflePool};
 use crate::sources::{
-    SourceResolution, SourceResolutionCandidate, SourceResolutionReason, SourceResolver,
-    SourceResolverError,
+    validate_provider_url, SourceResolution, SourceResolutionCandidate, SourceResolutionReason,
+    SourceResolver, SourceResolverError,
 };
 
 pub use self::backend::{
@@ -62,6 +62,7 @@ const COMMAND_SEND_TIMEOUT: Duration = Duration::from_millis(250);
 const COMMAND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
 const CONTROLLER_TICK: Duration = Duration::from_millis(5);
 const PENDING_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
+const ONLINE_PENDING_LOAD_TIMEOUT: Duration = Duration::from_secs(45);
 const CONTROLLER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 const RECOVERY_BACKOFF: [Duration; 3] = [
     Duration::from_millis(250),
@@ -2468,6 +2469,10 @@ impl Controller {
         desired_paused: bool,
         purpose: LoadPurpose,
     ) -> Result<PlaybackSnapshot, PlaybackError> {
+        if let Some(error) = deterministic_tool_failure(&self.backend.health()) {
+            self.fail_without_recovery(error.clone());
+            return Err(error);
+        }
         if matches!(&purpose, LoadPurpose::Normal)
             && self.snapshot.current_track_id.is_some()
             && self.snapshot.current_track_id != Some(resolved.track_id)
@@ -2487,12 +2492,16 @@ impl Controller {
         self.snapshot.duration_ms = resolved.duration_ms;
         self.snapshot.recovering = matches!(purpose, LoadPurpose::Recovery { .. });
         self.snapshot.error = None;
+        let load_timeout = match resolved.provider_kind {
+            ProviderKind::Youtube | ProviderKind::Soundcloud => ONLINE_PENDING_LOAD_TIMEOUT,
+            ProviderKind::Local | ProviderKind::Spotify => PENDING_LOAD_TIMEOUT,
+        };
         self.pending_load = Some(PendingLoad {
             resolved,
             desired_position_ms,
             desired_paused,
             purpose,
-            deadline: Instant::now() + PENDING_LOAD_TIMEOUT,
+            deadline: Instant::now() + load_timeout,
         });
         self.publish();
 
@@ -2672,7 +2681,11 @@ impl Controller {
                 // replacement and never advances the queue. A failed rollback
                 // is a backend failure even when its public operation code is
                 // LoadFailed or SeekFailed.
-                self.begin_recovery(rollback_error);
+                if is_deterministic_tool_error(&rollback_error) {
+                    self.fail_without_recovery(rollback_error);
+                } else {
+                    self.begin_recovery(rollback_error);
+                }
             }
             LoadPurpose::Recovery { token } => {
                 self.schedule_recovery_failure(token, error);
@@ -2681,10 +2694,7 @@ impl Controller {
                 if is_recoverable_backend_failure(&error) {
                     self.begin_recovery(error);
                 } else {
-                    self.snapshot.phase = PlaybackPhase::Failed;
-                    self.snapshot.recovering = false;
-                    self.set_error(error);
-                    self.publish();
+                    self.fail_without_recovery(error);
                 }
             }
         }
@@ -2778,9 +2788,19 @@ impl Controller {
             .map(|plan| plan.token)
         {
             self.schedule_recovery_failure(token, error);
+        } else if is_deterministic_tool_error(&error) {
+            self.fail_without_recovery(error);
         } else {
             self.begin_recovery(error);
         }
+    }
+
+    fn fail_without_recovery(&mut self, error: PlaybackError) {
+        self.recovery = None;
+        self.snapshot.phase = PlaybackPhase::Failed;
+        self.snapshot.recovering = false;
+        self.set_error(error);
+        self.publish();
     }
 
     fn begin_recovery(&mut self, error: PlaybackError) {
@@ -2859,6 +2879,10 @@ impl Controller {
     }
 
     fn schedule_recovery_failure(&mut self, token: u64, error: PlaybackError) {
+        if is_deterministic_tool_error(&error) {
+            self.fail_without_recovery(error);
+            return;
+        }
         let Some(plan) = self.recovery.as_mut() else {
             return;
         };
@@ -2936,10 +2960,7 @@ impl Controller {
                         false,
                     )
                 })?;
-            let path = self
-                .library
-                .resolve_playback_path(track.id, source_id)
-                .map_err(playback_error_from_library)?;
+            let path = self.resolve_source_target(track.id, source)?;
             let resolution = self
                 .resolver
                 .resolve(&track)
@@ -2975,10 +2996,7 @@ impl Controller {
                     false,
                 )
             })?;
-        let path = self
-            .library
-            .resolve_playback_path(track.id, source_id)
-            .map_err(playback_error_from_library)?;
+        let path = self.resolve_source_target(track.id, source)?;
         Ok(self.resolved_playback(&track, source, path, &resolution))
     }
 
@@ -3006,15 +3024,49 @@ impl Controller {
                     false,
                 )
             })?;
-        let path = self
-            .library
-            .resolve_playback_path(track_id, source_id)
-            .map_err(playback_error_from_library)?;
+        let path = self.resolve_source_target(track_id, source)?;
         let resolution = self
             .resolver
             .resolve(&track)
             .map_err(playback_error_from_resolver)?;
         Ok(self.resolved_playback(&track, source, path, &resolution))
+    }
+
+    fn resolve_source_target(
+        &self,
+        track_id: TrackId,
+        source: &TrackSource,
+    ) -> Result<PathBuf, PlaybackError> {
+        match source.provider_kind {
+            ProviderKind::Local => self
+                .library
+                .resolve_playback_path(track_id, source.id)
+                .map_err(playback_error_from_library),
+            ProviderKind::Youtube | ProviderKind::Soundcloud => {
+                let Some(source_uri) = source.source_uri.as_ref() else {
+                    return Err(PlaybackError::new(
+                        PlaybackErrorCode::SourceUnavailable,
+                        "online source does not have a provider URL",
+                        false,
+                    ));
+                };
+                let Some(validated_url) =
+                    validate_provider_url(source.provider_kind, source_uri.as_str()).ok()
+                else {
+                    return Err(PlaybackError::new(
+                        PlaybackErrorCode::SourceUnavailable,
+                        "online source has an invalid provider URL",
+                        false,
+                    ));
+                };
+                Ok(PathBuf::from(validated_url.as_url().as_str()))
+            }
+            ProviderKind::Spotify => Err(PlaybackError::new(
+                PlaybackErrorCode::SourceNotPlayable,
+                "Spotify search results do not support in-app playback; open Spotify or download audio",
+                false,
+            )),
+        }
     }
 
     fn track(&self, track_id: TrackId) -> Result<UnifiedTrack, PlaybackError> {
@@ -3659,7 +3711,14 @@ fn playback_error_from_backend(error: BackendError) -> PlaybackError {
             } else {
                 PlaybackErrorCode::SpawnFailed
             };
-            PlaybackError::new(code, detail, true)
+            PlaybackError::new(
+                code,
+                detail,
+                !matches!(
+                    code,
+                    PlaybackErrorCode::ToolMissing | PlaybackErrorCode::ToolBroken
+                ),
+            )
         }
         BackendError::NotStarted => PlaybackError::new(
             PlaybackErrorCode::SpawnFailed,
@@ -3703,14 +3762,38 @@ fn playback_error_from_backend(error: BackendError) -> PlaybackError {
 fn is_recoverable_backend_failure(error: &PlaybackError) -> bool {
     matches!(
         error.code,
-        PlaybackErrorCode::ToolMissing
-            | PlaybackErrorCode::ToolBroken
-            | PlaybackErrorCode::SpawnFailed
+        PlaybackErrorCode::SpawnFailed
             | PlaybackErrorCode::IpcConnectTimeout
             | PlaybackErrorCode::IpcDisconnected
             | PlaybackErrorCode::ProtocolError
             | PlaybackErrorCode::RequestTimeout
     )
+}
+
+fn is_deterministic_tool_error(error: &PlaybackError) -> bool {
+    matches!(
+        error.code,
+        PlaybackErrorCode::ToolMissing | PlaybackErrorCode::ToolBroken
+    )
+}
+
+fn deterministic_tool_failure(health: &BackendHealth) -> Option<PlaybackError> {
+    if health.ready {
+        return None;
+    }
+    let detail = health.detail.clone()?;
+    let normalized = detail.to_ascii_lowercase();
+    let code = if normalized.contains("not found")
+        || normalized.contains("not available")
+        || normalized.contains("not configured")
+    {
+        PlaybackErrorCode::ToolMissing
+    } else if normalized.contains("mpv") {
+        PlaybackErrorCode::ToolBroken
+    } else {
+        return None;
+    };
+    Some(PlaybackError::new(code, detail, false))
 }
 
 fn is_terminal_backend_failure(error: &PlaybackError) -> bool {
@@ -3834,6 +3917,7 @@ mod tests {
     struct FakeState {
         operations: Vec<FakeOperation>,
         health: BackendHealth,
+        start_error: Option<PlaybackError>,
         start_failures: usize,
         load_failures: usize,
         load_disconnect_failures: usize,
@@ -3848,6 +3932,7 @@ mod tests {
             Self {
                 operations: Vec::new(),
                 health: BackendHealth::default(),
+                start_error: None,
                 start_failures: 0,
                 load_failures: 0,
                 load_disconnect_failures: 0,
@@ -3875,7 +3960,15 @@ mod tests {
             let startup_event = {
                 let mut state = self.state.lock().unwrap();
                 state.operations.push(FakeOperation::Start);
-                if state.start_failures > 0 {
+                if let Some(error) = state.start_error.clone() {
+                    state.health = BackendHealth {
+                        ready: false,
+                        connected: false,
+                        detail: Some(error.detail.clone()),
+                        recovery_action: Some("Configure MPV in Settings".to_owned()),
+                    };
+                    BackendEvent::Failure(error)
+                } else if state.start_failures > 0 {
                     state.start_failures -= 1;
                     state.health = BackendHealth {
                         ready: false,
@@ -3945,6 +4038,10 @@ mod tests {
 
         fn fail_next_starts(&self, count: usize) {
             self.state.lock().unwrap().start_failures = count;
+        }
+
+        fn set_start_error(&self, error: PlaybackError) {
+            self.state.lock().unwrap().start_error = Some(error);
         }
 
         fn fail_next_loads(&self, count: usize) {
@@ -4338,6 +4435,63 @@ mod tests {
         assert!(request_json.get("sourceId").is_some());
         assert!(request_json.get("path").is_none());
         assert_eq!(snapshots.lock().unwrap()[0].phase, PlaybackPhase::Idle);
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn missing_mpv_fails_without_recovery_cycles_or_file_loaded_wait() {
+        let library = test_library(1);
+        let control = Arc::new(FakeControl::default());
+        control.set_start_error(PlaybackError::new(
+            PlaybackErrorCode::ToolMissing,
+            "MPV is not configured. Configure it in Settings.",
+            false,
+        ));
+        let factory_control = control.clone();
+        let snapshots = Arc::new(Mutex::new(Vec::new()));
+        let sink_snapshots = snapshots.clone();
+        let sink: SnapshotSink = Arc::new(move |snapshot| {
+            sink_snapshots.lock().unwrap().push(snapshot);
+        });
+        let service = PlaybackService::new_with_backend_factory(
+            library.service.clone(),
+            move |generation| factory_control.session(generation),
+            sink,
+        );
+
+        let startup_failure = wait_for_snapshot(&service, |snapshot| {
+            snapshot.phase == PlaybackPhase::Failed
+                && snapshot
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.code == PlaybackErrorCode::ToolMissing)
+        });
+        assert!(!startup_failure.recovering);
+        assert!(!startup_failure.error.unwrap().retryable);
+
+        let play_error = service
+            .play_track(library.tracks[0].clone())
+            .expect_err("missing MPV must fail before sending a load command");
+        assert_eq!(play_error.code, PlaybackErrorCode::ToolMissing);
+        assert_eq!(service.snapshot().phase, PlaybackPhase::Failed);
+        assert!(!service.snapshot().recovering);
+        thread::sleep(Duration::from_millis(150));
+        let observed = snapshots.lock().unwrap().clone();
+        assert!(!observed
+            .iter()
+            .any(|snapshot| snapshot.phase == PlaybackPhase::Recovering));
+        assert_eq!(
+            control
+                .operations()
+                .iter()
+                .filter(|operation| **operation == FakeOperation::Start)
+                .count(),
+            1
+        );
+        assert!(!control
+            .operations()
+            .iter()
+            .any(|operation| matches!(operation, FakeOperation::Load(_))));
         service.shutdown().unwrap();
     }
 

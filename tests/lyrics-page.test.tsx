@@ -22,12 +22,13 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, ...props }: { children: unknown; to: string }) => <a href={props.to} {...props}>{children}</a>,
 }));
 vi.mock("../src/hooks/useLyrics", () => ({
+  formatLyricsOffset: (offsetMs: number) => `${offsetMs} ms`,
   useLyrics: () => ({
     data: null,
     isLoading: false,
     error: null,
     searchOnline: { data: [], isPending: false, error: null, reset: resetSearchMock },
-    findBest: { isPending: false, error: null },
+    findBest: { isPending: false, error: null, mutateAsync: vi.fn() },
     selectCandidate: { isPending: false, error: null },
     saveManual: { isPending: false, isError: false, mutateAsync: vi.fn() },
     removeManual: { isPending: false, mutateAsync: vi.fn() },
@@ -46,6 +47,7 @@ vi.mock("../src/hooks/useLyrics", () => ({
     save: { isPending: false, mutateAsync: vi.fn() },
     remove: { isPending: false, mutateAsync: vi.fn() },
   }),
+  useLyricsOffset: () => ({ offsetMs: 0, setOffset: vi.fn(), nudge: vi.fn(), reset: vi.fn() }),
 }));
 
 import { LyricsPage } from "../src/pages/LyricsPage";

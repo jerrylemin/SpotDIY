@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { isTauriRuntime } from "../../services/ipc";
 import { usePlayback } from "../../hooks/usePlayback";
+import { usePlaybackClock } from "../../hooks/usePlaybackClock";
 import { useBookmarks } from "../../hooks/useLyrics";
 import { useUiStore } from "../../stores/ui-store";
 import { AudioDeviceMenu } from "../player/AudioDeviceMenu";
@@ -32,6 +33,7 @@ function phaseCaption(phase: ReturnType<typeof usePlayback>["snapshot"]["phase"]
 
 function StandardPlayerBar() {
   const playback = usePlayback();
+  const visualPositionMs = usePlaybackClock(playback.snapshot);
   const bookmarks = useBookmarks(playback.snapshot.currentTrackId);
   const queueDrawerOpen = useUiStore((state) => state.queueDrawerOpen);
   const setQueueDrawerOpen = useUiStore((state) => state.setQueueDrawerOpen);
@@ -48,8 +50,11 @@ function StandardPlayerBar() {
     : null;
   const hasCurrentTrack = playback.snapshot.currentTrackId !== null;
   const failureMessage = playback.snapshot.error?.summary ?? playback.bridgeError;
-  const canRetry = Boolean(playback.snapshot.error?.retryable || playback.bridgeError || playback.snapshot.recovering);
-  const toolMissing = playback.snapshot.error?.code === "toolMissing";
+  const toolFailure = playback.snapshot.error?.code === "toolMissing" || playback.snapshot.error?.code === "toolBroken";
+  const backendLooksLikeMissingMpv = !playback.snapshot.backendHealth.ready
+    && (playback.snapshot.backendHealth.detail?.toLowerCase().includes("mpv") ?? false);
+  const actionableMpvFailure = toolFailure || backendLooksLikeMissingMpv;
+  const canRetry = !actionableMpvFailure && Boolean(playback.snapshot.error?.retryable || playback.bridgeError || playback.snapshot.recovering);
 
   useEffect(() => setArtworkFailed(false), [artworkSource]);
 
@@ -73,17 +78,23 @@ function StandardPlayerBar() {
           <strong title={playback.snapshot.title ?? undefined}>{playback.snapshot.title ?? (browserPreviewIdle ? "Native playback only" : "Nothing queued")}</strong>
           <span>{hasCurrentTrack ? playback.snapshot.artists.join(" · ") || "Unknown artist" : browserPreviewIdle ? "Open the desktop app to control local playback." : "Choose a local track to start listening."}</span>
           {playback.snapshot.album ? <small>{playback.snapshot.album}</small> : null}
-          {failureMessage ? (
+          {actionableMpvFailure ? (
+            <div className="player-inline-alert" role="alert">
+              <SpotIcon name="alert" size={14} />
+              <span><strong>PLAYBACK ENGINE REQUIRED</strong> MPV is not configured or usable.</span>
+              <Link className="player-meta-action" to="/settings">Configure</Link>
+            </div>
+          ) : failureMessage ? (
             <div className="player-inline-alert" role={playback.snapshot.phase === "failed" ? "alert" : "status"}>
               <SpotIcon name="alert" size={14} />
-              {toolMissing ? <span><strong>Player engine unavailable</strong> Install mpv to play local music</span> : <span>{failureMessage}</span>}
-              {canRetry ? <button className="player-meta-action" onClick={() => { void playback.retryPlaybackBackend(); }} type="button">Retry Player Engine</button> : null}
+              <span>{failureMessage}</span>
+              {canRetry ? <button aria-label="Retry Player Engine" className="player-meta-action icon-only-button" onClick={() => { void playback.retryPlaybackBackend(); }} title="Retry player engine" type="button"><SpotIcon name="refresh" size={14} /> Retry Player Engine</button> : null}
             </div>
           ) : playback.snapshot.recovering || playback.snapshot.backendHealth.detail ? (
             <div className="player-inline-alert player-inline-status" role="status">
               <SpotIcon name="refresh" size={14} />
               <span>{playback.snapshot.backendHealth.detail ?? "SpotDIY is recovering playback."}</span>
-              {canRetry ? <button className="player-meta-action" onClick={() => { void playback.retryPlaybackBackend(); }} type="button">Retry Player Engine</button> : null}
+              {canRetry ? <button aria-label="Retry Player Engine" className="player-meta-action icon-only-button" onClick={() => { void playback.retryPlaybackBackend(); }} title="Retry player engine" type="button"><SpotIcon name="refresh" size={14} /> Retry Player Engine</button> : null}
             </div>
           ) : null}
         </div>
@@ -91,7 +102,7 @@ function StandardPlayerBar() {
 
       <div className="player-main">
         <PlaybackControls
-          disabled={playback.initializing}
+          disabled={playback.initializing || actionableMpvFailure}
           onClearQueue={() => { void playback.clearQueue(); }}
           onCycleRepeat={() => { void playback.cycleRepeatMode(); }}
           onNext={() => { void playback.nextTrack(); }}
@@ -108,7 +119,7 @@ function StandardPlayerBar() {
           durationMs={playback.snapshot.durationMs}
           onSeek={(positionMs) => { void playback.seekPlayback(positionMs); }}
           pending={playback.pending}
-          positionMs={playback.snapshot.positionMs}
+          positionMs={visualPositionMs}
         />
       </div>
 
@@ -125,8 +136,8 @@ function StandardPlayerBar() {
         <div className="player-shell-actions">
           <button aria-label="Open expanded now playing" className="icon-button" onClick={() => setPlayerMode("expanded")} title="Open expanded now playing" type="button"><SpotIcon name="expand" size={16} /></button>
           <button aria-label="Open mini player" className="icon-button" onClick={() => setPlayerMode("mini")} title="Open mini player" type="button"><SpotIcon name="collapse" size={16} /></button>
-          <button aria-expanded={queueDrawerOpen} aria-label="Open queue" className={`button button-quiet button-small player-queue-toggle${queueDrawerOpen ? " player-queue-toggle-active" : ""}`} onClick={() => setQueueDrawerOpen(!queueDrawerOpen)} type="button"><SpotIcon name="queue" size={14} /> Queue {playback.snapshot.queueLength > 0 ? `· ${playback.snapshot.queueLength}` : ""}</button>
-          <Link aria-label="Open lyrics" className="button button-quiet button-small player-lyrics-link" to="/lyrics"><SpotIcon name="lyrics" size={14} /> Lyrics</Link>
+           <button aria-expanded={queueDrawerOpen} aria-label="Open queue" className={`button button-quiet button-small icon-only-button player-queue-toggle${queueDrawerOpen ? " player-queue-toggle-active" : ""}`} onClick={() => setQueueDrawerOpen(!queueDrawerOpen)} title={`Queue${playback.snapshot.queueLength > 0 ? ` · ${playback.snapshot.queueLength}` : ""}`} type="button"><SpotIcon name="queue" size={14} /></button>
+          <Link aria-label="Open lyrics" className="button button-quiet button-small icon-only-button player-lyrics-link" title="Open lyrics" to="/lyrics"><SpotIcon name="lyrics" size={14} /></Link>
         </div>
         <AudioDeviceMenu devices={playback.audioDevices} disabled={playback.snapshot.phase === "failed" || playback.snapshot.phase === "recovering"} loading={playback.audioDevicesLoading} onOpen={() => { void playback.warmAudioDevices(); }} onSelect={(name) => { void playback.setAudioDevice(name); }} selectedDeviceName={playback.snapshot.selectedAudioDevice} />
         <VolumeControl disabled={playback.snapshot.phase === "failed" || playback.snapshot.phase === "recovering"} muted={playback.snapshot.muted} onSetVolume={(volumePercent) => { void playback.setVolume(volumePercent); }} onToggleMuted={() => { void playback.toggleMuted(); }} pending={playback.pending} volumePercent={playback.snapshot.volumePercent} />

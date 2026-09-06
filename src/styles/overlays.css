@@ -8,87 +8,62 @@ body:has(.spot-overlay) #root {
 }
 
 .spot-overlay {
+  position: relative;
   display: flex;
   width: 100%;
   height: 100%;
   min-width: 0;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: 12px 14px;
+  padding: 10px 12px;
   overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
   color: var(--color-text);
   box-shadow: var(--shadow-md);
+  cursor: grab;
+  user-select: none;
 }
 
-.spot-overlay-header,
-.spot-overlay-main-row,
-.spot-overlay-edge-row,
-.spot-overlay-gaming-row,
-.spot-overlay-gaming-footer,
-.spot-overlay-lyrics-controls {
-  display: flex;
-  align-items: center;
+.spot-overlay:active {
+  cursor: grabbing;
 }
 
-.spot-overlay-header {
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.spot-overlay-kicker {
-  color: var(--color-text-subtle);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-}
-
-.spot-overlay-close,
-.spot-overlay-control,
-.spot-overlay-play,
-.spot-overlay-toggle {
-  border: 0;
-  cursor: pointer;
-}
-
-.spot-overlay-close,
-.spot-overlay-control {
+.spot-overlay-close {
+  position: absolute;
+  z-index: 2;
+  top: 5px;
+  right: 5px;
   display: grid;
   width: 28px;
   height: 28px;
   place-items: center;
+  border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-muted);
+  cursor: pointer;
 }
 
-.spot-overlay-close:hover,
-.spot-overlay-control:hover:not(:disabled) {
+.spot-overlay-close:hover {
   background: var(--color-surface-raised);
   color: var(--color-text);
 }
 
-.spot-overlay-close:disabled,
-.spot-overlay-control:disabled,
-.spot-overlay-play:disabled,
-.spot-overlay-toggle:disabled {
-  cursor: not-allowed;
-  opacity: .4;
-}
-
 .spot-overlay-main-row {
+  display: flex;
   min-width: 0;
+  min-height: 0;
   flex: 1;
-  gap: var(--space-3);
+  align-items: center;
+  gap: 8px;
+  padding-right: 30px;
 }
 
 .spot-overlay-artwork {
   display: grid;
-  width: 52px;
-  height: 52px;
+  width: 42px;
+  height: 42px;
   flex: 0 0 auto;
   place-items: center;
   overflow: hidden;
@@ -104,43 +79,68 @@ body:has(.spot-overlay) #root {
   object-fit: cover;
 }
 
-.spot-overlay-track-copy,
-.spot-overlay-edge-copy,
-.spot-overlay-gaming-copy {
+.spot-overlay-track-copy {
   display: flex;
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
-.spot-overlay-track-copy strong,
-.spot-overlay-edge-copy strong,
-.spot-overlay-gaming-copy strong,
-.spot-overlay-lyrics-heading strong {
+.spot-overlay-track-copy > strong,
+.spot-overlay-track-copy > span {
   overflow: hidden;
-  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.spot-overlay-track-copy span,
-.spot-overlay-edge-copy span,
-.spot-overlay-gaming-copy span,
-.spot-overlay-lyrics-heading span {
-  overflow: hidden;
+.spot-overlay-track-copy > strong {
+  font-size: 12px;
+}
+
+.spot-overlay-track-copy > span {
   color: var(--color-text-muted);
   font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.spot-overlay-transport,
-.spot-overlay-edge-actions,
-.spot-overlay-gaming-actions {
+.spot-overlay-compact-controls,
+.spot-overlay-transport {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 3px;
+}
+
+.spot-overlay-compact-controls {
+  gap: 5px;
+}
+
+.spot-overlay-transport {
+  gap: 1px;
+}
+
+.spot-overlay-close,
+.spot-overlay-control,
+.spot-overlay-play,
+.spot-overlay .player-icon-button {
+  border: 0;
+  cursor: pointer;
+}
+
+.spot-overlay-control,
+.spot-overlay .player-icon-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.spot-overlay-control:hover:not(:disabled),
+.spot-overlay .player-icon-button:hover:not(:disabled) {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
 }
 
 .spot-overlay-play {
@@ -157,132 +157,52 @@ body:has(.spot-overlay) #root {
   filter: brightness(1.08);
 }
 
-.spot-overlay-progress {
-  width: 100%;
-  height: 3px;
-  margin-top: 3px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--color-border);
+.spot-overlay-close:disabled,
+.spot-overlay-control:disabled,
+.spot-overlay-play:disabled,
+.spot-overlay .player-icon-button:disabled,
+.spot-overlay .player-volume input:disabled {
+  cursor: not-allowed;
+  opacity: .4;
 }
 
-.spot-overlay-progress span {
+.spot-overlay .player-progress {
   display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--color-accent);
+  width: 100%;
+  margin-top: 1px;
 }
 
-.spot-overlay-edge-row,
-.spot-overlay-gaming-row {
-  min-width: 0;
-  flex: 1;
-  gap: var(--space-3);
+.spot-overlay .player-progress > span:not(.player-progress-track) {
+  display: none;
 }
 
-.spot-overlay-edge-actions,
-.spot-overlay-gaming-actions {
+.spot-overlay .player-progress-track,
+.spot-overlay .player-progress-track input {
+  width: 100%;
+}
+
+.spot-overlay .player-progress-track input,
+.spot-overlay .player-volume input {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.spot-overlay .player-volume {
+  display: flex;
+  width: 78px;
+  align-items: center;
+  gap: 3px;
+  justify-content: flex-end;
+}
+
+.spot-overlay .player-volume .player-icon-button {
   flex: 0 0 auto;
 }
 
-.spot-overlay-volume {
-  display: flex;
-  width: 105px;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-text-muted);
+.spot-overlay .player-volume input {
+  width: 47px;
 }
 
-.spot-overlay-volume input {
-  width: 80px;
-  accent-color: var(--color-accent);
-}
-
-.spot-overlay-lyrics-heading {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.spot-overlay-lyrics-body {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 4px 12px;
-  color: var(--color-text);
-  font-size: 14px;
-  line-height: 1.35;
-  text-align: center;
-}
-
-.spot-overlay-lyrics-context,
-.spot-overlay-muted {
-  color: var(--color-text-muted);
-  font-size: 11px;
-}
-
-.spot-overlay-lyrics-body strong {
-  color: var(--color-accent);
-  font-size: 16px;
-}
-
-.spot-overlay-lyrics-controls {
-  justify-content: center;
-  gap: 4px;
-}
-
-.spot-overlay-gaming-footer {
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.spot-overlay-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-text-muted);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.spot-overlay-state-active {
-  color: var(--color-warning);
-}
-
-.spot-overlay-state-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.spot-overlay-toggle {
-  min-height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-raised);
-  color: var(--color-text);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.spot-overlay-toggle:hover:not(:disabled) {
-  border-color: var(--color-accent);
-}
-
-.spot-overlay-warning,
-.spot-overlay-error {
-  margin: 0;
-  color: var(--color-warning);
-  font-size: 9px;
-  line-height: 1.35;
-}
-
-.spot-overlay-error {
-  color: var(--color-danger);
+.spot-overlay .player-volume > span:last-child {
+  display: none;
 }

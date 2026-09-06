@@ -7,8 +7,10 @@ interface DownloadTaskRowProps {
   task: DownloadTask;
   actionPending: boolean;
   onCancel: (taskId: DownloadTaskId) => void;
+  onClear: (taskId: DownloadTaskId) => void;
   onRetry: (taskId: DownloadTaskId) => void;
   onOpenLocation: (taskId: DownloadTaskId) => void;
+  onRename: (taskId: DownloadTaskId, name: string) => void;
 }
 
 function stateLabel(state: DownloadTask["state"]): string {
@@ -55,11 +57,23 @@ function etaLabel(value: number | null): string {
   return minutes > 0 ? `${minutes}m ${seconds}s left` : `${seconds}s left`;
 }
 
-export function DownloadTaskRow({ task, actionPending, onCancel, onRetry, onOpenLocation }: DownloadTaskRowProps) {
+export function DownloadTaskRow({ task, actionPending, onCancel, onClear, onRetry, onOpenLocation, onRename }: DownloadTaskRowProps) {
   const openTrackInspector = useUiStore((state) => state.openTrackInspector);
   const cancellable = task.state === "queued" || task.state === "resolving" || task.state === "downloading" || task.state === "postprocessing";
   const retryable = task.state === "failed" || task.state === "cancelled";
+  const clearable = task.state === "completed";
   const hasOutput = task.state === "completed" && !task.outputMissing;
+  const rename = () => {
+    if (!task.outputPath) {
+      return;
+    }
+    const filename = task.outputPath.split(/[\\/]/).pop() ?? task.title;
+    const currentName = filename.replace(/\.[^.]+$/, "");
+    const nextName = window.prompt("Rename downloaded file (the extension is preserved):", currentName);
+    if (nextName?.trim()) {
+      onRename(task.id, nextName.trim());
+    }
+  };
 
   return (
     <article className={`download-task-row download-task-state-${task.state}`}>
@@ -84,10 +98,12 @@ export function DownloadTaskRow({ task, actionPending, onCancel, onRetry, onOpen
         <div className="download-task-facts"><span>{bytesLabel(task.downloadedBytes)} / {bytesLabel(task.expectedBytes)}</span><span>{speedLabel(task.speedBytesPerSecond)} · {etaLabel(task.etaSeconds)}</span></div>
       </div>
       <div className="download-task-actions">
-        {task.targetTrackId ? <button className="text-link" onClick={() => openTrackInspector(task.targetTrackId!)} type="button"><SpotIcon name="info" size={14} /> Inspect track</button> : null}
-        {cancellable ? <button className="button button-small" disabled={actionPending} onClick={() => onCancel(task.id)} type="button">Cancel</button> : null}
-        {retryable ? <button className="button button-small" disabled={actionPending} onClick={() => onRetry(task.id)} type="button">Retry</button> : null}
-        {hasOutput || task.outputMissing ? <button className="text-link" disabled={actionPending} onClick={() => onOpenLocation(task.id)} type="button"><SpotIcon name="folder" size={14} /> Open folder</button> : null}
+        {task.targetTrackId ? <button aria-label="Inspect track" className="button button-quiet button-small icon-only-button" onClick={() => openTrackInspector(task.targetTrackId!)} title="Inspect track" type="button"><SpotIcon name="info" size={14} /> Inspect track</button> : null}
+        {cancellable ? <button aria-label="Cancel" className="button button-small icon-only-button" disabled={actionPending} onClick={() => onCancel(task.id)} title="Cancel download" type="button"><SpotIcon name="close" size={14} /> Cancel</button> : null}
+        {retryable ? <button aria-label="Retry" className="button button-small icon-only-button" disabled={actionPending} onClick={() => onRetry(task.id)} title="Retry download" type="button"><SpotIcon name="refresh" size={14} /> Retry</button> : null}
+        {clearable ? <button aria-label={`Clear ${task.title}`} className="button button-quiet button-small icon-only-button playlist-danger" disabled={actionPending} onClick={() => onClear(task.id)} title="Clear completed download" type="button"><SpotIcon name="trash" size={14} /> Clear</button> : null}
+        {hasOutput ? <button aria-label={`Rename ${task.title}`} className="button button-small icon-only-button" disabled={actionPending} onClick={rename} title="Rename downloaded file" type="button"><SpotIcon name="edit" size={14} /></button> : null}
+        {hasOutput || task.outputMissing ? <button aria-label="Open folder" className="button button-quiet button-small icon-only-button" disabled={actionPending} onClick={() => onOpenLocation(task.id)} title="Open download folder" type="button"><SpotIcon name="folder" size={14} /> Open folder</button> : null}
       </div>
     </article>
   );

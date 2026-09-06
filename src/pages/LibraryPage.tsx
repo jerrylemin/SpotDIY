@@ -16,6 +16,7 @@ import {
   useLibraryProgress,
   useLibraryStatus,
   useRemoveLibraryFolder,
+  useRenameLocalFile,
   useRescanAllLibraryFolders,
   useRescanLibraryFolder,
   useRevealLocalFile,
@@ -83,6 +84,7 @@ export function LibraryPage() {
   const rescanFolder = useRescanLibraryFolder();
   const rescanAll = useRescanAllLibraryFolders();
   const revealFile = useRevealLocalFile();
+  const renameFile = useRenameLocalFile();
 
   useEffect(() => {
     if (folderFilter && !folders.some((folder) => folder.id === folderFilter)) {
@@ -95,7 +97,7 @@ export function LibraryPage() {
     setPageNumber(0);
   }, [descending, folderFilter, sort]);
 
-  const busy = addFolders.isPending || removeFolder.isPending || rescanFolder.isPending || rescanAll.isPending;
+  const busy = addFolders.isPending || removeFolder.isPending || rescanFolder.isPending || rescanAll.isPending || renameFile.isPending;
   const scanActive = status.data?.isScanning || progress?.status === "queued" || progress?.status === "scanning";
   const pageData = libraryPage.data;
   const pageHasItems = Boolean(pageData && pageData.items.length > 0);
@@ -109,6 +111,7 @@ export function LibraryPage() {
     rescanFolder.error,
     rescanAll.error,
     revealFile.error,
+    renameFile.error,
   );
   const playbackEnabled = nativeRuntime || e2ePlaybackPreview;
   const playbackErrorMessage = playback.bridgeError ?? playback.snapshot.error?.summary ?? null;
@@ -188,6 +191,11 @@ export function LibraryPage() {
     revealFile.mutate(sourceId);
   };
 
+  const rename = (track: LibraryTrack, name: string) => {
+    setActionErrorMessage(null);
+    renameFile.mutate({ sourceId: track.sourceId, name });
+  };
+
   const refreshCollectionState = async (track: LibraryTrack) => {
     if (!hasIpcExport("getTrackCollectionStates")) {
       return;
@@ -259,7 +267,8 @@ export function LibraryPage() {
 
   const addFolderButton = (label: string) => (
     <button
-      className="button button-primary"
+      aria-label={label}
+      className="button button-primary icon-only-button"
       disabled={!nativeRuntime || busy}
       onClick={() => void addFolder()}
       title={nativeRuntime ? "Choose one or more music folders" : "Folder selection is available in the native SpotDIY app"}
@@ -272,18 +281,6 @@ export function LibraryPage() {
 
   return (
     <div className="page-stack">
-      <section className="page-intro">
-        <div>
-          <span className="eyebrow">LOCAL LIBRARY</span>
-          <h1>Your collection, <em>in focus.</em></h1>
-          <p>SpotDIY reads your files where they are and keeps the index close to the source.</p>
-        </div>
-        <div className="page-intro-stat">
-          <strong>{status.data?.indexedTrackCount ?? 0}</strong>
-          <span>tracks indexed</span>
-        </div>
-      </section>
-
       {visibleActionError ? (
         <div className="library-alert library-alert-error" role="alert">
           <SpotIcon name="alert" size={16} />
@@ -306,7 +303,7 @@ export function LibraryPage() {
           eyebrow="LIBRARY UNAVAILABLE"
           title="Could not read the local library"
           description={errorMessage(status.error, "The native library service did not return a valid status.")}
-          action={<button className="button button-primary" onClick={() => void status.refetch()} type="button">Try again</button>}
+          action={<button aria-label="Try again" className="button button-primary icon-only-button" onClick={() => void status.refetch()} title="Try again" type="button"><SpotIcon name="refresh" size={15} /></button>}
         />
       ) : folders.length === 0 ? (
         <EmptyState
@@ -328,7 +325,8 @@ export function LibraryPage() {
               </div>
               <div className="library-heading-actions">
                 <button
-                  className="button button-quiet"
+                  aria-label="Rescan all"
+                  className="button button-quiet icon-only-button"
                   disabled={!nativeRuntime || busy}
                   onClick={rescanAllFolders}
                   title="Scan every connected folder"
@@ -409,10 +407,13 @@ export function LibraryPage() {
               </label>
               <button
                 aria-pressed={descending}
-                className="button button-quiet button-small library-sort-direction"
+                aria-label={descending ? "Descending" : "Ascending"}
+                className="button button-quiet button-small icon-only-button library-sort-direction"
                 onClick={() => setDescending((value) => !value)}
+                title={descending ? "Sort ascending" : "Sort descending"}
                 type="button"
               >
+                <SpotIcon name="arrow" size={14} />
                 {descending ? "Descending" : "Ascending"}
               </button>
             </div>
@@ -435,6 +436,7 @@ export function LibraryPage() {
                       onPlayNext={(row) => { void playback.playNext(row.trackId, row.sourceId); }}
                       onPlayNow={(row) => { void playback.playNow(row.trackId, row.sourceId); }}
                       onReveal={reveal}
+                      onRename={rename}
                       playbackEnabled={playbackEnabled}
                       playbackPending={playback.pending}
                       revealPending={revealFile.isPending}
@@ -454,7 +456,7 @@ export function LibraryPage() {
                 {libraryPage.isFetching ? <span className="library-refreshing" role="status">Updating library results…</span> : null}
               </>
             ) : pageIsEmpty ? (
-              <EmptyState icon="library" eyebrow="EMPTY PAGE" title="This library page is empty" description="The collection changed while this page was open. Go back one page or refresh the library." action={<button className="button button-quiet" disabled={pageNumber === 0} onClick={() => setPageNumber((value) => Math.max(0, value - 1))} type="button">Previous page</button>} />
+              <EmptyState icon="library" eyebrow="EMPTY PAGE" title="This library page is empty" description="The collection changed while this page was open. Go back one page or refresh the library." action={<button aria-label="Previous page" className="button button-quiet icon-only-button" disabled={pageNumber === 0} onClick={() => setPageNumber((value) => Math.max(0, value - 1))} title="Previous page" type="button"><SpotIcon name="previous" size={14} /></button>} />
             ) : pageHasNoItems && scanActive ? (
               <EmptyState icon="spark" eyebrow="SCAN IN PROGRESS" title="Your tracks are being indexed" description="SpotDIY will keep the folder status and scan progress visible while it reads supported files." />
             ) : (
@@ -465,8 +467,8 @@ export function LibraryPage() {
               <div className="library-pagination">
                 <span>Showing {pageData.items.length === 0 ? 0 : pageNumber * PAGE_SIZE + 1}–{Math.min((pageNumber * PAGE_SIZE) + pageData.items.length, pageData.total)} of {pageData.total}</span>
                 <div>
-                  <button className="button button-quiet button-small" disabled={pageNumber === 0 || libraryPage.isFetching} onClick={() => setPageNumber((value) => Math.max(0, value - 1))} type="button">Previous</button>
-                  <button className="button button-quiet button-small" disabled={!pageData.hasNext || libraryPage.isFetching} onClick={() => setPageNumber((value) => value + 1)} type="button">Next</button>
+                  <button aria-label="Previous" className="button button-quiet button-small icon-only-button" disabled={pageNumber === 0 || libraryPage.isFetching} onClick={() => setPageNumber((value) => Math.max(0, value - 1))} title="Previous page" type="button"><SpotIcon name="previous" size={14} /></button>
+                  <button aria-label="Next" className="button button-quiet button-small icon-only-button" disabled={!pageData.hasNext || libraryPage.isFetching} onClick={() => setPageNumber((value) => value + 1)} title="Next page" type="button"><SpotIcon name="next" size={14} /></button>
                 </div>
               </div>
             ) : null}
@@ -474,14 +476,6 @@ export function LibraryPage() {
         </>
       )}
 
-      <section className="library-principles">
-        <div><span className="eyebrow">INDEXING PRINCIPLES</span><h2>Local by default.</h2></div>
-        <div className="principle-list">
-          <div><span>01</span><strong>Incremental scans</strong><p>Only changed files need another look.</p></div>
-          <div><span>02</span><strong>Quality stays honest</strong><p>Codec, bitrate, sample rate, and provenance stay visible.</p></div>
-          <div><span>03</span><strong>Files stay yours</strong><p>SpotDIY keeps user music at the paths you choose.</p></div>
-        </div>
-      </section>
     </div>
   );
 }

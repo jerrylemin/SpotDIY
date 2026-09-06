@@ -8,38 +8,26 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 #[serde(rename_all = "camelCase")]
 pub enum OverlayKind {
     Mini,
-    Edge,
-    Lyrics,
-    Gaming,
 }
 
 impl OverlayKind {
-    pub const ALL: [Self; 4] = [Self::Mini, Self::Edge, Self::Lyrics, Self::Gaming];
+    pub const ALL: [Self; 1] = [Self::Mini];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Mini => "overlay-mini",
-            Self::Edge => "overlay-edge",
-            Self::Lyrics => "overlay-lyrics",
-            Self::Gaming => "overlay-gaming",
         }
     }
 
     pub const fn title(self) -> &'static str {
         match self {
             Self::Mini => "Mini",
-            Self::Edge => "Edge",
-            Self::Lyrics => "Lyrics",
-            Self::Gaming => "Gaming",
         }
     }
 
     pub const fn dimensions(self) -> (f64, f64, bool) {
         match self {
-            Self::Mini => (420.0, 110.0, false),
-            Self::Edge => (380.0, 72.0, false),
-            Self::Lyrics => (640.0, 220.0, true),
-            Self::Gaming => (420.0, 96.0, false),
+            Self::Mini => (460.0, 88.0, false),
         }
     }
 }
@@ -125,7 +113,7 @@ impl OverlayManager {
         }
 
         let (width, height, resizable) = kind.dimensions();
-        let mut builder = WebviewWindowBuilder::new(
+        let builder = WebviewWindowBuilder::new(
             &self.app,
             kind.label(),
             WebviewUrl::App("index.html".into()),
@@ -136,12 +124,6 @@ impl OverlayManager {
         .visible(true)
         .resizable(resizable)
         .inner_size(width, height);
-        if kind == OverlayKind::Edge {
-            if let Some((x, y)) = self.edge_position() {
-                builder = builder.position(x, y);
-            }
-        }
-
         let window = match builder.build() {
             Ok(window) => window,
             Err(error) => {
@@ -226,34 +208,6 @@ impl OverlayManager {
             },
         );
     }
-
-    fn edge_position(&self) -> Option<(f64, f64)> {
-        let main = self.app.get_webview_window("main");
-        let monitor = main.as_ref().and_then(|window| {
-            window.current_monitor().ok().flatten().or_else(|| {
-                window
-                    .available_monitors()
-                    .ok()
-                    .and_then(|monitors| monitors.into_iter().next())
-            })
-        })?;
-        let work_area = monitor.work_area();
-        Some((
-            f64::from(work_area.position.x + work_area.size.width as i32 - 380 - 12),
-            f64::from(work_area.position.y + 12),
-        ))
-    }
-}
-
-pub fn edge_position_for_work_area(
-    work_area_x: i32,
-    work_area_y: i32,
-    work_area_width: u32,
-) -> (i32, i32) {
-    (
-        work_area_x + work_area_width as i32 - 380 - 12,
-        work_area_y + 12,
-    )
 }
 
 #[cfg(test)]
@@ -263,15 +217,7 @@ mod tests {
     #[test]
     fn overlay_labels_and_dimensions_are_frozen() {
         assert_eq!(OverlayKind::Mini.label(), "overlay-mini");
-        assert_eq!(OverlayKind::Edge.label(), "overlay-edge");
-        assert_eq!(OverlayKind::Lyrics.label(), "overlay-lyrics");
-        assert_eq!(OverlayKind::Gaming.label(), "overlay-gaming");
-        assert_eq!(OverlayKind::Mini.dimensions(), (420.0, 110.0, false));
-        assert_eq!(OverlayKind::Lyrics.dimensions(), (640.0, 220.0, true));
-    }
-
-    #[test]
-    fn edge_position_uses_work_area_and_twelve_pixel_margin() {
-        assert_eq!(edge_position_for_work_area(100, 20, 1920), (1628, 32));
+        assert_eq!(OverlayKind::ALL, [OverlayKind::Mini]);
+        assert_eq!(OverlayKind::Mini.dimensions(), (460.0, 88.0, false));
     }
 }

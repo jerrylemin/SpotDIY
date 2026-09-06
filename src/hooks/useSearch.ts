@@ -17,7 +17,7 @@ import type {
   SearchSortField,
 } from "../types/domain";
 
-export const SEARCH_PROVIDER_ORDER: ProviderKind[] = ["local", "youtube", "soundcloud"];
+export const SEARCH_PROVIDER_ORDER: ProviderKind[] = ["local", "youtube", "soundcloud", "spotify"];
 
 export interface UseSearchOptions {
   query: string;

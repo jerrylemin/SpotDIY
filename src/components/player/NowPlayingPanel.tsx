@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { usePlayback } from "../../hooks/usePlayback";
+import { usePlaybackClock } from "../../hooks/usePlaybackClock";
 import { useBookmarks } from "../../hooks/useLyrics";
 import { useQueue } from "../../hooks/useQueue";
 import { useTrackInspector } from "../../hooks/useTrackInspector";
@@ -33,6 +34,7 @@ function qualityFacts(source: NonNullable<ReturnType<typeof useTrackInspector>["
 
 export function NowPlayingPanel() {
   const playback = usePlayback();
+  const visualPositionMs = usePlaybackClock(playback.snapshot);
   const queue = useQueue();
   const bookmarks = useBookmarks(playback.snapshot.currentTrackId);
   const setPlayerMode = useUiStore((state) => state.setPlayerMode);
@@ -56,7 +58,7 @@ export function NowPlayingPanel() {
       <header className="now-playing-header">
         <div><span className="eyebrow accent-eyebrow">NOW PLAYING</span><h2>{hasTrack ? snapshot.title : "Nothing queued"}</h2><p>{hasTrack ? snapshot.artists.join(" · ") || "Unknown artist" : "Choose a local track to start listening."}</p></div>
         <div className="now-playing-header-actions">
-          <button aria-label="Open queue" className="button button-quiet button-small" onClick={() => setQueueDrawerOpen(true)} type="button"><SpotIcon name="queue" size={14} /> Queue</button>
+          <button aria-label="Open queue" className="button button-quiet button-small icon-only-button" onClick={() => setQueueDrawerOpen(true)} title="Open queue" type="button"><SpotIcon name="queue" size={14} /> Queue</button>
           <button aria-label="Use standard player" className="icon-button" onClick={() => setPlayerMode("standard")} title="Use standard player" type="button"><SpotIcon name="collapse" size={17} /></button>
           <button aria-label="Close expanded now playing" className="icon-button" onClick={() => setPlayerMode("standard")} title="Close expanded now playing" type="button"><SpotIcon name="close" size={18} /></button>
         </div>
@@ -86,7 +88,7 @@ export function NowPlayingPanel() {
             durationMs={snapshot.durationMs}
             onSeek={(positionMs) => { void playback.seekPlayback(positionMs); }}
             pending={playback.pending}
-            positionMs={snapshot.positionMs}
+            positionMs={visualPositionMs}
           />
           <SourceSwitcher
             currentSourceId={snapshot.currentSourceId}
@@ -110,8 +112,8 @@ export function NowPlayingPanel() {
             {inspector.isLoading ? <span className="inspector-muted">Reading current source details…</span> : inspectorSource ? <><div><span>Provider</span><strong>{inspectorSource.provider}</strong></div><div><span>Availability</span><strong>{inspectorSource.available ? "Available" : inspectorSource.availabilityDetail ?? "Unavailable"}</strong></div><div><span>Version</span><strong>{inspectorSource.versionQualifiers.join(" · ") || "Unspecified"}</strong></div><div className="now-playing-quality-facts">{qualityFacts(inspectorSource).map((fact) => <span key={fact}>{fact}</span>)}</div></> : <span className="inspector-muted">Quality is unavailable for this source.</span>}
           </div>
           <div className="now-playing-fact-actions">
-            <Link className="button button-quiet button-small" to="/lyrics"><SpotIcon name="lyrics" size={14} /> Lyrics</Link>
-            {hasTrack ? <button className="button button-quiet button-small" onClick={() => openTrackInspector(snapshot.currentTrackId!)} type="button"><SpotIcon name="info" size={14} /> Inspect track</button> : null}
+            <Link aria-label="Lyrics" className="button button-quiet button-small icon-only-button" title="Lyrics" to="/lyrics"><SpotIcon name="lyrics" size={14} /> Lyrics</Link>
+            {hasTrack ? <button aria-label="Inspect track" className="button button-quiet button-small icon-only-button" onClick={() => openTrackInspector(snapshot.currentTrackId!)} title="Inspect track" type="button"><SpotIcon name="info" size={14} /> Inspect track</button> : null}
           </div>
         </div>
         <div className="now-playing-queue-preview">

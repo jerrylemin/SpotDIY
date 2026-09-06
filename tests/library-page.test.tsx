@@ -12,6 +12,7 @@ const removeMutation = vi.hoisted(() => ({ isPending: false, error: null as unkn
 const rescanMutation = vi.hoisted(() => ({ isPending: false, error: null as unknown, mutate: vi.fn() }));
 const rescanAllMutation = vi.hoisted(() => ({ isPending: false, error: null as unknown, mutate: vi.fn() }));
 const revealMutation = vi.hoisted(() => ({ isPending: false, error: null as unknown, mutate: vi.fn() }));
+const renameMutation = vi.hoisted(() => ({ isPending: false, error: null as unknown, mutateAsync: vi.fn() }));
 const playbackResult = vi.hoisted(() => ({
   snapshot: {
     revision: 0,
@@ -81,6 +82,7 @@ vi.mock("../src/hooks/useLibrary", () => ({
   useRescanLibraryFolder: () => rescanMutation,
   useRescanAllLibraryFolders: () => rescanAllMutation,
   useRevealLocalFile: () => revealMutation,
+  useRenameLocalFile: () => renameMutation,
 }));
 vi.mock("../src/hooks/usePlayback", () => ({
   usePlayback: () => playbackResult,

@@ -16,6 +16,7 @@ const MINIMUM_MPV_VERSION: MpvVersion = MpvVersion {
     minor: 41,
     patch: 0,
 };
+const PACKAGED_MPV_RELATIVE_DIRECTORY: &str = "mpv";
 const MPV_VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const MPV_VERSION_PROBE_POLL: Duration = Duration::from_millis(10);
 const MPV_VERSION_PROBE_OUTPUT_LIMIT: usize = 64 * 1024;
@@ -120,6 +121,12 @@ pub struct MediaToolManager {
     /// This seam is only used by deterministic Rust tests. Production
     /// discovery is environment override followed by PATH.
     ffmpeg_override_path: Option<PathBuf>,
+    /// A native settings value loaded at startup. This remains behind the
+    /// media-tool boundary and is never serialized into frontend DTOs.
+    configured_mpv_path: Arc<Mutex<Option<PathBuf>>>,
+    /// Persisted executable selections for the provider/download tools.
+    configured_yt_dlp_path: Arc<Mutex<Option<PathBuf>>>,
+    configured_ffmpeg_path: Arc<Mutex<Option<PathBuf>>>,
     state: Arc<Mutex<ManagerState>>,
 }
 
@@ -129,6 +136,9 @@ impl MediaToolManager {
             override_path: None,
             yt_dlp_override_path: None,
             ffmpeg_override_path: None,
+            configured_mpv_path: Arc::new(Mutex::new(None)),
+            configured_yt_dlp_path: Arc::new(Mutex::new(None)),
+            configured_ffmpeg_path: Arc::new(Mutex::new(None)),
             state: Arc::new(Mutex::new(initial_state())),
         };
         manager.refresh_mpv();
@@ -144,6 +154,9 @@ impl MediaToolManager {
             override_path: Some(path),
             yt_dlp_override_path: None,
             ffmpeg_override_path: None,
+            configured_mpv_path: Arc::new(Mutex::new(None)),
+            configured_yt_dlp_path: Arc::new(Mutex::new(None)),
+            configured_ffmpeg_path: Arc::new(Mutex::new(None)),
             state: Arc::new(Mutex::new(initial_state())),
         };
         manager.refresh_mpv();
@@ -159,6 +172,9 @@ impl MediaToolManager {
             override_path: None,
             yt_dlp_override_path: Some(path),
             ffmpeg_override_path: None,
+            configured_mpv_path: Arc::new(Mutex::new(None)),
+            configured_yt_dlp_path: Arc::new(Mutex::new(None)),
+            configured_ffmpeg_path: Arc::new(Mutex::new(None)),
             state: Arc::new(Mutex::new(initial_state())),
         };
         manager.refresh_mpv();
@@ -174,6 +190,9 @@ impl MediaToolManager {
             override_path: None,
             yt_dlp_override_path: None,
             ffmpeg_override_path: Some(path),
+            configured_mpv_path: Arc::new(Mutex::new(None)),
+            configured_yt_dlp_path: Arc::new(Mutex::new(None)),
+            configured_ffmpeg_path: Arc::new(Mutex::new(None)),
             state: Arc::new(Mutex::new(initial_state())),
         };
         manager.refresh_mpv();
@@ -194,16 +213,50 @@ impl MediaToolManager {
             override_path: None,
             yt_dlp_override_path: None,
             ffmpeg_override_path: None,
+            configured_mpv_path: Arc::new(Mutex::new(None)),
+            configured_yt_dlp_path: Arc::new(Mutex::new(None)),
+            configured_ffmpeg_path: Arc::new(Mutex::new(None)),
             state: Arc::new(Mutex::new(state)),
         }
     }
 
+    pub fn with_persisted_mpv_path(path: Option<PathBuf>) -> Self {
+        Self::with_persisted_paths(path, None, None)
+    }
+
+    pub fn with_persisted_paths(
+        mpv_path: Option<PathBuf>,
+        yt_dlp_path: Option<PathBuf>,
+        ffmpeg_path: Option<PathBuf>,
+    ) -> Self {
+        let manager = Self {
+            override_path: None,
+            yt_dlp_override_path: None,
+            ffmpeg_override_path: None,
+            configured_mpv_path: Arc::new(Mutex::new(mpv_path)),
+            configured_yt_dlp_path: Arc::new(Mutex::new(yt_dlp_path)),
+            configured_ffmpeg_path: Arc::new(Mutex::new(ffmpeg_path)),
+            state: Arc::new(Mutex::new(initial_state())),
+        };
+        manager.refresh_mpv();
+        manager.refresh_yt_dlp();
+        manager.refresh_ffmpeg();
+        manager
+    }
+
     pub fn refresh_mpv(&self) -> MpvToolStatus {
-        let candidate = self
-            .override_path
-            .clone()
-            .or_else(|| env::var_os("SPOTDIY_MPV_PATH").map(PathBuf::from))
-            .or_else(find_mpv_on_path);
+        let persisted_path = self
+            .configured_mpv_path
+            .lock()
+            .ok()
+            .and_then(|path| path.clone());
+        let candidate = choose_mpv_candidate(
+            persisted_path,
+            self.override_path.clone(),
+            env::var_os("SPOTDIY_MPV_PATH").map(PathBuf::from),
+            find_packaged_mpv_on_disk().or_else(find_development_mpv_on_disk),
+            find_mpv_on_path(),
+        );
         let status = match candidate.as_deref() {
             None => missing_status("mpv was not found on PATH"),
             Some(path) if !path.is_file() => missing_status("mpv executable was not found"),
@@ -233,25 +286,31 @@ impl MediaToolManager {
                 status
                     .detail
                     .unwrap_or_else(|| "mpv is not installed".to_owned()),
-                true,
+                false,
             )),
             (MediaToolHealth::Broken, _) => Err(crate::playback::PlaybackError::new(
                 crate::playback::PlaybackErrorCode::ToolBroken,
                 status
                     .detail
                     .unwrap_or_else(|| "mpv is not usable".to_owned()),
-                true,
+                false,
             )),
             (MediaToolHealth::Ready, None) => Err(crate::playback::PlaybackError::new(
                 crate::playback::PlaybackErrorCode::ToolBroken,
                 "mpv was reported ready without an executable",
-                true,
+                false,
             )),
         }
     }
 
     pub fn refresh_yt_dlp(&self) -> YtDlpToolStatus {
+        let persisted_path = self
+            .configured_yt_dlp_path
+            .lock()
+            .ok()
+            .and_then(|path| path.clone());
         let candidate = choose_yt_dlp_candidate(
+            persisted_path,
             self.yt_dlp_override_path.clone(),
             env::var_os("SPOTDIY_YTDLP_PATH").map(PathBuf::from),
             find_yt_dlp_on_path(),
@@ -276,8 +335,18 @@ impl MediaToolManager {
             .unwrap_or_else(|_| missing_yt_dlp_status("yt-dlp status is unavailable"))
     }
 
+    pub fn yt_dlp_path(&self) -> Option<PathBuf> {
+        self.yt_dlp_status().executable
+    }
+
     pub fn refresh_ffmpeg(&self) -> FfmpegToolStatus {
+        let persisted_path = self
+            .configured_ffmpeg_path
+            .lock()
+            .ok()
+            .and_then(|path| path.clone());
         let candidate = choose_ffmpeg_candidate(
+            persisted_path,
             self.ffmpeg_override_path.clone(),
             env::var_os("SPOTDIY_FFMPEG_PATH").map(PathBuf::from),
             find_ffmpeg_on_path(),
@@ -300,6 +369,10 @@ impl MediaToolManager {
             .lock()
             .map(|state| state.ffmpeg_status.clone())
             .unwrap_or_else(|_| missing_ffmpeg_status("FFmpeg status is unavailable"))
+    }
+
+    pub fn ffmpeg_path(&self) -> Option<PathBuf> {
+        self.ffmpeg_status().executable
     }
 
     pub fn require_yt_dlp(&self) -> Result<PathBuf, crate::search::types::ProviderSearchErrorCode> {
@@ -332,6 +405,99 @@ impl MediaToolManager {
 
     pub fn mpv_path(&self) -> Option<PathBuf> {
         self.mpv_status().executable
+    }
+
+    pub fn validate_mpv_path(&self, path: &Path) -> Result<(), String> {
+        if !path.is_file() {
+            return Err("the selected MPV path is not a regular file".to_owned());
+        }
+        let acceptable_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                executable_names()
+                    .iter()
+                    .any(|expected| name.eq_ignore_ascii_case(expected))
+            });
+        if !acceptable_name {
+            return Err("choose the mpv executable (mpv.exe)".to_owned());
+        }
+        let status = inspect_mpv(path);
+        if status.health != MediaToolHealth::Ready {
+            return Err(status
+                .detail
+                .unwrap_or_else(|| "the selected MPV executable is not usable".to_owned()));
+        }
+        Ok(())
+    }
+
+    pub fn set_configured_mpv_path(&self, path: Option<PathBuf>) -> MpvToolStatus {
+        if let Ok(mut configured) = self.configured_mpv_path.lock() {
+            *configured = path;
+        }
+        self.refresh_mpv()
+    }
+
+    pub fn validate_yt_dlp_path(&self, path: &Path) -> Result<(), String> {
+        if !path.is_file() {
+            return Err("the selected yt-dlp path is not a regular file".to_owned());
+        }
+        let acceptable_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                yt_dlp_executable_names()
+                    .iter()
+                    .any(|expected| name.eq_ignore_ascii_case(expected))
+            });
+        if !acceptable_name {
+            return Err("choose the yt-dlp executable (yt-dlp.exe)".to_owned());
+        }
+        let status = inspect_yt_dlp(path);
+        if status.status != crate::search::types::ProviderRuntimeStatus::Ready {
+            return Err(status
+                .detail
+                .unwrap_or_else(|| "the selected yt-dlp executable is not usable".to_owned()));
+        }
+        Ok(())
+    }
+
+    pub fn set_configured_yt_dlp_path(&self, path: Option<PathBuf>) -> YtDlpToolStatus {
+        if let Ok(mut configured) = self.configured_yt_dlp_path.lock() {
+            *configured = path;
+        }
+        self.refresh_yt_dlp()
+    }
+
+    pub fn validate_ffmpeg_path(&self, path: &Path) -> Result<(), String> {
+        if !path.is_file() {
+            return Err("the selected FFmpeg path is not a regular file".to_owned());
+        }
+        let acceptable_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                ffmpeg_executable_names()
+                    .iter()
+                    .any(|expected| name.eq_ignore_ascii_case(expected))
+            });
+        if !acceptable_name {
+            return Err("choose the FFmpeg executable (ffmpeg.exe)".to_owned());
+        }
+        let status = inspect_ffmpeg(path);
+        if status.health != MediaToolHealth::Ready {
+            return Err(status
+                .detail
+                .unwrap_or_else(|| "the selected FFmpeg executable is not usable".to_owned()));
+        }
+        Ok(())
+    }
+
+    pub fn set_configured_ffmpeg_path(&self, path: Option<PathBuf>) -> FfmpegToolStatus {
+        if let Ok(mut configured) = self.configured_ffmpeg_path.lock() {
+            *configured = path;
+        }
+        self.refresh_ffmpeg()
     }
 }
 
@@ -399,15 +565,88 @@ fn diagnostic_from_status(status: &MpvToolStatus) -> MediaToolDiagnostic {
         detail: status.detail.clone(),
         recovery_action: Some(match status.health {
             MediaToolHealth::Ready => "Retry the playback backend".to_owned(),
-            MediaToolHealth::Missing => "Install mpv or set SPOTDIY_MPV_PATH".to_owned(),
+            MediaToolHealth::Missing => "Configure MPV in Settings".to_owned(),
             MediaToolHealth::Broken => "Install a working mpv release".to_owned(),
         }),
     }
 }
 
 fn find_mpv_on_path() -> Option<PathBuf> {
-    let path_entries = env::var_os("PATH")?;
-    find_mpv_in_paths(&path_entries)
+    env::var_os("PATH")
+        .as_deref()
+        .and_then(find_mpv_in_paths)
+        .or_else(|| find_in_known_windows_locations(executable_names()))
+}
+
+#[cfg(windows)]
+fn find_in_known_windows_locations(names: &[&str]) -> Option<PathBuf> {
+    let local_app_data = env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
+    let links_directory = local_app_data
+        .join("Microsoft")
+        .join("WinGet")
+        .join("Links");
+    names
+        .iter()
+        .map(|name| links_directory.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+#[cfg(not(windows))]
+fn find_in_known_windows_locations(_names: &[&str]) -> Option<PathBuf> {
+    None
+}
+
+fn find_packaged_mpv_on_disk() -> Option<PathBuf> {
+    let executable_dir = env::current_exe().ok()?.parent()?.to_path_buf();
+    find_packaged_mpv_in_directory(&executable_dir)
+        .or_else(|| find_packaged_mpv_in_directory(&executable_dir.join("resources")))
+}
+
+#[cfg(debug_assertions)]
+fn find_development_mpv_on_disk() -> Option<PathBuf> {
+    let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent()?;
+    [
+        repository_root
+            .join(".tools")
+            .join("mpv")
+            .join("v0.41.0")
+            .join(executable_names()[0]),
+        repository_root
+            .join(".tools")
+            .join("mpv")
+            .join(executable_names()[0]),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
+}
+
+#[cfg(not(debug_assertions))]
+fn find_development_mpv_on_disk() -> Option<PathBuf> {
+    None
+}
+
+fn find_packaged_mpv_in_directory(executable_dir: &Path) -> Option<PathBuf> {
+    let candidate = executable_dir
+        .join(PACKAGED_MPV_RELATIVE_DIRECTORY)
+        .join(executable_names()[0]);
+    candidate.is_file().then_some(candidate)
+}
+
+fn choose_mpv_candidate(
+    persisted_path: Option<PathBuf>,
+    test_override: Option<PathBuf>,
+    environment_override: Option<PathBuf>,
+    packaged_candidate: Option<PathBuf>,
+    path_candidate: Option<PathBuf>,
+) -> Option<PathBuf> {
+    // Test overrides are deliberately kept outside production construction;
+    // the production order is persisted path, environment override, packaged
+    // candidate, then PATH.
+    test_override
+        .or(persisted_path)
+        .or(environment_override)
+        .or(packaged_candidate)
+        .or(path_candidate)
 }
 
 fn find_mpv_in_paths(path_entries: &std::ffi::OsStr) -> Option<PathBuf> {
@@ -423,13 +662,17 @@ fn find_mpv_in_paths(path_entries: &std::ffi::OsStr) -> Option<PathBuf> {
 }
 
 fn find_yt_dlp_on_path() -> Option<PathBuf> {
-    let path_entries = env::var_os("PATH")?;
-    find_yt_dlp_in_paths(&path_entries)
+    env::var_os("PATH")
+        .as_deref()
+        .and_then(find_yt_dlp_in_paths)
+        .or_else(|| find_in_known_windows_locations(yt_dlp_executable_names()))
 }
 
 fn find_ffmpeg_on_path() -> Option<PathBuf> {
-    let path_entries = env::var_os("PATH")?;
-    find_ffmpeg_in_paths(&path_entries)
+    env::var_os("PATH")
+        .as_deref()
+        .and_then(find_ffmpeg_in_paths)
+        .or_else(|| find_in_known_windows_locations(ffmpeg_executable_names()))
 }
 
 fn find_ffmpeg_in_paths(path_entries: &std::ffi::OsStr) -> Option<PathBuf> {
@@ -457,19 +700,27 @@ fn find_yt_dlp_in_paths(path_entries: &std::ffi::OsStr) -> Option<PathBuf> {
 }
 
 fn choose_yt_dlp_candidate(
+    persisted_path: Option<PathBuf>,
     test_override: Option<PathBuf>,
     environment_override: Option<PathBuf>,
     path_candidate: Option<PathBuf>,
 ) -> Option<PathBuf> {
-    test_override.or(environment_override).or(path_candidate)
+    test_override
+        .or(persisted_path)
+        .or(environment_override)
+        .or(path_candidate)
 }
 
 fn choose_ffmpeg_candidate(
+    persisted_path: Option<PathBuf>,
     test_override: Option<PathBuf>,
     environment_override: Option<PathBuf>,
     path_candidate: Option<PathBuf>,
 ) -> Option<PathBuf> {
-    test_override.or(environment_override).or(path_candidate)
+    test_override
+        .or(persisted_path)
+        .or(environment_override)
+        .or(path_candidate)
 }
 
 #[cfg(windows)]
@@ -991,6 +1242,7 @@ mod tests {
     fn yt_dlp_path_override_has_priority() {
         assert_eq!(
             choose_yt_dlp_candidate(
+                None,
                 Some(PathBuf::from("test-yt-dlp")),
                 Some(PathBuf::from("environment-yt-dlp")),
                 Some(PathBuf::from("path-yt-dlp")),
@@ -1059,6 +1311,7 @@ mod tests {
     fn ffmpeg_path_override_has_priority() {
         assert_eq!(
             choose_ffmpeg_candidate(
+                None,
                 Some(PathBuf::from("test-ffmpeg")),
                 Some(PathBuf::from("environment-ffmpeg")),
                 Some(PathBuf::from("path-ffmpeg")),
@@ -1249,6 +1502,22 @@ mod tests {
     }
 
     #[test]
+    fn configured_mpv_path_validation_rejects_missing_non_mpv_and_directory_paths() {
+        let manager = MediaToolManager::new();
+        let directory = tempfile::tempdir().unwrap();
+        let wrong_name = directory.path().join("player.exe");
+        std::fs::File::create(&wrong_name).unwrap();
+        let missing = directory.path().join(executable_names()[0]);
+
+        let directory_error = manager.validate_mpv_path(directory.path()).unwrap_err();
+        assert!(directory_error.contains("regular file"));
+        let wrong_name_error = manager.validate_mpv_path(&wrong_name).unwrap_err();
+        assert!(wrong_name_error.contains("mpv executable"));
+        let missing_error = manager.validate_mpv_path(&missing).unwrap_err();
+        assert!(missing_error.contains("regular file"));
+    }
+
+    #[test]
     fn path_lookup_only_checks_path_entries() {
         let directory = tempfile::tempdir().unwrap();
         let executable = directory.path().join(executable_names()[0]);
@@ -1268,5 +1537,75 @@ mod tests {
             .detail
             .unwrap_or_default()
             .contains(r"C:\SpotDIY\mpv.exe"));
+    }
+
+    #[test]
+    fn mpv_resolver_uses_the_explicit_order() {
+        let persisted = PathBuf::from("persisted/mpv.exe");
+        let developer = PathBuf::from("developer/mpv.exe");
+        let packaged = PathBuf::from("packaged/mpv.exe");
+        let path = PathBuf::from("path/mpv.exe");
+
+        assert_eq!(
+            choose_mpv_candidate(
+                Some(persisted.clone()),
+                None,
+                Some(developer),
+                Some(packaged),
+                Some(path.clone())
+            ),
+            Some(persisted)
+        );
+        assert_eq!(
+            choose_mpv_candidate(
+                None,
+                None,
+                Some(PathBuf::from("developer/mpv.exe")),
+                Some(PathBuf::from("packaged/mpv.exe")),
+                Some(PathBuf::from("path/mpv.exe"))
+            ),
+            Some(PathBuf::from("developer/mpv.exe"))
+        );
+        assert_eq!(
+            choose_mpv_candidate(
+                None,
+                None,
+                None,
+                Some(PathBuf::from("packaged/mpv.exe")),
+                Some(PathBuf::from("path/mpv.exe"))
+            ),
+            Some(PathBuf::from("packaged/mpv.exe"))
+        );
+        assert_eq!(
+            choose_mpv_candidate(None, None, None, None, Some(path.clone())),
+            Some(path)
+        );
+    }
+
+    #[test]
+    fn packaged_mpv_candidate_is_limited_to_the_app_owned_location() {
+        let directory = tempfile::tempdir().unwrap();
+        let packaged_directory = directory.path().join(PACKAGED_MPV_RELATIVE_DIRECTORY);
+        std::fs::create_dir_all(&packaged_directory).unwrap();
+        let executable = packaged_directory.join(executable_names()[0]);
+        std::fs::File::create(&executable).unwrap();
+        assert_eq!(
+            find_packaged_mpv_in_directory(directory.path()),
+            Some(executable)
+        );
+        assert_eq!(
+            find_packaged_mpv_in_directory(&directory.path().join("other")),
+            None
+        );
+    }
+
+    #[test]
+    fn persisted_missing_mpv_is_reported_without_falling_back() {
+        let manager = MediaToolManager::with_persisted_mpv_path(Some(PathBuf::from(
+            r"C:\SpotDIY\missing-mpv.exe",
+        )));
+        let status = manager.mpv_status();
+        assert_eq!(status.health, MediaToolHealth::Missing);
+        assert!(status.executable.is_none());
     }
 }

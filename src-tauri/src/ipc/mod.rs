@@ -2,14 +2,18 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::db::Database;
-use crate::downloads::{media_tools_snapshot, MediaToolsSnapshot};
+use crate::downloads::{
+    download_directory_status, media_tools_snapshot, DownloadDirectoryStatus, MediaToolsSnapshot,
+};
 use crate::media_tools::{MediaToolManager, YtDlpToolStatus};
 use crate::search::types::ProviderRuntimeStatus;
 use crate::settings::{SettingsError, SettingsRepository};
 use crate::{
     db::DatabaseError,
     domain::{ProviderKind, SourceCapabilities},
-    sources::spotify::{SpotifyAuthService, SpotifyAuthState, SpotifySetupStatus},
+    sources::spotify::{
+        spotdl_runtime_status, SPOTIFY_RESULT_CAPABILITIES, SPOTIFY_SOURCE_CAPABILITIES,
+    },
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -40,6 +44,8 @@ pub struct AppStatus {
     pub first_run: bool,
     pub tracks_indexed: u64,
     pub music_folders: Vec<String>,
+    pub downloads_directory: Option<String>,
+    pub download_directory_status: DownloadDirectoryStatus,
     pub providers: Vec<ProviderStatus>,
     pub media_tools: MediaToolsSnapshot,
 }
@@ -67,7 +73,7 @@ const LOCAL_CAPABILITIES: SourceCapabilities = SourceCapabilities {
 };
 const VIDEO_CAPABILITIES: SourceCapabilities = SourceCapabilities {
     search: true,
-    playback: false,
+    playback: true,
     metadata: true,
     artwork: true,
     lyrics: false,
@@ -76,18 +82,6 @@ const VIDEO_CAPABILITIES: SourceCapabilities = SourceCapabilities {
     release_date: false,
     lyrics_metadata: false,
 };
-const SPOTIFY_CAPABILITIES: SourceCapabilities = SourceCapabilities {
-    search: true,
-    playback: false,
-    metadata: true,
-    artwork: true,
-    lyrics: false,
-    downloads: false,
-    popularity: false,
-    release_date: true,
-    lyrics_metadata: false,
-};
-
 pub fn app_status(version: &'static str, database: &Database) -> Result<AppStatus, StatusError> {
     let tracks_indexed: i64 = database.with_connection(|connection| {
         connection.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
@@ -115,7 +109,14 @@ pub fn app_status(version: &'static str, database: &Database) -> Result<AppStatu
         first_run: settings.first_run,
         tracks_indexed,
         music_folders: music_folders.clone(),
-        providers: provider_statuses(&music_folders, None, None),
+        downloads_directory: settings
+            .downloads_directory
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned()),
+        download_directory_status: download_directory_status(
+            settings.downloads_directory.as_deref(),
+        ),
+        providers: provider_statuses(&music_folders, None, Some(spotdl_runtime_status())),
         media_tools: MediaToolsSnapshot::default(),
     })
 }
@@ -124,7 +125,6 @@ pub fn app_status_with_runtime(
     version: &'static str,
     database: &Database,
     media_tools: &MediaToolManager,
-    spotify: &SpotifyAuthService,
 ) -> Result<AppStatus, StatusError> {
     let tracks_indexed: i64 = database.with_connection(|connection| {
         connection.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
@@ -152,10 +152,17 @@ pub fn app_status_with_runtime(
         first_run: settings.first_run,
         tracks_indexed,
         music_folders: music_folders.clone(),
+        downloads_directory: settings
+            .downloads_directory
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned()),
+        download_directory_status: download_directory_status(
+            settings.downloads_directory.as_deref(),
+        ),
         providers: provider_statuses(
             &music_folders,
             Some(media_tools.yt_dlp_status()),
-            Some(spotify.setup_status()),
+            Some(spotdl_runtime_status()),
         ),
         media_tools: media_tools_snapshot(media_tools),
     })
@@ -177,7 +184,7 @@ pub fn source_capabilities() -> Vec<ProviderCapabilities> {
         },
         ProviderCapabilities {
             kind: ProviderKind::Spotify,
-            capabilities: SPOTIFY_CAPABILITIES,
+            capabilities: SPOTIFY_SOURCE_CAPABILITIES,
         },
     ]
 }
@@ -186,14 +193,14 @@ pub(crate) fn provider_capabilities(provider: ProviderKind) -> SourceCapabilitie
     match provider {
         ProviderKind::Local => LOCAL_CAPABILITIES,
         ProviderKind::Youtube | ProviderKind::Soundcloud => VIDEO_CAPABILITIES,
-        ProviderKind::Spotify => SPOTIFY_CAPABILITIES,
+        ProviderKind::Spotify => SPOTIFY_SOURCE_CAPABILITIES,
     }
 }
 
 pub fn provider_statuses(
     music_folders: &[String],
     yt_dlp: Option<YtDlpToolStatus>,
-    spotify: Option<SpotifySetupStatus>,
+    spotify_runtime: Option<ProviderRuntimeStatus>,
 ) -> Vec<ProviderStatus> {
     let local_configured = !music_folders.is_empty();
     let yt_dlp = yt_dlp.unwrap_or(YtDlpToolStatus {
@@ -202,14 +209,8 @@ pub fn provider_statuses(
         version: None,
         detail: Some("yt-dlp status is not available".into()),
     });
-    let spotify = spotify.unwrap_or(SpotifySetupStatus {
-        enabled: false,
-        configured: false,
-        available: false,
-        state: SpotifyAuthState::Disabled,
-        market: None,
-        detail: Some("Spotify catalog search is disabled by default.".into()),
-    });
+    let spotify_runtime = spotify_runtime.unwrap_or(ProviderRuntimeStatus::Missing);
+    let spotify_available = spotify_runtime == ProviderRuntimeStatus::Ready;
     vec![
         ProviderStatus {
             kind: ProviderKind::Local,
@@ -249,19 +250,16 @@ pub fn provider_statuses(
         },
         ProviderStatus {
             kind: ProviderKind::Spotify,
-            label: "Spotify catalog",
-            configured: spotify.configured,
-            available: spotify.available,
-            runtime_status: match spotify.state {
-                SpotifyAuthState::Disabled => ProviderRuntimeStatus::Disabled,
-                SpotifyAuthState::Connected => ProviderRuntimeStatus::Ready,
-                SpotifyAuthState::SetupRequired => ProviderRuntimeStatus::Missing,
-                SpotifyAuthState::Unavailable => ProviderRuntimeStatus::Broken,
+            label: "Spotify",
+            configured: spotify_available,
+            available: spotify_available,
+            runtime_status: spotify_runtime,
+            capabilities: SPOTIFY_RESULT_CAPABILITIES,
+            detail: if spotify_available {
+                "spotdl is ready for Spotify search and source-matched audio downloads.".into()
+            } else {
+                "Install spotdl to search Spotify and download matched audio.".into()
             },
-            capabilities: SPOTIFY_CAPABILITIES,
-            detail: spotify
-                .detail
-                .unwrap_or_else(|| "Spotify catalog search is ready.".into()),
         },
     ]
 }
@@ -276,7 +274,6 @@ mod tests {
         ProviderSearchEvent, ProviderSearchSection, ProviderSearchState, SearchId,
     };
     use crate::settings::SettingsRepository;
-    use crate::sources::spotify::{SpotifyAuthState, SpotifySetupStatus};
     use rusqlite::params;
 
     #[test]
@@ -320,7 +317,11 @@ mod tests {
 
     #[test]
     fn provider_status_reports_local_folder_configuration() {
-        let statuses = provider_statuses(&["C:\\Music".into()], None, None);
+        let statuses = provider_statuses(
+            &["C:\\Music".into()],
+            None,
+            Some(ProviderRuntimeStatus::Missing),
+        );
         let local = statuses
             .iter()
             .find(|status| status.kind == ProviderKind::Local)
@@ -332,7 +333,11 @@ mod tests {
 
     #[test]
     fn provider_status_shares_one_ytdlp_state_for_youtube_and_soundcloud() {
-        let statuses = provider_statuses(&[], Some(ready_yt_dlp_status()), None);
+        let statuses = provider_statuses(
+            &[],
+            Some(ready_yt_dlp_status()),
+            Some(ProviderRuntimeStatus::Missing),
+        );
         let youtube = statuses
             .iter()
             .find(|status| status.kind == ProviderKind::Youtube)
@@ -347,21 +352,14 @@ mod tests {
     }
 
     #[test]
-    fn provider_status_reports_spotify_compliance_disabled_without_network() {
-        let status = SpotifySetupStatus {
-            enabled: false,
-            configured: false,
-            available: false,
-            state: SpotifyAuthState::Disabled,
-            market: None,
-            detail: Some("disabled".into()),
-        };
-        let spotify = provider_statuses(&[], None, Some(status))
+    fn provider_status_reports_spotify_as_ready_when_spotdl_is_available() {
+        let spotify = provider_statuses(&[], None, Some(ProviderRuntimeStatus::Ready))
             .into_iter()
             .find(|status| status.kind == ProviderKind::Spotify)
             .unwrap();
-        assert!(!spotify.available);
-        assert_eq!(spotify.runtime_status, ProviderRuntimeStatus::Disabled);
+        assert!(spotify.available);
+        assert_eq!(spotify.runtime_status, ProviderRuntimeStatus::Ready);
+        assert!(spotify.capabilities.downloads);
     }
 
     #[test]
@@ -383,14 +381,7 @@ mod tests {
                 version: None,
                 detail: Some("yt-dlp is missing".into()),
             }),
-            Some(SpotifySetupStatus {
-                enabled: false,
-                configured: false,
-                available: false,
-                state: SpotifyAuthState::Disabled,
-                market: None,
-                detail: Some("disabled".into()),
-            }),
+            Some(ProviderRuntimeStatus::Missing),
         );
         assert_eq!(statuses.len(), 4);
         assert!(statuses
@@ -415,21 +406,6 @@ mod tests {
         assert!(value.to_string().contains("results"));
         assert!(!value.to_string().contains("stderr"));
         assert!(!value.to_string().contains("access_token"));
-    }
-
-    #[test]
-    fn search_commands_reject_secret_arguments_at_compile_boundary() {
-        let setup = SpotifySetupStatus {
-            enabled: true,
-            configured: false,
-            available: false,
-            state: SpotifyAuthState::SetupRequired,
-            market: None,
-            detail: Some("setup".into()),
-        };
-        let serialized = serde_json::to_string(&setup).unwrap();
-        assert!(!serialized.contains("refresh"));
-        assert!(!serialized.contains("secret"));
     }
 
     #[test]

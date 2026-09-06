@@ -14,6 +14,7 @@ use std::time::SystemTime;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use thiserror::Error;
+use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 use uuid::Uuid;
 
 use crate::db::repository::{RepositoryError, SourceRepository};
@@ -75,6 +76,12 @@ pub enum LibraryError {
     },
     #[error("playback source {source_id} is unavailable: {detail}")]
     SourceUnavailable { source_id: SourceId, detail: String },
+    #[error("file rename name is invalid: {0}")]
+    InvalidRenameName(String),
+    #[error("a file with that name already exists")]
+    RenameConflict,
+    #[error("file rename failed: {0}")]
+    RenameFailed(String),
 }
 
 #[derive(Clone, Debug)]
@@ -524,6 +531,121 @@ impl LibraryService {
             });
         }
         Ok(display_path)
+    }
+
+    pub fn rename_path(
+        &self,
+        source_id: SourceId,
+        requested_name: &str,
+    ) -> Result<(), LibraryError> {
+        let record: Option<(String, String, String, String)> =
+            self.database.with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT lf.path, lf.normalized_path_key, f.path, f.normalized_path_key
+                         FROM local_files lf
+                         INNER JOIN track_sources ts ON ts.id = lf.source_id
+                         INNER JOIN library_folders f ON f.id = lf.library_folder_id
+                         WHERE lf.source_id = ?1
+                           AND ts.provider_kind = 'local'
+                           AND f.enabled = 1",
+                        params![source_id.to_string()],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                    )
+                    .optional()
+            })?;
+        let Some((stored_path, stored_path_key, folder_path, folder_path_key)) = record else {
+            return Err(LibraryError::SourceNotFound { source_id });
+        };
+
+        let folder = normalize_folder_path(&folder_path)?;
+        if folder.normalized_path_key != folder_path_key {
+            return Err(LibraryError::InvalidStoredValue {
+                field: "library_folders.normalized_path_key",
+                value: folder_path_key,
+            });
+        }
+        let (current_path, current_path_key) = normalize_file_path(&stored_path)?;
+        if current_path_key != stored_path_key
+            || !is_path_within(&folder_path_key, &current_path_key)
+        {
+            return Err(LibraryError::InvalidStoredValue {
+                field: "local_files.normalized_path_key",
+                value: stored_path_key,
+            });
+        }
+
+        let target_path = renamed_path(&current_path, requested_name)?;
+        let target_exists = fs::symlink_metadata(&target_path).is_ok();
+        let target_is_current = target_exists
+            && fs::canonicalize(&target_path).ok() == fs::canonicalize(&current_path).ok();
+        if target_exists && !target_is_current {
+            return Err(LibraryError::RenameConflict);
+        }
+        let temporary_path = target_is_current.then(|| {
+            current_path
+                .parent()
+                .expect("a regular file always has a parent")
+                .join(format!(".spotdiy-rename-{}.tmp", Uuid::new_v4()))
+        });
+
+        if let Some(temporary_path) = &temporary_path {
+            fs::rename(&current_path, temporary_path)
+                .map_err(|error| LibraryError::RenameFailed(error.to_string()))?;
+            if let Err(error) = fs::rename(temporary_path, &target_path) {
+                let _ = fs::rename(temporary_path, &current_path);
+                return Err(LibraryError::RenameFailed(error.to_string()));
+            }
+        } else {
+            fs::rename(&current_path, &target_path)
+                .map_err(|error| LibraryError::RenameFailed(error.to_string()))?;
+        }
+
+        let renamed = match normalize_file_path(&target_path) {
+            Ok(value) if is_path_within(&folder_path_key, &value.1) => value,
+            Ok((_, path_key)) => {
+                let _ = fs::rename(&target_path, &current_path);
+                return Err(LibraryError::InvalidStoredValue {
+                    field: "local_files.normalized_path_key",
+                    value: path_key,
+                });
+            }
+            Err(error) => {
+                let _ = fs::rename(&target_path, &current_path);
+                return Err(LibraryError::Path(error));
+            }
+        };
+        let now = Utc::now().to_rfc3339();
+        let update = self.database.with_connection(|connection| {
+            let changed = connection.execute(
+                "UPDATE local_files
+                 SET path = ?1, normalized_path_key = ?2, updated_at = ?3
+                 WHERE source_id = ?4 AND normalized_path_key = ?5",
+                params![
+                    renamed.0.to_string_lossy().into_owned(),
+                    renamed.1,
+                    now,
+                    source_id.to_string(),
+                    stored_path_key,
+                ],
+            )?;
+            if changed == 1 {
+                Ok(())
+            } else {
+                Err(rusqlite::Error::QueryReturnedNoRows)
+            }
+        });
+        if let Err(error) = update {
+            let rollback = fs::rename(&target_path, &current_path);
+            return if rollback.is_err() {
+                Err(LibraryError::RenameFailed(
+                    "the file moved, but its library index could not be updated".to_owned(),
+                ))
+            } else {
+                Err(LibraryError::Database(error))
+            };
+        }
+        Ok(())
     }
 
     pub fn resolve_playback_path(
@@ -1858,10 +1980,79 @@ fn parse_index_status(value: &str) -> Result<LocalFileIndexStatus, LibraryError>
 
 fn normalize_title(title: &str) -> String {
     title
+        .nfkd()
+        .filter(|character| !is_combining_mark(*character))
+        .flat_map(char::to_lowercase)
+        .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-        .to_lowercase()
+}
+
+fn renamed_path(
+    current_path: &std::path::Path,
+    requested_name: &str,
+) -> Result<PathBuf, LibraryError> {
+    let name = requested_name.trim();
+    if name.is_empty() {
+        return Err(LibraryError::InvalidRenameName(
+            "a file name is required".to_owned(),
+        ));
+    }
+    if name == "." || name == ".." || name.chars().count() > 180 {
+        return Err(LibraryError::InvalidRenameName(
+            "use a shorter file name".to_owned(),
+        ));
+    }
+    if name.chars().any(|character| {
+        character.is_control()
+            || matches!(
+                character,
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+            )
+    }) || name.ends_with([' ', '.'])
+    {
+        return Err(LibraryError::InvalidRenameName(
+            "the name contains characters that are not valid for a file".to_owned(),
+        ));
+    }
+    if is_reserved_windows_name(name) {
+        return Err(LibraryError::InvalidRenameName(
+            "that name is reserved by Windows".to_owned(),
+        ));
+    }
+    let extension = current_path.extension().and_then(|value| value.to_str());
+    let name = match extension {
+        Some(extension) => name
+            .rsplit_once('.')
+            .filter(|(_, supplied_extension)| supplied_extension.eq_ignore_ascii_case(extension))
+            .map_or(name, |(stem, _)| stem),
+        None => name,
+    };
+    if name.is_empty() || is_reserved_windows_name(name) {
+        return Err(LibraryError::InvalidRenameName(
+            "that name is not valid for a file".to_owned(),
+        ));
+    }
+    let filename = extension.map_or_else(
+        || name.to_owned(),
+        |extension| format!("{name}.{extension}"),
+    );
+    let parent = current_path.parent().ok_or_else(|| {
+        LibraryError::InvalidRenameName("the file has no valid parent folder".to_owned())
+    })?;
+    Ok(parent.join(filename))
+}
+
+fn is_reserved_windows_name(value: &str) -> bool {
+    let stem = value.split('.').next().unwrap_or_default();
+    matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+    ) || (stem.len() == 4
+        && (stem.starts_with("COM") || stem.starts_with("LPT"))
+        && stem.as_bytes().last().is_some_and(u8::is_ascii_digit)
+        && stem.as_bytes()[3] != b'0')
 }
 
 fn is_safe_cache_key(value: &str) -> bool {
@@ -2264,6 +2455,42 @@ mod tests {
     }
 
     #[test]
+    fn scan_indexes_valid_webm_with_truthful_fallback_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("Voice Note.WEBM"), minimal_webm()).unwrap();
+
+        let database_path = TempDatabasePath::new("library-webm");
+        let database = Database::open(database_path.path()).unwrap();
+        let artwork = tempfile::tempdir().unwrap();
+        let service = LibraryService::new(database, artwork.path()).unwrap();
+        let folder = service
+            .add_folders(vec![directory.path().to_path_buf()])
+            .unwrap()
+            .remove(0);
+
+        let summary = service.scan_folder_now(folder.id, false, None).unwrap();
+        assert_eq!(summary.candidates, 1);
+        assert_eq!(summary.new_files, 1);
+        assert_eq!(summary.metadata_failures, 0);
+
+        let item = service
+            .page(LibraryPageRequest::default())
+            .unwrap()
+            .items
+            .remove(0);
+        assert!(item.available);
+        assert_eq!(item.index_status, LocalFileIndexStatus::Indexed);
+        assert_eq!(item.title, "Voice Note");
+        assert_eq!(item.artists, vec!["Unknown Artist"]);
+        assert_eq!(item.container.as_deref(), Some("WebM"));
+        assert_eq!(item.codec, None);
+        assert_eq!(item.duration_ms, None);
+        assert_eq!(item.bitrate_kbps, None);
+        assert_eq!(item.sample_rate_hz, None);
+        assert_eq!(item.bit_depth, None);
+    }
+
+    #[test]
     fn forced_rescan_refreshes_same_size_content() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("forced.wav");
@@ -2288,6 +2515,69 @@ mod tests {
         let after = service.page(LibraryPageRequest::default()).unwrap();
         assert_ne!(after.items[0].content_fingerprint, before_fingerprint);
         assert_eq!(after.items[0].index_status, LocalFileIndexStatus::Indexed);
+    }
+
+    #[test]
+    fn renames_a_managed_file_and_updates_its_index_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let original_path = directory.path().join("original.wav");
+        let renamed_path = directory.path().join("renamed.wav");
+        fs::write(&original_path, minimal_wav()).unwrap();
+
+        let database = Database::open(TempDatabasePath::new("library-rename-file").path()).unwrap();
+        let artwork = tempfile::tempdir().unwrap();
+        let service = LibraryService::new(database, artwork.path()).unwrap();
+        let folder = service
+            .add_folders(vec![directory.path().to_path_buf()])
+            .unwrap()
+            .remove(0);
+        service.scan_folder_now(folder.id, false, None).unwrap();
+        let item = service.page(LibraryPageRequest::default()).unwrap().items[0].clone();
+
+        service.rename_path(item.source_id, "renamed").unwrap();
+
+        assert!(!original_path.exists());
+        assert!(renamed_path.is_file());
+        let page = service.page(LibraryPageRequest::default()).unwrap();
+        assert_eq!(page.items[0].source_id, item.source_id);
+        assert!(page.items[0].path.ends_with("renamed.wav"));
+        assert!(service
+            .resolve_playback_path(item.track_id, item.source_id)
+            .is_ok());
+    }
+
+    #[test]
+    fn rejects_unsafe_or_colliding_file_renames() {
+        let directory = tempfile::tempdir().unwrap();
+        let original_path = directory.path().join("original.wav");
+        fs::write(&original_path, minimal_wav()).unwrap();
+        fs::write(directory.path().join("other.wav"), minimal_wav()).unwrap();
+
+        let database =
+            Database::open(TempDatabasePath::new("library-rename-validation").path()).unwrap();
+        let artwork = tempfile::tempdir().unwrap();
+        let service = LibraryService::new(database, artwork.path()).unwrap();
+        let folder = service
+            .add_folders(vec![directory.path().to_path_buf()])
+            .unwrap()
+            .remove(0);
+        service.scan_folder_now(folder.id, false, None).unwrap();
+        let item = service
+            .page(LibraryPageRequest::default())
+            .unwrap()
+            .items
+            .into_iter()
+            .find(|item| item.path.ends_with("original.wav"))
+            .unwrap();
+
+        assert!(matches!(
+            service.rename_path(item.source_id, "other"),
+            Err(LibraryError::RenameConflict)
+        ));
+        assert!(matches!(
+            service.rename_path(item.source_id, "..\\escape"),
+            Err(LibraryError::InvalidRenameName(_))
+        ));
     }
 
     #[test]
@@ -2659,6 +2949,13 @@ mod tests {
 
     fn minimal_wav() -> Vec<u8> {
         minimal_wav_with_sample(0)
+    }
+
+    fn minimal_webm() -> Vec<u8> {
+        vec![
+            0x1A, 0x45, 0xDF, 0xA3, 0x8B, 0x42, 0x86, 0x81, 0x01, 0x42, 0x82, 0x84, b'w', b'e',
+            b'b', b'm', 0x18, 0x53, 0x80, 0x67, 0x80,
+        ]
     }
 
     fn minimal_wav_with_sample(sample: i16) -> Vec<u8> {

@@ -128,7 +128,7 @@ The native Windows boundary is organized as follows:
 
 ```text
 src-tauri/src/windows/mod.rs
-        +--> overlays.rs       lazy native overlay windows and click-through
+        +--> overlays.rs       lazy native mini overlay window and native drag
         +--> shortcuts.rs      global shortcut registry and status reporting
         +--> tray.rs            tray menu/action dispatch
         `--> smtc.rs            typed media controls and isolated WinRT bridge
@@ -139,8 +139,8 @@ src/components/settings/*         --> Windows Integration settings controls
 src/hooks/useWindowsIntegration.ts + overlay-store.ts --> typed UI state
 ```
 
-`WindowsIntegrationService` is the single native owner. Overlay visibility and
-Gaming click-through are session state; settings, bindings, and output profiles
+`WindowsIntegrationService` is the single native owner. Mini overlay visibility
+and native handles are session state; settings, bindings, and output profiles
 are durable ordinary records. The frontend receives only validated snapshots,
 status details, typed overlay kinds, and profile values.
 

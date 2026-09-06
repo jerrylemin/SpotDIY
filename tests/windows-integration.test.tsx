@@ -5,18 +5,10 @@ import type { ReactNode } from "react";
 
 const usePlaybackMock = vi.hoisted(() => vi.fn());
 const useWindowsIntegrationMock = vi.hoisted(() => vi.fn());
-const useLyricsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../src/hooks/usePlayback", () => ({ usePlayback: usePlaybackMock }));
 vi.mock("../src/hooks/useWindowsIntegration", () => ({ useWindowsIntegration: useWindowsIntegrationMock }));
-vi.mock("../src/hooks/useLyrics", () => ({
-  activeCueIndex: (cues: Array<{ startMs: number }>, positionMs: number) => cues.reduce((active, cue, index) => cue.startMs <= positionMs ? index : active, -1),
-  useLyrics: useLyricsMock,
-}));
 
-import { EdgeOverlay } from "../src/components/overlay/EdgeOverlay";
-import { GamingOverlay } from "../src/components/overlay/GamingOverlay";
-import { LyricsOverlay } from "../src/components/overlay/LyricsOverlay";
 import { MiniOverlay } from "../src/components/overlay/MiniOverlay";
 
 const playback = {
@@ -49,7 +41,9 @@ const playback = {
   nextTrack: vi.fn(),
   previousTrack: vi.fn(),
   togglePlayPause: vi.fn(),
+  seekPlayback: vi.fn(),
   setVolume: vi.fn(),
+  toggleMuted: vi.fn(),
 };
 
 const windows = {
@@ -64,17 +58,12 @@ const windows = {
     shortcutStatuses: [],
     overlays: [
       { kind: "mini" as const, status: "open" as const, detail: null },
-      { kind: "edge" as const, status: "open" as const, detail: null },
-      { kind: "lyrics" as const, status: "open" as const, detail: null },
-      { kind: "gaming" as const, status: "open" as const, detail: null },
     ],
-    gamingClickThrough: false,
     outputProfiles: [],
   },
   loading: false,
   error: null,
   closeOverlay: vi.fn(),
-  setGamingClickThrough: vi.fn(),
 };
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -85,52 +74,25 @@ afterEach(() => {
   cleanup();
   usePlaybackMock.mockReset();
   useWindowsIntegrationMock.mockReset();
-  useLyricsMock.mockReset();
   playback.nextTrack.mockReset();
   playback.previousTrack.mockReset();
   playback.togglePlayPause.mockReset();
+  playback.seekPlayback.mockReset();
   playback.setVolume.mockReset();
+  playback.toggleMuted.mockReset();
   windows.closeOverlay.mockReset();
-  windows.setGamingClickThrough.mockReset();
 });
 
 describe("Windows overlay surfaces", () => {
-  it("renders the Mini, Edge, Lyrics, and Gaming surfaces from shared playback state", () => {
+  it("renders the only mini surface with seek and volume controls", () => {
     usePlaybackMock.mockReturnValue(playback);
     useWindowsIntegrationMock.mockReturnValue(windows);
-    useLyricsMock.mockReturnValue({
-      data: {
-        syncKind: "timed",
-        cues: [{ startMs: 0, lines: ["First line"] }, { startMs: 900, lines: ["Active line"] }, { startMs: 2_000, lines: ["Next line"] }],
-        plainText: null,
-      },
-      isLoading: false,
-    });
 
-    const mini = render(<MiniOverlay />, { wrapper });
-    expect(screen.getByRole("region", { name: "Mini overlay" })).toHaveTextContent("Night Drive");
-    mini.unmount();
-
-    const edge = render(<EdgeOverlay />, { wrapper });
-    expect(screen.getByRole("region", { name: "Edge overlay" })).toHaveTextContent("Luna Max");
-    edge.unmount();
-
-    const lyrics = render(<LyricsOverlay />, { wrapper });
-    expect(screen.getByRole("region", { name: "Lyrics overlay" })).toHaveTextContent("Active line");
-    lyrics.unmount();
-
-    render(<GamingOverlay />, { wrapper });
-    expect(screen.getByRole("region", { name: "Gaming overlay" })).toHaveTextContent("Interactive");
-  });
-
-  it("keeps Gaming click-through explicit and routed through the Windows service", async () => {
-    usePlaybackMock.mockReturnValue(playback);
-    useWindowsIntegrationMock.mockReturnValue(windows);
-    useLyricsMock.mockReturnValue({ data: null, isLoading: false });
-    render(<GamingOverlay />, { wrapper });
-
-    expect(screen.getByText(/windowed or borderless games/)).toBeVisible();
-    await screen.getByRole("button", { name: "Enable click-through" }).click();
-    expect(windows.setGamingClickThrough).toHaveBeenCalledWith(true);
+    render(<MiniOverlay />, { wrapper });
+    const region = screen.getByRole("region", { name: "Mini overlay" });
+    expect(region).toHaveTextContent("Night Drive");
+    expect(region).not.toHaveTextContent("SpotDIY");
+    expect(screen.getByRole("slider", { name: "Seek within current track" })).toBeVisible();
+    expect(screen.getByRole("slider", { name: "Playback volume" })).toHaveValue("72");
   });
 });

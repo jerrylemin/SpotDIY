@@ -438,26 +438,19 @@ try {
     }
 
     const miniPage = await openAndCheckOverlay("mini", "overlay-mini");
+    const seekControl = miniPage.getByRole("slider", { name: "Seek within current track" });
+    const volumeControl = miniPage.getByRole("slider", { name: "Playback volume" });
+    if (await seekControl.count() !== 1 || await volumeControl.count() !== 1) {
+      throw new Error("the mini overlay did not expose seek and volume controls");
+    }
     await invoke("close_overlay", { kind: "mini" });
     await waitFor("Mini overlay close", async () => (await findOverlayPage("mini")) === null);
     await openAndCheckOverlay("mini", "overlay-mini");
     await invoke("close_overlay", { kind: "mini" });
     await waitFor("Mini overlay reopen close", async () => (await findOverlayPage("mini")) === null);
 
-    await openAndCheckOverlay("edge", "overlay-edge");
-    await openAndCheckOverlay("lyrics", "overlay-lyrics");
-    const gamingPage = await openAndCheckOverlay("gaming", "overlay-gaming");
-    if (!miniPage || !gamingPage) {
+    if (!miniPage) {
       throw new Error("the packaged overlay pages were not exposed to WebView2");
-    }
-
-    integration = await invoke("set_gaming_click_through", { enabled: true });
-    if (!integration.gamingClickThrough) {
-      throw new Error(`Gaming click-through did not enable after rescue registration: ${JSON.stringify(integration)}`);
-    }
-    integration = await invoke("set_gaming_click_through", { enabled: false });
-    if (integration.gamingClickThrough) {
-      throw new Error(`Gaming click-through did not disable through the native recovery path: ${JSON.stringify(integration)}`);
     }
 
     const beforePlayback = await invoke("get_playback_snapshot");
@@ -497,11 +490,8 @@ try {
       throw new Error(`the Plan 12 output profile restore did not recover the prior output state: ${JSON.stringify({ beforePlayback, restored })}`);
     }
 
-    for (const kind of ["edge", "lyrics", "gaming"]) {
-      await invoke("close_overlay", { kind });
-    }
     integration = await invoke("get_windows_integration_snapshot");
-    if (integration.overlays.some((overlay) => overlay.status !== "closed") || integration.gamingClickThrough) {
+    if (integration.overlays.some((overlay) => overlay.status !== "closed")) {
       throw new Error(`overlays were not fully closed before restart: ${JSON.stringify(integration)}`);
     }
     console.log("packaged Plan 12 native integration flow passed");
@@ -773,7 +763,7 @@ try {
     if (!profile || profile.audioDeviceName !== "auto" || !shortcut || shortcut.accelerator !== "Ctrl+Alt+Shift+F12") {
       throw new Error(`Plan 12 output profile or controlled shortcut did not persist across restart: ${JSON.stringify(integration)}`);
     }
-    if (integration.overlays.some((overlay) => overlay.status !== "closed") || integration.gamingClickThrough) {
+    if (integration.overlays.some((overlay) => overlay.status !== "closed")) {
       throw new Error(`Plan 12 session-only overlay state persisted across restart: ${JSON.stringify(integration)}`);
     }
     if (integration.smtcStatus === "ready") {

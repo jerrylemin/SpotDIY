@@ -7,16 +7,18 @@ This document records the release-candidate setup and verified host facts for
 
 - Windows 11 x64; Windows 10 is a target where Tauri/WebView2 supports it.
 - Node.js `24.11.1` and pnpm `11.22.0` for reproducible release/CI runs.
-- Rust stable MSVC and a Visual Studio x64 Developer Command Prompt with the
+- Rust `1.98.1-x86_64-pc-windows-msvc` and a Visual Studio x64 Developer Command Prompt with the
   Windows SDK and MSVC headers/libraries.
 - Evergreen WebView2 Runtime.
-- Python, FFmpeg, yt-dlp, and mpv for the managed media-tool boundary.
+- Python, `spotdl`, FFmpeg, yt-dlp, and mpv for the managed media-tool
+  boundary. Spotify search and MP3 downloads use spotdl; no Spotify developer
+  credentials are needed.
 
 The local host observed during Plan 16 was Node `24.14.0`, pnpm `11.19.0`, and
-Rust/Cargo `1.95.0`. CI pins Node/pnpm as above. The local Visual Studio
-installation currently lacks required MSVC headers/libraries, so native
-compile, package, and RustSec gates are blocked until that installation is
-repaired.
+default Rust/Cargo `1.95.0`; the repository toolchain file pins verification
+commands to Rust `1.98.1`. CI uses the same exact Rust target and passed the
+native, RustSec, and package jobs. The current external-target local build also
+passes; build output stays outside the repository at `C:\CargoTarget\SpotDIY`.
 
 ## Install
 
@@ -36,8 +38,8 @@ browser matrix.
 pnpm dev
 ```
 
-For the native window, open an x64 Visual Studio Developer Shell, set the
-external Cargo target, and run:
+The `pnpm tauri` launcher selects the installed x64 Visual Studio C++ toolset.
+Set the external Cargo target and run:
 
 ```powershell
 $env:CARGO_TARGET_DIR = 'C:\CargoTarget\SpotDIY'
@@ -79,7 +81,13 @@ pnpm tauri build
 
 When native prerequisites are healthy, the NSIS artifact is under
 `C:\CargoTarget\SpotDIY\release\bundle\nsis\`. The repository must not
-contain `src-tauri\target`.
+contain `src-tauri\target`. The current local artifact is
+`SpotDIY_0.1.0_x64-setup.exe`, 6,501,279 bytes, SHA-256
+`0DA477FE2B2163130484DD8346D14871564DB1FC13422D8B2A39F3D2FBC325A4`, and
+`NotSigned`. The earlier Plan 16 CI artifact was
+`SpotDIY_0.1.0_x64-setup.exe` from run `33769072435`; it was `6,489,236`
+bytes and `NotSigned` with SHA-256
+`D52A17EF5A69F514DFE20C98EAD904543F8FA18599FE0DE74CAFB3B62ACA95CB`.
 
 Release verification records the installer filename, version, byte size,
 SHA-256, and `Get-AuthenticodeSignature` result. No signing certificate is
@@ -90,9 +98,18 @@ installers.
 ## Media tools and provider boundaries
 
 mpv is the owned main/preview process boundary; FFmpeg and yt-dlp receive
-structured arguments from native code. The current bundle does not vendor
-arbitrary media binaries. Spotify is metadata-only, online playback is not
-enabled, and live download tests require an approved public-domain/CC fixture.
+structured arguments from native code. Development builds discover the pinned
+`.tools\mpv\v0.41.0\mpv.exe`, and release bundles place that binary under the
+app-owned `resources\mpv\mpv.exe` location. Settings can choose or clear local
+`mpv.exe`, `yt-dlp.exe`, and `ffmpeg.exe` paths; validated persisted paths are
+resolved before environment overrides, bundled binaries, and PATH. YouTube and
+SoundCloud URLs can play through MPV when the provider URL and MPV are ready.
+Spotify search requires `spotdl` on `PATH` (or the `SPOTDIY_SPOTDL_PATH`
+environment variable). Install it with `py -m pip install --user spotdl` and
+verify with `spotdl --version`. Spotify playback still opens Spotify; audio
+downloads resolve a transient YouTube/SoundCloud match and then use yt-dlp and
+FFmpeg to create MP3 output. Live download tests require an approved
+public-domain/CC fixture.
 Without one, the correct result is
 `SKIPPED — no approved legal live-download fixture`.
 
@@ -104,5 +121,5 @@ music folders remain user-owned. Portable mode is selected by an exact
 `Data`, `Music`, `Covers`, `Lyrics`, `Database`, `Cache`, and `Config` roots.
 Portable startup does not fall back to AppData.
 
-The schema is 9 and `.spotdiy` archive format is 1. No updater or GitHub
+The schema is 11 and `.spotdiy` archive format is 1. No updater or GitHub
 Release is configured.

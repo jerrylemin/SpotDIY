@@ -104,7 +104,7 @@ if (-not $liveRequested) {
     } else {
         $ytDlpPath = $ytDlpCommand.Source
         Invoke-StructuredProviderSmoke "YouTube" "ytsearch25" $ytDlpPath
-        Invoke-StructuredProviderSmoke "SoundCloud" "scsearch25" $ytDlpPath
+        Invoke-StructuredProviderSmoke "SoundCloud" "scsearch5" $ytDlpPath
     }
 }
 

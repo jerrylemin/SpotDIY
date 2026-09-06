@@ -61,7 +61,9 @@ path before invoking the scoped opener.
 Provider adapters report capability sets and normalize provider results into
 shared DTOs. `SourceFusionService` will match sources into `UnifiedTrack`
 records, while `SourceResolver` will select playable sources according to the
-user's ordered preferences. Spotify catalog sources remain metadata-only.
+user's ordered preferences. Persisted Spotify sources remain metadata-only;
+transient Spotify search results can use `spotdl` for source-matched audio
+downloads but never become in-app playback sources.
 
 Standard storage targets `%LOCALAPPDATA%\SpotDIY\spotdiy.sqlite3`; managed
 download task temp storage is `%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>`
@@ -117,22 +119,24 @@ SearchService
   |-- LocalSourceAdapter -> SQLite library records
   |-- YoutubeSourceAdapter -> bounded yt-dlp metadata process
   |-- SoundcloudSourceAdapter -> bounded yt-dlp metadata process
-  `-- SpotifySourceAdapter -> PKCE-authenticated catalog metadata (isolated lens)
+  `-- SpotifySourceAdapter -> bounded local spotdl metadata process
 ```
 
 `SearchService` owns the provider registry, active SearchId, cancellation,
 per-provider timeouts, partial section events, exact completion, stale-event
-identity, provider-local sorting, and a bounded TTL cache. Unified `ALL`,
-`TRACKS`, `ARTISTS`, and `ALBUMS` requests never include Spotify; `LOCAL`,
-`YOUTUBE`, `SOUNDCLOUD`, and `SPOTIFY` select only their specified providers.
+identity, provider-local sorting, and a bounded TTL cache. Unified `ALL` and
+`TRACKS` requests include Spotify alongside Local, YouTube, and SoundCloud;
+`LOCAL`, `YOUTUBE`, `SOUNDCLOUD`, and `SPOTIFY` select only their specified
+providers.
 The frontend buffers events that arrive before the native start response and
 rejects events from stale SearchIds. Search results are transient DTOs; no
 provider payload, raw subprocess output, token, or credential is persisted.
 
-Spotify authorization is loopback-only on `127.0.0.1` with a dynamic port and
-S256 PKCE. Access and refresh tokens stay in the Windows credential seam or
-process memory, and catalog search remains disabled until the explicit
-development/compliance gate is enabled.
+Spotify search invokes the locally installed `spotdl` executable with bounded
+output, timeout, cancellation, and no shell. No Spotify developer app, client
+ID, market, login, token, or credential is required. Search results are
+transient; when a result is downloaded, spotdl returns a YouTube/SoundCloud
+match transiently and the existing yt-dlp worker performs the MP3 download.
 
 ## Plan 06 source fusion and resolver boundary
 
@@ -186,13 +190,15 @@ typed queue command -> DownloadService -> downloads repository (schema 4)
 ```
 
 `DownloadService` is the sole owner of persistent download lifecycle. It
-validates YouTube/SoundCloud provider identity and canonical URLs, reads the
-existing `downloads_directory` setting, creates UUID task roots, and never
-passes provider-derived filenames directly to the filesystem. It supports
-audio provider encoding and video best-video-plus-best-audio with FFmpeg when
-available; missing video tooling fails truthfully. Progress is machine-readable
-and throttled for SQLite persistence while snapshots remain revisioned and
-bounded for the UI.
+validates YouTube/SoundCloud provider identity and canonical URLs, accepts
+Spotify only on transient search-result tasks, and reads the existing
+`downloads_directory` setting. Spotify tasks resolve through `spotdl` to a
+validated YouTube/SoundCloud source before yt-dlp; the service creates UUID
+task roots and never passes provider-derived filenames directly to the
+filesystem. It supports audio provider encoding, Spotify MP3 extraction, and
+video best-video-plus-best-audio with FFmpeg when available; missing required
+tooling fails truthfully. Progress is machine-readable and throttled for
+SQLite persistence while snapshots remain revisioned and bounded for the UI.
 
 Cancellation kills and reaps only the child owned by that task. Restart
 recovery requeues only interrupted active states and cleans only their owned
@@ -200,7 +206,7 @@ task temp roots. Finalization validates a regular output inside that root,
 copies through a destination-side temporary file, renames without overwrite,
 persists the trusted path, and cleans the owned temp root. Plan 07 does not
 create library tracks, move library media, fuse sources, or provide online
-playback; Spotify and Local download requests are rejected.
+playback; persisted Spotify-source and Local download requests are rejected.
 
 ## Plan 08 durable collections and queue boundary
 
@@ -330,19 +336,17 @@ adds the separate Windows integration boundary described below.
 ## Plan 12 Windows integration boundary
 
 `WindowsIntegrationService` is the native owner for optional desktop surfaces
-and system controls. It lazily creates exactly four labeled Tauri webview
-windows (`overlay-mini`, `overlay-edge`, `overlay-lyrics`, and
-`overlay-gaming`) with exact dimensions, safe positioning, and always-on-top
-configuration. Reopening an active overlay reuses the existing window. The
-overlay capability grants only the event listen/unlisten and window close,
-always-on-top permissions needed by those surfaces; the main capability grants
-only the additional focus/show permissions needed by the tray and palette path.
+and system controls. It lazily creates exactly one labeled Tauri webview window
+(`overlay-mini`) with exact dimensions and always-on-top configuration.
+Reopening an active overlay reuses the existing window. The overlay capability
+grants only the event listen/unlisten, close, always-on-top, and native-drag
+permissions needed by that surface; the main capability grants only the
+additional focus/show permissions needed by the tray and palette path.
 
-The same service owns the tray menu, nine typed global shortcut bindings, and
+The same service owns the tray menu, seven typed global shortcut bindings, and
 per-binding registered/conflict/invalid/failed status. The master shortcut
 switch is disabled by default; failed registrations do not become claimed
-actions. Gaming click-through is session-only and can be recovered with the
-reserved `Ctrl+Alt+Shift+G` rescue binding.
+actions. Overlay visibility and native handles are session-only.
 
 SMTC is enabled by default but reports `ready`, `disabled`, `unsupported`, or
 `failed` with detail. The WinRT bridge is isolated in the Windows-only
@@ -351,7 +355,7 @@ metadata and typed transport commands. Output profiles are ordinary schema-8
 settings and apply through `PlaybackService` without changing track, queue,
 position, or playback phase; device/volume/mute failures roll back and report
 the recovery result. Overlay visibility, native handles, tray state, SMTC
-runtime objects, and click-through state are never persisted.
+runtime objects, and native drag state are never persisted.
 
 ## Plan 13 backup and portable storage boundary
 

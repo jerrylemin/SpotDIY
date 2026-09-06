@@ -1,17 +1,17 @@
 import { useMemo, useState } from "react";
 
 import { usePlayback } from "../../hooks/usePlayback";
-import { isTauriRuntime, openProviderResult, queueSearchResultDownload, revealLocalFile } from "../../services/ipc";
+import { isTauriRuntime, openProviderResult, pickDownloadDirectory, playSearchResult, queueSearchResultDownload, revealLocalFile, setSetting } from "../../services/ipc";
 import { useUiStore } from "../../stores/ui-store";
 import type { DownloadMode, SearchResult, SourceCapabilities } from "../../types/domain";
-import { deriveSearchResultActions, type SearchResultActionId } from "../../features/actions/track-actions";
+import { deriveSearchResultActions, downloadModesForResult, downloadReadinessReason, isDownloadFolderReadinessReason, type DownloadReadiness, type SearchResultActionId } from "../../features/actions/track-actions";
 import { ContextActionMenu } from "../common/ContextActionMenu";
-import { ProviderBadge } from "../common/ProviderBadge";
 import { SpotIcon } from "../icons/SpotIcon";
 
 interface SearchResultCardProps {
   result: SearchResult;
   capabilities?: SourceCapabilities;
+  downloadReadiness?: DownloadReadiness;
 }
 
 function durationLabel(durationMs: number | null): string | null {
@@ -25,7 +25,7 @@ function resultErrorMessage(error: unknown): string {
   return "That action could not be completed.";
 }
 
-export function SearchResultCard({ capabilities, result }: SearchResultCardProps) {
+export function SearchResultCard({ capabilities, downloadReadiness, result }: SearchResultCardProps) {
   const playback = usePlayback();
   const nativeRuntime = isTauriRuntime();
   const openTrackInspector = useUiStore((state) => state.openTrackInspector);
@@ -34,11 +34,22 @@ export function SearchResultCard({ capabilities, result }: SearchResultCardProps
   const [actionError, setActionError] = useState<string | null>(null);
   const [downloadMode, setDownloadMode] = useState<DownloadMode>("audio");
   const localPlayable = result.provider === "local" && result.localTrackId !== null;
-  const actions = useMemo(() => deriveSearchResultActions(result, { downloadsAvailable: capabilities?.downloads, nativeRuntime }), [capabilities?.downloads, nativeRuntime, result]);
+  const actions = useMemo(() => deriveSearchResultActions(result, { downloadReadiness, downloadsAvailable: capabilities?.downloads, nativeRuntime }), [capabilities?.downloads, downloadReadiness, nativeRuntime, result]);
   const action = (id: SearchResultActionId) => actions.find((item) => item.id === id);
   const duration = durationLabel(result.durationMs);
   const downloadAction = action("download");
   const openSourceAction = action("open-source");
+  const downloadModes = downloadAction?.downloadModes ?? downloadModesForResult(result);
+  const selectedDownloadReason = downloadModes.length > 0
+    ? downloadReadinessReason(result.provider, downloadMode, {
+      canonicalUrl: result.canonicalUrl,
+      nativeRuntime,
+      downloadsAvailable: capabilities?.downloads,
+      downloadReadiness,
+    })
+    : undefined;
+  const playAction = action("play");
+  const downloadEnabled = Boolean(downloadAction?.enabled && (selectedDownloadReason === undefined || isDownloadFolderReadinessReason(selectedDownloadReason)));
 
   async function runAction(run: () => Promise<unknown>) {
     setBusy(true);
@@ -50,6 +61,23 @@ export function SearchResultCard({ capabilities, result }: SearchResultCardProps
     } finally {
       setBusy(false);
     }
+  }
+
+  async function queueDownload(mode: DownloadMode) {
+    const reason = downloadReadinessReason(result.provider, mode, {
+      canonicalUrl: result.canonicalUrl,
+      nativeRuntime,
+      downloadsAvailable: capabilities?.downloads,
+      downloadReadiness,
+    });
+    if (isDownloadFolderReadinessReason(reason)) {
+      const directory = await pickDownloadDirectory();
+      if (!directory) {
+        return;
+      }
+      await setSetting({ key: "downloadsDirectory", value: directory });
+    }
+    await queueSearchResultDownload(result, mode);
   }
 
   const localTrackId = result.localTrackId;
@@ -71,22 +99,20 @@ export function SearchResultCard({ capabilities, result }: SearchResultCardProps
         onSelect: () => {
           if (item.id === "inspect") inspect();
           if (item.id === "play" && localPlayable && localTrackId) void runAction(() => playback.playNow(localTrackId, result.localSourceId));
+          if (item.id === "play" && !localPlayable) void runAction(() => playSearchResult(result));
           if (item.id === "play-next" && localPlayable && localTrackId) void runAction(() => playback.playNext(localTrackId, result.localSourceId));
           if (item.id === "queue" && localPlayable && localTrackId) void runAction(() => playback.addToQueue(localTrackId, result.localSourceId));
           if (item.id === "open-location" && result.localSourceId) void runAction(() => revealLocalFile(result.localSourceId!));
           if (item.id === "open-source" && result.canonicalUrl) void runAction(() => openProviderResult(result.provider, result.canonicalUrl!));
-          if (item.id === "download" && result.canonicalUrl) void runAction(() => queueSearchResultDownload(result, downloadMode));
+          if (item.id === "download" && result.canonicalUrl) void runAction(() => queueDownload(downloadMode));
         },
       }))}
       className="search-result-context-menu"
       label={`Actions for ${result.title}`}
     >
       <article className="search-result-card">
-        <div className="search-result-art">
-          {result.artworkUrl ? <img alt={`${result.title} artwork`} src={result.artworkUrl} /> : <SpotIcon name="library" size={18} />}
-        </div>
         <div className="search-result-main">
-          <div className="search-result-heading"><ProviderBadge kind={result.provider} /><strong title={result.title}>{result.title}</strong>{result.explicit ? <span className="search-result-explicit">E</span> : null}</div>
+          <div className="search-result-heading"><strong title={result.title}>{result.title}</strong>{result.explicit ? <span className="search-result-explicit">E</span> : null}</div>
           <span className="search-result-artists">{result.artists.length > 0 ? result.artists.join(", ") : "Unknown artist"}</span>
           <span className="search-result-album">{result.album ?? "Single"}{duration ? ` · ${duration}` : ""}</span>
           {result.publishedAt ? <span className="search-result-date">{result.publishedAt.value}</span> : null}
@@ -95,18 +121,18 @@ export function SearchResultCard({ capabilities, result }: SearchResultCardProps
         <div className="search-result-actions">
           {localPlayable ? (
             <>
-              <button className="button button-small search-result-play" disabled={busy} onClick={() => void runAction(() => playback.playNow(result.localTrackId!, result.localSourceId))} type="button"><SpotIcon name="play" size={13} /> Play now</button>
-              <button className="button button-small" disabled={busy} onClick={() => void runAction(() => playback.addToQueue(result.localTrackId!, result.localSourceId))} type="button">Queue</button>
-              <button className="button button-small" disabled={busy} onClick={() => void runAction(() => playback.playNext(result.localTrackId!, result.localSourceId))} type="button">Play next</button>
-              <button className="button button-small" disabled={busy} onClick={inspect} type="button"><SpotIcon name="info" size={13} /> Inspect</button>
-              {result.localSourceId ? <button className="text-link search-result-reveal" disabled={busy || !action("open-location")?.enabled} onClick={() => void runAction(() => revealLocalFile(result.localSourceId!))} title={action("open-location")?.reason} type="button">Show file</button> : null}
+              <button aria-label="Play now" className="button button-small icon-only-button search-result-play" disabled={busy} onClick={() => void runAction(() => playback.playNow(result.localTrackId!, result.localSourceId))} title={`Play ${result.title} now`} type="button"><SpotIcon name="play" size={13} /></button>
+              <button aria-label="Queue" className="button button-small icon-only-button" disabled={busy} onClick={() => void runAction(() => playback.addToQueue(result.localTrackId!, result.localSourceId))} title={`Add ${result.title} to queue`} type="button"><SpotIcon name="queue" size={13} /></button>
+              <button aria-label="Play next" className="button button-small icon-only-button" disabled={busy} onClick={() => void runAction(() => playback.playNext(result.localTrackId!, result.localSourceId))} title={`Play ${result.title} next`} type="button"><SpotIcon name="next" size={13} /></button>
+              <button aria-label="Inspect" className="button button-small icon-only-button" disabled={busy} onClick={inspect} title={`Inspect ${result.title}`} type="button"><SpotIcon name="info" size={13} /></button>
+              {result.localSourceId ? <button aria-label="Show file" className="button button-small icon-only-button search-result-reveal" disabled={busy || !action("open-location")?.enabled} onClick={() => void runAction(() => revealLocalFile(result.localSourceId!))} title={action("open-location")?.reason ?? `Show ${result.title} file`} type="button"><SpotIcon name="folder" size={13} /></button> : null}
             </>
           ) : (
             <>
-              <button className="button button-small" disabled={busy || !openSourceAction?.enabled} onClick={() => { if (result.canonicalUrl) void runAction(() => openProviderResult(result.provider, result.canonicalUrl!)); }} title={openSourceAction?.enabled ? "Open the validated provider source" : openSourceAction?.reason} type="button">{result.provider === "spotify" ? "Open on Spotify" : "Open source"}</button>
-              <button className="button button-small" onClick={inspect} type="button"><SpotIcon name="info" size={13} /> Inspect</button>
-              {downloadAction?.enabled || downloadAction?.reason ? <div className="search-result-download"><select aria-label={`Download mode for ${result.title}`} disabled={busy || !downloadAction.enabled} onChange={(event) => setDownloadMode(event.target.value as DownloadMode)} title={downloadAction.reason} value={downloadMode}><option value="audio">Audio</option><option value="video">Video</option></select><button className="button button-small" disabled={busy || !downloadAction.enabled} onClick={() => void runAction(() => queueSearchResultDownload(result, downloadMode))} title={downloadAction.enabled ? "Queue this provider download" : downloadAction.reason} type="button"><SpotIcon name="download" size={13} /> Download</button></div> : null}
-              <span className="search-result-capability-note">{result.provider === "spotify" ? "Metadata only · Spotify downloads are not supported" : "Online playback is not implemented"}</span>
+              {result.provider !== "spotify" ? <button aria-label="Play online" className="button button-small icon-only-button search-result-play" disabled={busy || !playAction?.enabled} onClick={() => void runAction(() => playSearchResult(result))} title={playAction?.enabled ? `Play ${result.title}` : playAction?.reason} type="button"><SpotIcon name="play" size={13} /></button> : null}
+              <button aria-label={result.provider === "spotify" ? "Open on Spotify" : "Open source"} className="button button-small icon-only-button" disabled={busy || !openSourceAction?.enabled} onClick={() => { if (result.canonicalUrl) void runAction(() => openProviderResult(result.provider, result.canonicalUrl!)); }} title={openSourceAction?.enabled ? (result.provider === "spotify" ? "Open on Spotify" : `Open ${result.title} source`) : openSourceAction?.reason} type="button"><SpotIcon name="arrow" size={13} /></button>
+              <button aria-label="Inspect" className="button button-small icon-only-button" disabled={busy} onClick={inspect} title={`Inspect ${result.title}`} type="button"><SpotIcon name="info" size={13} /></button>
+              {downloadAction?.enabled || downloadAction?.reason ? <div className="search-result-download">{downloadModes.length > 1 ? <select aria-label={`Download mode for ${result.title}`} disabled={busy || !downloadAction.enabled} onChange={(event) => setDownloadMode(event.target.value as DownloadMode)} title={selectedDownloadReason ?? downloadAction.reason} value={downloadMode}>{downloadModes.map((mode) => { const modeReason = downloadReadinessReason(result.provider, mode, { canonicalUrl: result.canonicalUrl, nativeRuntime, downloadsAvailable: capabilities?.downloads, downloadReadiness }); return <option disabled={Boolean(modeReason && !isDownloadFolderReadinessReason(modeReason))} key={mode} value={mode}>{mode === "audio" ? "Audio" : "Video"}</option>; })}</select> : null}<button aria-label={downloadModes.length === 1 ? "Download audio" : "Download"} className="button button-small icon-only-button" disabled={busy || !downloadEnabled} onClick={() => void runAction(() => queueDownload(downloadMode))} title={downloadEnabled ? (isDownloadFolderReadinessReason(selectedDownloadReason) ? "Choose a download folder, then queue this download" : `Download ${result.title}`) : selectedDownloadReason ?? downloadAction.reason} type="button"><SpotIcon name="download" size={13} /></button></div> : null}
             </>
           )}
         </div>

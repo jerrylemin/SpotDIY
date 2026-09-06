@@ -111,11 +111,17 @@ pub fn extract_metadata(path: impl AsRef<Path>) -> Result<ExtractedMetadata, Met
         .and_then(|stem| stem.to_str())
         .filter(|stem| !stem.trim().is_empty())
         .unwrap_or("Untitled");
-    let title = title.unwrap_or_else(|| file_stem.to_owned());
-    let artists = if artists.is_empty() {
-        vec!["Unknown Artist".to_owned()]
-    } else {
-        artists
+    let (title, artists) = match title {
+        Some(title) => (
+            title,
+            if artists.is_empty() {
+                vec!["Unknown Artist".to_owned()]
+            } else {
+                artists
+            },
+        ),
+        None if artists.is_empty() => filename_metadata_fallback(file_stem),
+        None => (file_stem.to_owned(), artists),
     };
 
     let properties = tagged_file.properties();
@@ -243,6 +249,7 @@ fn embedded_synchronized(content: Vec<(u32, String)>) -> Option<EmbeddedLyrics> 
         cues.push(LyricsCue {
             start_ms,
             lines: vec![text],
+            words: Vec::new(),
         });
     }
     let plain_text = cues
@@ -283,6 +290,17 @@ fn clean_text(value: Option<&str>) -> Option<String> {
 fn clean_string(value: &str) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn filename_metadata_fallback(file_stem: &str) -> (String, Vec<String>) {
+    if let Some((artist, title)) = file_stem.split_once(" - ") {
+        let artist = artist.trim();
+        let title = title.trim();
+        if !artist.is_empty() && !title.is_empty() {
+            return (title.to_owned(), vec![artist.to_owned()]);
+        }
+    }
+    (file_stem.to_owned(), vec!["Unknown Artist".to_owned()])
 }
 
 fn valid_release_date(value: Option<&str>) -> Option<String> {
@@ -364,6 +382,21 @@ mod tests {
         assert_eq!(
             clean_string("Artist One, Artist Two"),
             Some("Artist One, Artist Two".to_owned())
+        );
+    }
+
+    #[test]
+    fn filename_fallback_recovers_artist_and_title_for_downloaded_names() {
+        assert_eq!(
+            filename_metadata_fallback("Original artist - Original title"),
+            (
+                "Original title".to_owned(),
+                vec!["Original artist".to_owned()]
+            )
+        );
+        assert_eq!(
+            filename_metadata_fallback("Voice Note"),
+            ("Voice Note".to_owned(), vec!["Unknown Artist".to_owned()])
         );
     }
 

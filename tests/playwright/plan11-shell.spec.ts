@@ -36,7 +36,7 @@ test.describe("Plan 11 shell surfaces", () => {
     const inspector = page.getByRole("dialog");
     await expect(inspector.getByText("NOT IN LOCAL LIBRARY", { exact: true })).toBeVisible();
     await expect(inspector.getByText("EPHEMERAL SEARCH RESULT", { exact: true })).toBeVisible();
-    await expect(inspector.getByText(/Online playback is not implemented/)).toBeVisible();
+    await expect(inspector.getByText(/Online playback requires the native SpotDIY desktop runtime/)).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(inspector).toBeHidden();
   });

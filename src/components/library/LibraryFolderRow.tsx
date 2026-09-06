@@ -75,7 +75,8 @@ export function LibraryFolderRow({
         <span>{progressLabel ?? formatLastScan(folder.lastScanFinishedAt)}</span>
         <div className="library-folder-actions">
           <button
-            className="button button-quiet button-small"
+            aria-label={isScanning ? "Queue refresh" : "Rescan"}
+            className="button button-quiet button-small icon-only-button"
             disabled={actionPending || !folder.enabled}
             onClick={() => onRescan(folder.id)}
             title="Scan this folder for new or changed files"

@@ -25,7 +25,7 @@ impl Default for ProviderTimeouts {
             local: Duration::from_secs(2),
             youtube: Duration::from_secs(15),
             soundcloud: Duration::from_secs(15),
-            spotify: Duration::from_secs(10),
+            spotify: Duration::from_secs(120),
         }
     }
 }
@@ -600,7 +600,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registry_has_four_adapters_but_all_excludes_spotify() {
+    async fn registry_has_four_adapters_and_all_queries_spotify() {
         let pairs: Vec<_> = ProviderKind::all()
             .iter()
             .map(|provider| ready_adapter(*provider, 0, Vec::new()))
@@ -618,7 +618,7 @@ mod tests {
         assert_eq!(pairs[0].1.calls.load(Ordering::SeqCst), 1);
         assert_eq!(pairs[1].1.calls.load(Ordering::SeqCst), 1);
         assert_eq!(pairs[2].1.calls.load(Ordering::SeqCst), 1);
-        assert_eq!(pairs[3].1.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(pairs[3].1.calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -645,7 +645,8 @@ mod tests {
         let (local, _) = ready_adapter(ProviderKind::Local, 1, Vec::new());
         let (youtube, _) = ready_adapter(ProviderKind::Youtube, 60, Vec::new());
         let (soundcloud, _) = ready_adapter(ProviderKind::Soundcloud, 80, Vec::new());
-        let service = SearchService::new([local, youtube, soundcloud]);
+        let (spotify, _) = ready_adapter(ProviderKind::Spotify, 100, Vec::new());
+        let service = SearchService::new([local, youtube, soundcloud, spotify]);
         let (sink, events) = event_sink();
         let started = service
             .start_search(request(SearchLens::All), sink)
@@ -739,7 +740,8 @@ mod tests {
         let (local, _) = ready_adapter(ProviderKind::Local, 40, Vec::new());
         let (youtube, _) = ready_adapter(ProviderKind::Youtube, 40, Vec::new());
         let (soundcloud, _) = ready_adapter(ProviderKind::Soundcloud, 40, Vec::new());
-        let service = SearchService::new([local, youtube, soundcloud]);
+        let (spotify, _) = ready_adapter(ProviderKind::Spotify, 40, Vec::new());
+        let service = SearchService::new([local, youtube, soundcloud, spotify]);
         let (sink, events) = event_sink();
         let old = service
             .start_search(request(SearchLens::All), sink.clone())
@@ -751,7 +753,7 @@ mod tests {
         wait_for_completions(&events, 2).await;
 
         let old_sections = sections_for(&events, old.search_id);
-        assert_eq!(old_sections.len(), 3);
+        assert_eq!(old_sections.len(), 4);
         assert!(old_sections
             .iter()
             .all(|section| section.state == ProviderSearchState::Cancelled));
@@ -955,7 +957,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn spotify_is_only_queried_by_spotify_lens_with_gate() {
+    async fn spotify_is_queried_by_all_and_spotify_lenses() {
         let (local, _) = ready_adapter(ProviderKind::Local, 0, Vec::new());
         let (youtube, _) = ready_adapter(ProviderKind::Youtube, 0, Vec::new());
         let (soundcloud, _) = ready_adapter(ProviderKind::Soundcloud, 0, Vec::new());
@@ -984,13 +986,13 @@ mod tests {
             .start_search(request(SearchLens::All), sink.clone())
             .unwrap();
         wait_for_completions(&events, 1).await;
-        assert_eq!(spotify_spy.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(spotify_spy.calls.load(Ordering::SeqCst), 1);
 
         service
             .start_search(request(SearchLens::Spotify), sink)
             .unwrap();
         wait_for_completions(&events, 2).await;
-        assert_eq!(spotify_spy.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(spotify_spy.calls.load(Ordering::SeqCst), 2);
     }
 
     #[test]

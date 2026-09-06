@@ -10,7 +10,7 @@ import {
   getLyrics,
   searchLrclib,
 } from "../src/services/ipc";
-import { activeCueIndex } from "../src/hooks/useLyrics";
+import { activeCueIndex, activeWordIndex, cueEndMs, cueProgress } from "../src/hooks/useLyrics";
 import type { LyricsDocument, SourceId, TrackId } from "../src/types/domain";
 
 const trackId = "track-lyrics" as TrackId;
@@ -20,8 +20,8 @@ const document: LyricsDocument = {
   syncKind: "timed",
   plainText: "First synthetic line\nSecond synthetic line",
   cues: [
-    { startMs: 1_000, lines: ["First synthetic line"] },
-    { startMs: 2_500, lines: ["Second synthetic line"] },
+    { startMs: 1_000, lines: ["First synthetic line"], words: [{ startMs: 1_000, text: "First" }, { startMs: 1_450, text: "synthetic" }, { startMs: 1_900, text: "line" }] },
+    { startMs: 2_500, lines: ["Second synthetic line"], words: [] },
   ],
   instrumental: false,
   editable: false,
@@ -48,6 +48,16 @@ describe("lyrics IPC contracts", () => {
       currentSourceId: "source-lyrics",
     });
     expect(invokeMock.mock.calls[0][1]).not.toHaveProperty("path");
+  });
+
+  it("normalizes legacy line cues that do not include word timestamps", async () => {
+    enableNativeRuntime();
+    invokeMock.mockResolvedValue({
+      ...document,
+      cues: [{ startMs: 1_000, lines: ["Legacy line"] }],
+    });
+
+    await expect(getLyrics(trackId)).resolves.toMatchObject({ cues: [{ words: [] }] });
   });
 
   it("accepts only metadata-only LRCLIB candidates", async () => {
@@ -87,5 +97,12 @@ describe("client-side timed lyric synchronization", () => {
     expect(activeCueIndex(document.cues, 2_499)).toBe(0);
     expect(activeCueIndex(document.cues, 2_500)).toBe(1);
     expect(activeCueIndex(document.cues, 99_000)).toBe(1);
+  });
+
+  it("keeps word highlighting and cue progress tied to the same clock", () => {
+    expect(activeWordIndex(document.cues[0].words, 999)).toBe(-1);
+    expect(activeWordIndex(document.cues[0].words, 1_450)).toBe(1);
+    expect(cueEndMs(document.cues, 0, 10_000)).toBe(2_500);
+    expect(cueProgress(document.cues, 0, 1_750, 10_000)).toBe(0.5);
   });
 });

@@ -425,6 +425,7 @@ impl Default for DownloadToolStatus {
 pub struct MediaToolsSnapshot {
     pub yt_dlp: DownloadToolStatus,
     pub ffmpeg: DownloadToolStatus,
+    pub mpv: DownloadToolStatus,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -519,6 +520,19 @@ impl<'database> DownloadRepository<'database> {
             .optional()?
             .map(parse_download_row)
             .transpose()
+    }
+
+    pub fn clear_completed(&self, id: DownloadTaskId) -> Result<bool, DownloadRepositoryError> {
+        let connection = self.database.connection()?;
+        Ok(connection.execute(
+            "DELETE FROM downloads WHERE id = ?1 AND state = 'completed'",
+            params![id.to_string()],
+        )? > 0)
+    }
+
+    pub fn clear_all_completed(&self) -> Result<usize, DownloadRepositoryError> {
+        let connection = self.database.connection()?;
+        Ok(connection.execute("DELETE FROM downloads WHERE state = 'completed'", [])?)
     }
 
     pub fn list(&self) -> Result<Vec<DownloadTask>, DownloadRepositoryError> {
@@ -1030,5 +1044,26 @@ mod tests {
         assert_eq!(loaded.state, DownloadState::Queued);
         assert_eq!(loaded.downloaded_bytes, 0);
         assert_eq!(loaded.destination_directory, PathBuf::from("C:\\Downloads"));
+    }
+
+    #[test]
+    fn repository_clear_completed_keeps_other_task_states() {
+        let path = TempDatabasePath::new("download-clear-completed");
+        let database = Database::open(path.path()).unwrap();
+        let repository = DownloadRepository::new(&database);
+        let mut completed = DownloadTask::from_request(request(), PathBuf::from("C:\\Downloads"));
+        completed.transition(DownloadState::Resolving).unwrap();
+        completed.transition(DownloadState::Downloading).unwrap();
+        completed.transition(DownloadState::Postprocessing).unwrap();
+        completed.transition(DownloadState::Completed).unwrap();
+        let queued = DownloadTask::from_request(request(), PathBuf::from("C:\\Downloads"));
+
+        repository.insert(&completed).unwrap();
+        repository.insert(&queued).unwrap();
+
+        assert!(!repository.clear_completed(queued.id).unwrap());
+        assert_eq!(repository.clear_all_completed().unwrap(), 1);
+        assert!(repository.get(completed.id).unwrap().is_none());
+        assert!(repository.get(queued.id).unwrap().is_some());
     }
 }

@@ -5,7 +5,10 @@ import type { ReactNode } from "react";
 
 const useDownloadSnapshotMock = vi.hoisted(() => vi.fn());
 const cancelMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
+const clearOneMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
+const clearAllMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
 const retryMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
+const renameMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
 const concurrencyMutation = vi.hoisted(() => ({ isPending: false, mutateAsync: vi.fn() }));
 const isTauriRuntimeMock = vi.hoisted(() => vi.fn(() => true));
 const pickDownloadDirectoryMock = vi.hoisted(() => vi.fn());
@@ -16,7 +19,10 @@ vi.mock("../src/hooks/useDownloads", () => ({
   DOWNLOAD_SNAPSHOT_QUERY_KEY: ["download-snapshot"],
   useDownloadSnapshot: useDownloadSnapshotMock,
   useCancelDownload: () => cancelMutation,
+  useClearCompletedDownload: () => clearOneMutation,
+  useClearCompletedDownloads: () => clearAllMutation,
   useRetryDownload: () => retryMutation,
+  useRenameDownload: () => renameMutation,
   useSetDownloadConcurrency: () => concurrencyMutation,
 }));
 vi.mock("../src/services/ipc", () => ({
@@ -70,6 +76,7 @@ function snapshot() {
     tools: {
       ytDlp: { status: "ready", version: "2026.08.19", detail: null },
       ffmpeg: { status: "missing", version: null, detail: "Install FFmpeg for video downloads." },
+      mpv: { status: "ready", version: "0.41.0", detail: null },
     },
   };
 }
@@ -85,11 +92,15 @@ afterEach(() => {
   cleanup();
   useDownloadSnapshotMock.mockReset();
   cancelMutation.mutateAsync.mockReset();
+  clearOneMutation.mutateAsync.mockReset();
+  clearAllMutation.mutateAsync.mockReset();
   retryMutation.mutateAsync.mockReset();
+  renameMutation.mutateAsync.mockReset();
   concurrencyMutation.mutateAsync.mockReset();
   pickDownloadDirectoryMock.mockReset();
   setSettingMock.mockReset();
   openDownloadLocationMock.mockReset();
+  vi.restoreAllMocks();
   isTauriRuntimeMock.mockReturnValue(true);
 });
 
@@ -116,5 +127,18 @@ describe("DownloadsPage", () => {
     await waitFor(() => expect(setSettingMock).toHaveBeenCalledWith({ key: "downloadsDirectory", value: "D:\\SpotDIY Downloads" }));
     fireEvent.click(screen.getByRole("button", { name: /Open folder/ }));
     await waitFor(() => expect(openDownloadLocationMock).toHaveBeenCalledWith("download-1"));
+  });
+
+  it("clears one completed task or all completed tasks", async () => {
+    useDownloadSnapshotMock.mockReturnValue({ data: snapshot(), isLoading: false, isError: false, error: null, eventError: null });
+    clearOneMutation.mutateAsync.mockResolvedValueOnce(undefined);
+    clearAllMutation.mutateAsync.mockResolvedValueOnce(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<DownloadsPage />, { wrapper: createWrapper() });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear Fixture video" }));
+    await waitFor(() => expect(clearOneMutation.mutateAsync).toHaveBeenCalledWith("download-1"));
+    fireEvent.click(screen.getByRole("button", { name: "Clear all completed downloads" }));
+    await waitFor(() => expect(clearAllMutation.mutateAsync).toHaveBeenCalled());
   });
 });

@@ -8,15 +8,19 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
 use crate::db::repository::{SourceRepository, TrackRepository};
 use crate::db::APPLICATION_DATA_DIRECTORY;
 use crate::domain::{ProviderKind, SourceId, TrackId};
-use crate::media_tools::{FfmpegToolStatus, MediaToolHealth, MediaToolManager, YtDlpToolStatus};
+use crate::media_tools::{
+    FfmpegToolStatus, MediaToolHealth, MediaToolManager, MpvToolStatus, YtDlpToolStatus,
+};
 use crate::search::types::{SearchCancellation, SearchResult};
 use crate::settings::SettingsRepository;
+use crate::sources::spotify::{resolve_spotify_download_url, SpotifyDownloadError};
 use crate::sources::yt_dlp::{
     TokioYtDlpProcessRunner, YtDlpDownloadEvent, YtDlpDownloadProcessError, YtDlpDownloadRunner,
     YT_DLP_DOWNLOAD_EVENT_CHANNEL_CAPACITY,
@@ -42,6 +46,14 @@ const MAX_FILENAME_CHARS: usize = 180;
 
 pub type DownloadSnapshotSink = Arc<dyn Fn(DownloadSnapshot) + Send + Sync + 'static>;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DownloadDirectoryStatus {
+    Ready,
+    Missing,
+    Invalid,
+}
+
 #[derive(Debug, Error)]
 pub enum DownloadError {
     #[error("download persistence failed: {0}")]
@@ -63,14 +75,50 @@ pub enum DownloadError {
     },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadErrorDto {
+    pub code: DownloadErrorCode,
+    pub detail: String,
+}
+
 impl DownloadError {
     pub fn code(&self) -> DownloadErrorCode {
         match self {
             Self::Persistence(_) => DownloadErrorCode::PersistenceFailed,
-            Self::TaskNotFound(_) | Self::Invalid { .. } | Self::Transition(_) => {
-                DownloadErrorCode::InvalidRequest
-            }
+            Self::TaskNotFound(_) => DownloadErrorCode::SourceNotFound,
+            Self::Invalid { code, .. } => *code,
+            Self::Transition(_) => DownloadErrorCode::InvalidRequest,
             Self::Filesystem { .. } => DownloadErrorCode::FinalizationFailed,
+        }
+    }
+
+    fn public_detail(&self) -> String {
+        match self {
+            Self::Invalid { code, detail } => match code {
+                // Directory validation can include OS-provided paths or
+                // other filesystem diagnostics. Keep the structured code,
+                // but expose only the stable user-facing explanation.
+                DownloadErrorCode::DownloadDirectoryInvalid => {
+                    "the download folder is not usable".to_owned()
+                }
+                DownloadErrorCode::OutputInvalid => "the downloaded output is not valid".to_owned(),
+                DownloadErrorCode::FinalizationFailed => {
+                    "the downloaded output could not be finalized".to_owned()
+                }
+                _ => detail.clone(),
+            },
+            Self::TaskNotFound(_) => "the requested download task was not found".to_owned(),
+            Self::Persistence(_) => "download persistence failed".to_owned(),
+            Self::Transition(_) => "the download task could not change state".to_owned(),
+            Self::Filesystem { .. } => "download filesystem operation failed".to_owned(),
+        }
+    }
+
+    pub fn to_dto(&self) -> DownloadErrorDto {
+        DownloadErrorDto {
+            code: self.code(),
+            detail: self.public_detail(),
         }
     }
 }
@@ -182,6 +230,7 @@ impl DownloadService {
         mode: DownloadMode,
     ) -> Result<DownloadTask, DownloadError> {
         let provider = validate_download_provider(result.provider)?;
+        validate_download_mode(provider, mode)?;
         if result.entity_kind != crate::search::types::SearchEntityKind::Track {
             return Err(invalid(
                 DownloadErrorCode::InvalidRequest,
@@ -244,6 +293,7 @@ impl DownloadService {
             ));
         }
         let provider = validate_download_provider(source.provider_kind)?;
+        validate_download_mode(provider, mode)?;
         if !source.capabilities.downloads {
             return Err(invalid(
                 DownloadErrorCode::UnsupportedProvider,
@@ -333,6 +383,36 @@ impl DownloadService {
         Ok(task)
     }
 
+    pub fn clear_completed_download(&self, id: DownloadTaskId) -> Result<(), DownloadError> {
+        let task = self.task(id)?;
+        if task.state != DownloadState::Completed {
+            return Err(invalid(
+                DownloadErrorCode::InvalidRequest,
+                "only completed downloads can be cleared",
+            ));
+        }
+        let removed = DownloadRepository::new(&self.inner.database)
+            .clear_completed(id)
+            .map_err(|error| persistence_error(error.to_string()))?;
+        if !removed {
+            return Err(DownloadError::TaskNotFound(id));
+        }
+        self.clear_runtime_progress(id);
+        self.publish_snapshot();
+        Ok(())
+    }
+
+    pub fn clear_completed_downloads(&self) -> Result<(), DownloadError> {
+        // ponytail: clear task history only; keep completed files for offline use.
+        let removed = DownloadRepository::new(&self.inner.database)
+            .clear_all_completed()
+            .map_err(|error| persistence_error(error.to_string()))?;
+        if removed > 0 {
+            self.publish_snapshot();
+        }
+        Ok(())
+    }
+
     pub fn set_download_concurrency(
         &self,
         max_concurrent: u8,
@@ -374,6 +454,72 @@ impl DownloadService {
         let task = self.task(id)?;
         validate_download_directory(&task.destination_directory)
             .map_err(|error| invalid(DownloadErrorCode::DownloadDirectoryInvalid, &error))
+    }
+
+    pub fn rename_output(
+        &self,
+        id: DownloadTaskId,
+        requested_name: &str,
+    ) -> Result<DownloadTask, DownloadError> {
+        let mut task = self.task(id)?;
+        if task.state != DownloadState::Completed {
+            return Err(invalid(
+                DownloadErrorCode::InvalidRequest,
+                "only completed downloads can be renamed",
+            ));
+        }
+        let output = task.output_path.clone().ok_or_else(|| {
+            invalid(
+                DownloadErrorCode::OutputInvalid,
+                "the completed download has no recorded output",
+            )
+        })?;
+        let output = validate_final_output(&task.destination_directory, &output)
+            .map_err(|error| invalid(DownloadErrorCode::OutputInvalid, &error))?;
+        let target = renamed_output_path(&output, requested_name)
+            .map_err(|detail| invalid(DownloadErrorCode::InvalidRequest, &detail))?;
+        let target_exists = fs::symlink_metadata(&target).is_ok();
+        let target_is_current =
+            target_exists && fs::canonicalize(&target).ok() == fs::canonicalize(&output).ok();
+        if target_exists && !target_is_current {
+            return Err(invalid(
+                DownloadErrorCode::InvalidRequest,
+                "a file with that name already exists",
+            ));
+        }
+
+        if target_is_current {
+            let temporary = output
+                .parent()
+                .expect("a regular file always has a parent")
+                .join(format!(".spotdiy-rename-{}.tmp", uuid::Uuid::new_v4()));
+            fs::rename(&output, &temporary)
+                .map_err(|source| filesystem_error("rename downloaded output", source))?;
+            if let Err(source) = fs::rename(&temporary, &target) {
+                let _ = fs::rename(&temporary, &output);
+                return Err(filesystem_error("rename downloaded output", source));
+            }
+        } else {
+            fs::rename(&output, &target)
+                .map_err(|source| filesystem_error("rename downloaded output", source))?;
+        }
+
+        let renamed = match validate_final_output(&task.destination_directory, &target) {
+            Ok(path) => path,
+            Err(detail) => {
+                let _ = fs::rename(&target, &output);
+                return Err(invalid(DownloadErrorCode::OutputInvalid, &detail));
+            }
+        };
+        task.output_path = Some(renamed);
+        task.output_missing = false;
+        task.updated_at = chrono::Utc::now();
+        if let Err(error) = self.save_task(&task) {
+            let _ = fs::rename(&target, &output);
+            return Err(error);
+        }
+        self.publish_snapshot();
+        Ok(task)
     }
 
     pub fn shutdown(&self) -> Result<(), DownloadError> {
@@ -494,9 +640,6 @@ impl DownloadService {
     }
 
     fn schedule(&self) {
-        if tokio::runtime::Handle::try_current().is_err() {
-            return;
-        }
         loop {
             let task = match self.next_schedulable_task() {
                 Ok(Some(task)) => task,
@@ -528,7 +671,7 @@ impl DownloadService {
                 return;
             }
             let service = self.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 service.run_task(task, cancellation).await;
             });
         }
@@ -596,23 +739,31 @@ impl DownloadService {
                     .unwrap_or_else(|| "yt-dlp is unavailable".to_owned()),
             ));
         };
-        let ffmpeg = if task.mode == DownloadMode::Video {
-            let status = self.inner.media_tools.ffmpeg_status();
-            let Some(path) = ready_ffmpeg(&status) else {
-                return Err((
-                    tool_error_code(status.health_as_runtime_status()),
-                    status
-                        .detail
-                        .unwrap_or_else(|| "FFmpeg is unavailable for video merging".to_owned()),
-                ));
+        let ffmpeg =
+            if task.mode == DownloadMode::Video || task.provider_kind == ProviderKind::Spotify {
+                let status = self.inner.media_tools.ffmpeg_status();
+                let Some(path) = ready_ffmpeg(&status) else {
+                    return Err((
+                        tool_error_code(status.health_as_runtime_status()),
+                        status.detail.unwrap_or_else(|| {
+                            "FFmpeg is unavailable for video merging".to_owned()
+                        }),
+                    ));
+                };
+                Some(path)
+            } else {
+                None
             };
-            Some(path)
+        let source_url = if task.provider_kind == ProviderKind::Spotify {
+            resolve_spotify_download_url(&task.canonical_url, cancellation.clone())
+                .await
+                .map_err(spotify_resolution_error)?
         } else {
-            None
+            task.canonical_url.clone()
         };
         let task_root = create_owned_task_temp(&self.inner.task_temp_root, task.id)
             .map_err(|error| (DownloadErrorCode::FinalizationFailed, error.to_string()))?;
-        let args = build_download_args(task, &task_root, ffmpeg.as_deref());
+        let args = build_download_args_for_url(task, &task_root, ffmpeg.as_deref(), &source_url);
         self.transition_and_publish(task, DownloadState::Downloading)
             .map_err(|error| (error.code(), error.to_string()))?;
 
@@ -866,16 +1017,28 @@ fn default_task_temp_root() -> PathBuf {
 
 fn validate_download_provider(provider: ProviderKind) -> Result<ProviderKind, DownloadError> {
     match provider {
-        ProviderKind::Youtube | ProviderKind::Soundcloud => Ok(provider),
-        ProviderKind::Spotify => Err(invalid(
-            DownloadErrorCode::UnsupportedProvider,
-            "Spotify downloads are not supported",
-        )),
+        ProviderKind::Youtube | ProviderKind::Soundcloud | ProviderKind::Spotify => Ok(provider),
         ProviderKind::Local => Err(invalid(
             DownloadErrorCode::UnsupportedProvider,
             "local sources are not provider downloads",
         )),
     }
+}
+
+fn validate_download_mode(provider: ProviderKind, mode: DownloadMode) -> Result<(), DownloadError> {
+    if (provider == ProviderKind::Soundcloud || provider == ProviderKind::Spotify)
+        && mode == DownloadMode::Video
+    {
+        return Err(invalid(
+            DownloadErrorCode::InvalidRequest,
+            if provider == ProviderKind::Spotify {
+                "Spotify source matching supports audio downloads only"
+            } else {
+                "SoundCloud supports audio downloads only"
+            },
+        ));
+    }
+    Ok(())
 }
 
 fn non_empty(value: String, field: &'static str) -> Result<String, DownloadError> {
@@ -996,6 +1159,15 @@ pub fn build_download_args(
     task_root: &Path,
     ffmpeg: Option<&Path>,
 ) -> Vec<String> {
+    build_download_args_for_url(task, task_root, ffmpeg, &task.canonical_url)
+}
+
+fn build_download_args_for_url(
+    task: &DownloadTask,
+    task_root: &Path,
+    ffmpeg: Option<&Path>,
+    source_url: &str,
+) -> Vec<String> {
     let template = "download:SPOTDIY_PROGRESS\t%(progress.status)s\t%(progress.downloaded_bytes)s\t%(progress.total_bytes)s\t%(progress.total_bytes_estimate)s\t%(progress.speed)s\t%(progress.eta)s";
     let mut args = vec![
         "--no-config".to_owned(),
@@ -1014,7 +1186,22 @@ pub fn build_download_args(
         "--format".to_owned(),
     ];
     match task.mode {
-        DownloadMode::Audio => args.push("bestaudio/best".to_owned()),
+        DownloadMode::Audio => {
+            args.push("bestaudio/best".to_owned());
+            if task.provider_kind == ProviderKind::Spotify {
+                args.extend([
+                    "--extract-audio".to_owned(),
+                    "--audio-format".to_owned(),
+                    "mp3".to_owned(),
+                    "--audio-quality".to_owned(),
+                    "0".to_owned(),
+                    "--ffmpeg-location".to_owned(),
+                    ffmpeg
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                ]);
+            }
+        }
         DownloadMode::Video => {
             args.push("bv*+ba/b".to_owned());
             args.extend([
@@ -1027,7 +1214,10 @@ pub fn build_download_args(
             ]);
         }
     }
-    args.push(task.canonical_url.clone());
+    if ffmpeg.is_some() {
+        args.push("--embed-metadata".to_owned());
+    }
+    args.push(source_url.to_owned());
     args
 }
 
@@ -1139,14 +1329,11 @@ pub fn sanitize_filename_component(value: &str) -> String {
 pub fn final_filename_base(task: &DownloadTask) -> String {
     let artist = sanitize_filename_component(&task.artists.join(", "));
     let title = sanitize_filename_component(&task.title);
-    let provider_id = sanitize_filename_component(&task.provider_item_id);
-    let base = if !artist.is_empty() && !title.is_empty() {
-        format!(
-            "{artist} - {title} [{}-{provider_id}]",
-            task.provider_kind.as_str()
-        )
-    } else {
-        format!("{}-{provider_id}", task.provider_kind.as_str())
+    let base = match (artist.is_empty(), title.is_empty()) {
+        (false, false) => format!("{artist} - {title}"),
+        (true, false) => title,
+        (false, true) => artist,
+        (true, true) => format!("{}-item", task.provider_kind.as_str()),
     };
     let mut bounded = base.chars().take(MAX_FILENAME_CHARS).collect::<String>();
     bounded = bounded.trim_end_matches([' ', '.']).to_owned();
@@ -1176,6 +1363,36 @@ fn output_extension(path: &Path) -> Option<String> {
             .chars()
             .all(|character| character.is_ascii_alphanumeric()))
     .then_some(extension)
+}
+
+fn renamed_output_path(current_path: &Path, requested_name: &str) -> Result<PathBuf, String> {
+    let name = requested_name.trim();
+    if name.is_empty() || name == "." || name == ".." || name.chars().count() > MAX_FILENAME_CHARS {
+        return Err("use a shorter, non-empty file name".to_owned());
+    }
+    if name.chars().any(|character| {
+        character.is_control()
+            || matches!(
+                character,
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+            )
+    }) || name.ends_with([' ', '.'])
+    {
+        return Err("the name contains characters that are not valid for a file".to_owned());
+    }
+    let extension = output_extension(current_path)
+        .ok_or_else(|| "the output extension is invalid".to_owned())?;
+    let name = name
+        .rsplit_once('.')
+        .filter(|(_, supplied_extension)| supplied_extension.eq_ignore_ascii_case(&extension))
+        .map_or(name, |(stem, _)| stem);
+    if name.is_empty() || is_reserved_windows_name(name) {
+        return Err("that name is reserved or invalid on Windows".to_owned());
+    }
+    let parent = current_path
+        .parent()
+        .ok_or_else(|| "the output has no valid parent folder".to_owned())?;
+    Ok(parent.join(format!("{name}.{extension}")))
 }
 
 fn finalize_download_output(
@@ -1267,6 +1484,7 @@ fn tool_error_code(status: crate::search::types::ProviderRuntimeStatus) -> Downl
 pub fn media_tools_snapshot(media_tools: &MediaToolManager) -> MediaToolsSnapshot {
     let yt_dlp = media_tools.yt_dlp_status();
     let ffmpeg = media_tools.ffmpeg_status();
+    let mpv = media_tools.mpv_status();
     MediaToolsSnapshot {
         yt_dlp: DownloadToolStatus {
             status: yt_dlp.status,
@@ -1278,6 +1496,28 @@ pub fn media_tools_snapshot(media_tools: &MediaToolManager) -> MediaToolsSnapsho
             version: ffmpeg.version,
             detail: ffmpeg.detail,
         },
+        mpv: DownloadToolStatus {
+            status: mpv.health_as_runtime_status(),
+            version: mpv.version,
+            detail: mpv.detail,
+        },
+    }
+}
+
+pub fn download_directory_status(configured: Option<&Path>) -> DownloadDirectoryStatus {
+    let Some(path) = configured else {
+        return DownloadDirectoryStatus::Missing;
+    };
+    if !path.is_absolute() {
+        return DownloadDirectoryStatus::Invalid;
+    }
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            DownloadDirectoryStatus::Invalid
+        }
+        Ok(_) => DownloadDirectoryStatus::Ready,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => DownloadDirectoryStatus::Ready,
+        Err(_) => DownloadDirectoryStatus::Invalid,
     }
 }
 
@@ -1286,6 +1526,20 @@ trait FfmpegRuntimeStatus {
 }
 
 impl FfmpegRuntimeStatus for FfmpegToolStatus {
+    fn health_as_runtime_status(&self) -> crate::search::types::ProviderRuntimeStatus {
+        match self.health {
+            MediaToolHealth::Ready => crate::search::types::ProviderRuntimeStatus::Ready,
+            MediaToolHealth::Missing => crate::search::types::ProviderRuntimeStatus::Missing,
+            MediaToolHealth::Broken => crate::search::types::ProviderRuntimeStatus::Broken,
+        }
+    }
+}
+
+trait MpvRuntimeStatus {
+    fn health_as_runtime_status(&self) -> crate::search::types::ProviderRuntimeStatus;
+}
+
+impl MpvRuntimeStatus for MpvToolStatus {
     fn health_as_runtime_status(&self) -> crate::search::types::ProviderRuntimeStatus {
         match self.health {
             MediaToolHealth::Ready => crate::search::types::ProviderRuntimeStatus::Ready,
@@ -1310,9 +1564,41 @@ fn process_error(error: &YtDlpDownloadProcessError) -> (DownloadErrorCode, Strin
         | YtDlpDownloadProcessError::StderrLineTooLong => {
             (DownloadErrorCode::ProcessFailed, error.to_string())
         }
-        YtDlpDownloadProcessError::NonZeroExit { .. } => (
+        YtDlpDownloadProcessError::NonZeroExit { diagnostic, .. } => {
+            let diagnostic = diagnostic.trim();
+            (
+                DownloadErrorCode::ProcessFailed,
+                if diagnostic.is_empty() {
+                    "yt-dlp exited unsuccessfully".to_owned()
+                } else {
+                    format!("yt-dlp exited unsuccessfully: {diagnostic}")
+                },
+            )
+        }
+    }
+}
+
+fn spotify_resolution_error(error: SpotifyDownloadError) -> (DownloadErrorCode, String) {
+    match error {
+        SpotifyDownloadError::Cancelled => (
+            DownloadErrorCode::Cancelled,
+            "Spotify source matching was cancelled".to_owned(),
+        ),
+        SpotifyDownloadError::SpotDlUnavailable => (
+            DownloadErrorCode::ToolMissing,
+            "spotdl is not installed; install it to download Spotify results".to_owned(),
+        ),
+        SpotifyDownloadError::Timeout => (
             DownloadErrorCode::ProcessFailed,
-            "yt-dlp exited unsuccessfully".to_owned(),
+            "spotdl took too long to find a playable source".to_owned(),
+        ),
+        SpotifyDownloadError::InvalidSpotifyUrl => (
+            DownloadErrorCode::InvalidProviderUrl,
+            "the Spotify result URL is invalid".to_owned(),
+        ),
+        SpotifyDownloadError::Failed | SpotifyDownloadError::InvalidResponse => (
+            DownloadErrorCode::ProcessFailed,
+            "spotdl could not find a playable source for this Spotify result".to_owned(),
         ),
     }
 }
@@ -1556,6 +1842,33 @@ mod tests {
     }
 
     #[test]
+    fn spotify_audio_argv_extracts_mp3_with_ffmpeg() {
+        let mut task = task();
+        task.provider_kind = ProviderKind::Spotify;
+        task.canonical_url = safe_url("https://open.spotify.com/track/spotify-id")
+            .as_url()
+            .as_str()
+            .to_owned();
+        let args = build_download_args(
+            &task,
+            Path::new(r"C:\owned\task"),
+            Some(Path::new(r"C:\tools\ffmpeg.exe")),
+        );
+        assert!(args.contains(&"--extract-audio".to_owned()));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--audio-format", "mp3"]));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--audio-quality", "0"]));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--ffmpeg-location", r"C:\tools\ffmpeg.exe"]));
+        assert!(args.contains(&"--embed-metadata".to_owned()));
+        assert_eq!(args.last(), Some(&task.canonical_url));
+    }
+
+    #[test]
     fn video_argv_requires_ffmpeg_and_uses_mkv_without_reencoding() {
         let mut task = task();
         task.mode = DownloadMode::Video;
@@ -1571,6 +1884,7 @@ mod tests {
             .windows(2)
             .any(|window| window == ["--ffmpeg-location", r"C:\tools\ffmpeg.exe"]));
         assert!(args.contains(&"bv*+ba/b".to_owned()));
+        assert!(args.contains(&"--embed-metadata".to_owned()));
     }
 
     #[test]
@@ -1579,9 +1893,24 @@ mod tests {
         let base = final_filename_base(&task);
         assert!(!base.contains(':'));
         assert!(!base.contains('?'));
+        assert!(!base.contains("[youtube-"));
+        assert!(!base.contains("id_with_bad"));
         assert!(base.contains("_"));
         assert!(sanitize_filename_component("CON") != "CON");
         assert!(sanitize_filename_component("name... ").ends_with("name"));
+    }
+
+    #[test]
+    fn final_filename_keeps_source_title_without_provider_identity_suffix() {
+        let mut task = task();
+        task.provider_item_id = "q-1FuU37zvA".to_owned();
+        task.title = "Original source title".to_owned();
+        task.artists = vec!["Original artist".to_owned()];
+
+        assert_eq!(
+            final_filename_base(&task),
+            "Original artist - Original source title"
+        );
     }
 
     #[test]
@@ -1640,9 +1969,35 @@ mod tests {
     }
 
     #[test]
-    fn spotify_and_local_queue_requests_are_rejected() {
-        assert!(validate_download_provider(ProviderKind::Spotify).is_err());
+    fn spotify_audio_queue_is_allowed_but_local_downloads_are_rejected() {
+        assert_eq!(
+            validate_download_provider(ProviderKind::Spotify).unwrap(),
+            ProviderKind::Spotify
+        );
+        assert!(validate_download_mode(ProviderKind::Spotify, DownloadMode::Audio).is_ok());
+        assert!(validate_download_mode(ProviderKind::Spotify, DownloadMode::Video).is_err());
         assert!(validate_download_provider(ProviderKind::Local).is_err());
+    }
+
+    #[test]
+    fn soundcloud_video_is_rejected_with_a_structured_safe_error() {
+        let error = validate_download_mode(ProviderKind::Soundcloud, DownloadMode::Video)
+            .expect_err("SoundCloud must remain audio-only");
+        let dto = error.to_dto();
+        assert_eq!(dto.code, DownloadErrorCode::InvalidRequest);
+        assert_eq!(dto.detail, "SoundCloud supports audio downloads only");
+    }
+
+    #[test]
+    fn filesystem_details_are_redacted_at_the_download_ipc_boundary() {
+        let error = invalid(
+            DownloadErrorCode::DownloadDirectoryInvalid,
+            "the download directory could not be created: C:\\Users\\secret\\Downloads",
+        );
+        let dto = error.to_dto();
+        assert_eq!(dto.code, DownloadErrorCode::DownloadDirectoryInvalid);
+        assert_eq!(dto.detail, "the download folder is not usable");
+        assert!(!dto.detail.contains("secret"));
     }
 
     #[test]
@@ -1819,7 +2174,7 @@ mod tests {
     }
 
     #[test]
-    fn queue_rejects_spotify_and_non_track_results_without_creating_tasks() {
+    fn queue_allows_spotify_audio_and_rejects_non_track_results() {
         let database_path = TempDatabasePath::new("download-service-rejections");
         let database = Database::open(database_path.path()).unwrap();
         let destination = tempfile::tempdir().unwrap();
@@ -1831,22 +2186,16 @@ mod tests {
             None,
         )
         .unwrap();
-        let error = service
+        let spotify_task = service
             .queue_search_result_download(search_result(ProviderKind::Spotify), DownloadMode::Audio)
-            .unwrap_err();
-        assert!(matches!(
-            error,
-            DownloadError::Invalid {
-                code: DownloadErrorCode::UnsupportedProvider,
-                ..
-            }
-        ));
+            .unwrap();
+        assert_eq!(spotify_task.provider_kind, ProviderKind::Spotify);
         let mut artist = search_result(ProviderKind::Youtube);
         artist.entity_kind = SearchEntityKind::Artist;
         assert!(service
             .queue_search_result_download(artist, DownloadMode::Audio)
             .is_err());
-        assert!(service.snapshot().unwrap().tasks.is_empty());
+        assert_eq!(service.snapshot().unwrap().tasks.len(), 1);
     }
 
     #[test]

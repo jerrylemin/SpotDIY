@@ -8,7 +8,13 @@ Rust uses UUID-backed `TrackId`, `ArtistId`, `AlbumId`, and `SourceId` newtypes.
 
 `TrackSource` carries source URI, duration, `VersionInfo`, availability detail, `SourceCapabilities`, and optional `LocalFileSource` metadata. Version qualifiers include standard, studio, live, acoustic, remix, remaster, cover, instrumental, karaoke, sped-up, slowed, and unknown. Multiple artists are relationally ordered and retain a role field in SQLite.
 
-Capabilities are explicit data rather than UI provider-name logic. Spotify catalog sources are metadata-only: playback, download, lyrics, and lyrics-metadata capabilities are rejected by Rust and SQLite. Preferred-source ownership is checked by the repository and database triggers.
+Capabilities are explicit data rather than UI provider-name logic. Persisted
+Spotify catalog sources are metadata-only: playback, download, lyrics, and
+lyrics-metadata capabilities are rejected by Rust and SQLite. A transient
+Spotify search result may advertise audio download capability because the
+download worker source-matches it through `spotdl`; it never becomes a
+playback source or a persisted catalog row. Preferred-source ownership is
+checked by the repository and database triggers.
 
 See [ADR-0003](ADRs/ADR-0003-unified-source-model.md) and [ADR-0006](ADRs/ADR-0006-provider-source-identity.md). Source Fusion scoring and provider adapters remain later-plan work.
 
