@@ -194,71 +194,13 @@ impl SpotThemeDefinition {
             }
         }
 
-        for (foreground_name, background_name, minimum) in [
-            ("text", "background", 4.5),
-            ("text", "surface", 4.5),
-            ("textMuted", "background", 4.5),
-            ("textMuted", "surface", 4.5),
-            ("accent", "accentContrast", 4.5),
-            ("accent", "background", 3.0),
-            ("accent", "surface", 3.0),
-        ] {
-            let foreground = theme_token(&self.tokens, foreground_name);
-            let background = theme_token(&self.tokens, background_name);
-            let ratio = contrast_ratio(foreground, background);
-            if ratio < minimum {
-                return Err(SettingsError::InvalidValue {
-                    key: "custom_theme",
-                    reason: format!(
-                        "{foreground_name}/{background_name} contrast is {ratio:.2}:1; minimum is {minimum:.1}:1"
-                    ),
-                });
-            }
-        }
-
         Ok(())
-    }
-}
-
-fn theme_token<'tokens>(tokens: &'tokens SpotThemeTokens, name: &str) -> &'tokens str {
-    match name {
-        "background" => &tokens.background,
-        "surface" => &tokens.surface,
-        "text" => &tokens.text,
-        "textMuted" => &tokens.text_muted,
-        "accent" => &tokens.accent,
-        "accentContrast" => &tokens.accent_contrast,
-        _ => unreachable!("theme contrast token is declared in the validation table"),
     }
 }
 
 fn is_hex_color(value: &str) -> bool {
     let bytes = value.as_bytes();
     bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(u8::is_ascii_hexdigit)
-}
-
-fn relative_luminance(value: &str) -> f64 {
-    let channels = [
-        u8::from_str_radix(&value[1..3], 16).expect("validated color"),
-        u8::from_str_radix(&value[3..5], 16).expect("validated color"),
-        u8::from_str_radix(&value[5..7], 16).expect("validated color"),
-    ]
-    .map(|channel| {
-        let normalized = f64::from(channel) / 255.0;
-        if normalized <= 0.04045 {
-            normalized / 12.92
-        } else {
-            ((normalized + 0.055) / 1.055).powf(2.4)
-        }
-    });
-    channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
-}
-
-fn contrast_ratio(foreground: &str, background: &str) -> f64 {
-    let foreground_luminance = relative_luminance(foreground);
-    let background_luminance = relative_luminance(background);
-    (foreground_luminance.max(background_luminance) + 0.05)
-        / (foreground_luminance.min(background_luminance) + 0.05)
 }
 
 #[derive(Debug, Error)]
@@ -1156,7 +1098,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_theme_validation_rejects_schema_colors_unknown_tokens_and_contrast() {
+    fn custom_theme_validation_rejects_schema_and_color_shape_but_allows_low_contrast() {
         let mut malformed = valid_theme(ThemeBaseMode::Dark);
         malformed.schema_version = 2;
         assert!(matches!(
@@ -1180,13 +1122,7 @@ mod tests {
         let mut low_contrast = valid_theme(ThemeBaseMode::Dark);
         low_contrast.tokens.text = "#111111".to_owned();
         low_contrast.tokens.text_muted = "#121212".to_owned();
-        assert!(matches!(
-            low_contrast.validate(),
-            Err(SettingsError::InvalidValue {
-                key: "custom_theme",
-                ..
-            })
-        ));
+        assert!(low_contrast.validate().is_ok());
 
         let unknown_token = r##"{
           "schemaVersion": 1,

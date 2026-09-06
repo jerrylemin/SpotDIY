@@ -89,7 +89,7 @@ export function CommandPalette() {
     { id: "analytics", label: "Open analytics", hint: "Review local listening history and patterns", icon: "analytics", path: "/analytics" },
     { id: "music-map", label: "Open Music Map", hint: "Explore genre, artist, album, and track relationships", icon: "spark", path: "/music-map" },
     { id: "library-galaxy", label: "Open Library Galaxy", hint: "Plot your local library in a bounded Canvas workspace", icon: "expand", path: "/library-galaxy" },
-    { id: "theme-studio", label: "Open Theme Studio", hint: "Draft themes and preview your workspace", icon: "theme", path: "/theme-studio" },
+    { id: "theme-studio", label: "Open Theme Studio", hint: "Set and save workspace colors", icon: "theme", path: "/theme-studio" },
     { id: "settings", label: "Open settings", hint: "Storage, sources, and appearance", icon: "settings", path: "/settings" },
     {
       id: "private-session",
@@ -117,7 +117,7 @@ export function CommandPalette() {
     {
       id: "inspect-current",
       label: "Inspect current track",
-      hint: playback.snapshot.currentTrackId ? "Open persisted metadata, sources, and collection state" : "Nothing is currently selected",
+      hint: playback.snapshot.currentTrackId ? "Open persisted metadata, sources, and track state" : "Nothing is currently selected",
       icon: "info",
       disabled: playback.snapshot.currentTrackId === null,
       action: () => {

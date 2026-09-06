@@ -77,8 +77,7 @@ describe("BackupSection", () => {
       includeArtworkCache: false,
       includeSidecarLyrics: false,
     });
-    fireEvent.click(screen.getByRole("button", { name: /prepare portable mode/i }));
-    expect(state.switchMode).toHaveBeenCalledWith("portable");
+    expect(screen.queryByRole("button", { name: /prepare portable mode/i })).not.toBeInTheDocument();
   });
 
   it("requires an explicit confirmation for a staged import", () => {

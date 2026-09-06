@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ContextActionMenu, type ContextAction } from "../../components/common/ContextActionMenu";
 import { RadialMenu } from "../../components/radial-menu/RadialMenu";
 import { SpotIcon } from "../../components/icons/SpotIcon";
-import { cancelPreview, getTrackInspector, isTauriRuntime, revealLocalFile, addTrackToInbox } from "../../services/ipc";
+import { cancelPreview, getTrackInspector, isTauriRuntime, revealLocalFile } from "../../services/ipc";
 import { usePlayback } from "../../hooks/usePlayback";
 import { usePreview } from "../../hooks/usePreview";
 import { useUiStore } from "../../stores/ui-store";
@@ -51,7 +51,6 @@ export function VisualTrackActions({ onActionError, track }: VisualTrackActionsP
       { id: "play", label: "Play Now", onSelect: () => { void run(() => playback.playNow(track.trackId, null), "Could not start playback."); }, disabled: !canPlayback, disabledReason: playbackReason },
       { id: "play-next", label: "Play Next", onSelect: () => { void run(() => playback.playNext(track.trackId, null), "Could not queue the track to play next."); }, disabled: !canPlayback, disabledReason: playbackReason },
       { id: "queue", label: "Add to Queue", onSelect: () => { void run(() => playback.addToQueue(track.trackId, null), "Could not add the track to the queue."); }, disabled: !canPlayback, disabledReason: playbackReason },
-      { id: "inbox", label: "Add to Inbox", onSelect: () => { void run(() => addTrackToInbox(track.trackId).then(() => undefined), "Could not add the track to Inbox."); }, disabled: !isTauriRuntime(), disabledReason: "Inbox actions require the native app." },
       { id: "inspect", label: "Inspect", onSelect: () => useUiStore.getState().openTrackInspector(track.trackId) },
       { id: "lyrics", label: "Open Lyrics", onSelect: () => navigate({ to: "/lyrics" }) },
       { id: "reveal", label: "Reveal Local File", onSelect: () => { void run(async () => {
@@ -90,7 +89,7 @@ export function VisualTrackActions({ onActionError, track }: VisualTrackActionsP
           <button className="button button-primary button-small" disabled={actions[0].disabled} onClick={actions[0].onSelect} title={actions[0].disabled ? actions[0].disabledReason : undefined} type="button"><SpotIcon name="play" size={13} /> Play</button>
           <button className="button button-quiet button-small" disabled={actions[1].disabled} onClick={actions[1].onSelect} type="button">Next</button>
           <button className="button button-quiet button-small" disabled={actions[2].disabled} onClick={actions[2].onSelect} type="button">Queue</button>
-          <button className="button button-quiet button-small" disabled={actions[7].disabled} onClick={actions[7].onSelect} title={actions[7].disabled ? actions[7].disabledReason : undefined} type="button">{actions[7].label}</button>
+          <button className="button button-quiet button-small" disabled={actions[6].disabled} onClick={actions[6].onSelect} title={actions[6].disabled ? actions[6].disabledReason : undefined} type="button">{actions[6].label}</button>
           <button aria-label="Open radial actions" className="icon-button visual-radial-trigger" onClick={(event) => { returnFocusRef.current = event.currentTarget; const rect = event.currentTarget.getBoundingClientRect(); setRadial({ left: rect.left, top: rect.bottom }); }} ref={openerRef} type="button"><SpotIcon name="spark" size={15} /></button>
         </div>
         {previewRunning ? <span aria-live="polite" className="visual-preview-status" role="status">Preview playing · 8 second local sample</span> : preview.state.data?.phase === "failed" && preview.state.data.trackId === track.trackId ? <span aria-live="polite" className="visual-preview-status visual-preview-status-error" role="status">{preview.state.data.error ?? "Preview failed."}</span> : null}

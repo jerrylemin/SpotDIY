@@ -7,7 +7,6 @@ import { VisualTrackActions } from "../features/visual-exploration/VisualTrackAc
 import { buildMusicMapGraph, musicMapLayerPosition, type MusicMapNode } from "../features/music-map/layout";
 import { useVisualLibraryDataset } from "../hooks/useVisualLibraryDataset";
 import { usePlayback } from "../hooks/usePlayback";
-import { addTrackToInbox } from "../services/ipc";
 import { useUiStore } from "../stores/ui-store";
 import type { VisualDatasetRequest, VisualTrackPoint } from "../types/domain";
 
@@ -24,7 +23,6 @@ export function MusicMapPage() {
   const [query, setQuery] = useState("");
   const [genre, setGenre] = useState("");
   const [artist, setArtist] = useState("");
-  const [likedOnly, setLikedOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
   const request = {
@@ -32,7 +30,7 @@ export function MusicMapPage() {
     query: query.trim() || null,
     genre: genre || null,
     artist: artist || null,
-    likedOnly,
+    likedOnly: false,
   };
   const dataset = useVisualLibraryDataset(request);
   const tracks = dataset.data?.tracks ?? EMPTY_TRACKS;
@@ -70,20 +68,19 @@ export function MusicMapPage() {
   return (
     <div className="page-stack visual-page music-map-page">
       <section className="page-intro">
-        <div><span className="eyebrow">EXPLORE / MUSIC MAP</span><h1>See the <em>connections.</em></h1><p>Genres, artists, albums, and tracks are linked from your indexed local collection.</p></div>
+        <div><span className="eyebrow">EXPLORE / MUSIC MAP</span><h1>See the <em>connections.</em></h1><p>One track can connect to its artist, album, and genres. Click a node to inspect that relationship.</p></div>
         <div className="page-intro-stat"><strong>{dataset.data?.returnedTracks ?? tracks.length}</strong><span>tracks in view</span></div>
       </section>
       <section aria-label="Music Map filters" className="visual-toolbar">
         <label><span>Search</span><input onChange={(event) => setQuery(event.target.value)} placeholder="Title, artist, album…" value={query} /></label>
         <label><span>Genre</span><select onChange={(event) => setGenre(event.target.value)} value={genre}><option value="">All genres</option>{genres.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
         <label><span>Artist</span><select onChange={(event) => setArtist(event.target.value)} value={artist}><option value="">All artists</option>{artists.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-        <button aria-pressed={likedOnly} className={`button button-small ${likedOnly ? "button-primary" : "button-quiet"}`} onClick={() => setLikedOnly((value) => !value)} type="button">Liked only</button>
         <div className="visual-view-actions"><button className="button button-quiet button-small" onClick={() => setView((current) => ({ ...current, scale: Math.min(2.5, current.scale + 0.15) }))} type="button">＋</button><button className="button button-quiet button-small" onClick={() => setView((current) => ({ ...current, scale: Math.max(0.45, current.scale - 0.15) }))} type="button">−</button><button className="button button-quiet button-small" onClick={reset} type="button">Reset view</button></div>
       </section>
       {dataset.data?.truncated ? <div className="library-alert" role="status"><SpotIcon name="info" size={15} /><span>Showing {dataset.data.returnedTracks} of {dataset.data.totalTracks} tracks. Use filters to narrow the visualization.</span></div> : null}
       <section className="visual-workspace music-map-workspace">
         <div className="visual-canvas-panel">
-          <div className="visual-panel-heading"><div><span className="eyebrow">RELATIONAL GRAPH</span><h2>Music Map</h2></div><span className="section-note">{graph.nodes.length} nodes · {graph.edges.length} edges</span></div>
+          <div className="visual-panel-heading"><div><span className="eyebrow">RELATIONAL GRAPH</span><h2>Artists, albums, genres</h2></div><span className="section-note">{graph.nodes.length} nodes · {graph.edges.length} links</span></div>
           <svg aria-label="Music Map graph" className="music-map-svg" onPointerMove={move} role="group" viewBox="0 0 1000 700">
             <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
               {graph.edges.map((edge) => {
@@ -103,7 +100,7 @@ export function MusicMapPage() {
         <aside aria-label="Map Navigator" className="visual-navigator">
           <div className="visual-panel-heading"><div><span className="eyebrow">KEYBOARD FALLBACK</span><h2>Map Navigator</h2></div><span className="section-note">{Math.min(200, graph.nodes.length)} shown</span></div>
           <div className="visual-node-list">{graph.nodes.slice(0, 200).map((node) => <button className={`visual-node-list-item${selectedId === node.id ? " visual-node-list-item-selected" : ""}`} key={node.id} onClick={() => selectNode(node)} type="button"><span className={`visual-node-kind visual-node-kind-${node.kind}`}>{node.kind}</span><strong>{node.label}</strong></button>)}</div>
-          {selectedTrack ? <div className="visual-selected-panel"><span className="eyebrow">SELECTED TRACK</span><h3>{trackLabel(selectedTrack)}</h3><button className="button button-quiet button-small" onClick={() => openInspector(selectedTrack.trackId)} type="button"><SpotIcon name="info" size={13} /> Inspect</button><VisualTrackActions track={selectedTrack} /><TrackActionDragPanel disabled={playback.pending} onInbox={() => { void addTrackToInbox(selectedTrack.trackId); }} onPlayNext={() => void playback.playNext(selectedTrack.trackId, null)} onQueue={() => void playback.addToQueue(selectedTrack.trackId, null)} playbackAllowed={selectedTrack.canPlayback} trackId={selectedTrack.trackId} /></div> : <p className="visual-helper">Select a track node to reveal actions and inspection.</p>}
+          {selectedTrack ? <div className="visual-selected-panel"><span className="eyebrow">SELECTED TRACK</span><h3>{trackLabel(selectedTrack)}</h3><button className="button button-quiet button-small" onClick={() => openInspector(selectedTrack.trackId)} type="button"><SpotIcon name="info" size={13} /> Inspect</button><VisualTrackActions track={selectedTrack} /><TrackActionDragPanel disabled={playback.pending} onPlayNext={() => void playback.playNext(selectedTrack.trackId, null)} onQueue={() => void playback.addToQueue(selectedTrack.trackId, null)} playbackAllowed={selectedTrack.canPlayback} trackId={selectedTrack.trackId} /></div> : <p className="visual-helper">Select a track node to inspect it or send it to the next position in the queue.</p>}
         </aside>
       </section>
     </div>

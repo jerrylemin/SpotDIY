@@ -33,7 +33,7 @@ describe("capability-aware search actions", () => {
     expect(actions.find((action) => action.id === "download")).toMatchObject({ enabled: true });
   });
 
-  it("keeps Spotify playback external and enables native source-matched audio downloads", () => {
+  it("enables Spotify source-matched playback and native audio downloads", () => {
     const spotify = { ...baseResult, provider: "spotify" as const, canonicalUrl: "https://open.spotify.com/track/1" };
     expect(downloadModesForResult(spotify)).toEqual(["audio"]);
     const actions = deriveSearchResultActions(spotify, {
@@ -47,7 +47,7 @@ describe("capability-aware search actions", () => {
         downloadDirectoryStatus: "ready",
       },
     });
-    expect(actions.find((action) => action.id === "play")?.reason).toBe("Spotify results are not playable online; open Spotify to listen.");
+    expect(actions.find((action) => action.id === "play")).toMatchObject({ enabled: true, reason: undefined });
     expect(actions.find((action) => action.id === "download")).toMatchObject({ enabled: true, downloadModes: ["audio"] });
   });
 

@@ -9,10 +9,12 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: openMock }));
 import {
   IpcError,
   addLibraryFolders,
+  deleteLocalFile,
   getLibraryPage,
   parseScanProgress,
   pickLibraryFolders,
 } from "../src/services/ipc";
+import type { SourceId } from "../src/types/domain";
 
 function enableNativeRuntime() {
   Object.defineProperty(window, "__TAURI_INTERNALS__", {
@@ -67,6 +69,14 @@ describe("library dialog IPC", () => {
         folderId: null,
       }),
     ).rejects.toBeInstanceOf(IpcError);
+  });
+
+  it("deletes a local file through native IPC", async () => {
+    enableNativeRuntime();
+    invokeMock.mockResolvedValueOnce(undefined);
+
+    await expect(deleteLocalFile("source-id" as SourceId)).resolves.toBeUndefined();
+    expect(invokeMock).toHaveBeenCalledWith("delete_local_file", { sourceId: "source-id" });
   });
 });
 

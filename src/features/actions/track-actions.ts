@@ -113,17 +113,18 @@ function onlinePlaybackReason(
   result: SearchResult,
   options: SearchResultActionOptions,
 ): string | undefined {
-  if (result.provider === "spotify") {
-    return "Spotify results are not playable online; open Spotify to listen.";
-  }
   if (result.canonicalUrl === null) {
     return "No validated provider URL is available";
   }
   if (!options.nativeRuntime) {
     return "Online playback requires the native SpotDIY desktop runtime";
   }
-  const status = options.downloadReadiness?.mpvStatus;
-  return status === "ready" ? undefined : runtimeToolReason("MPV", status ?? "unknown");
+  const mpvReason = runtimeToolReason("MPV", options.downloadReadiness?.mpvStatus ?? "unknown");
+  if (mpvReason) return mpvReason;
+  if (result.provider === "spotify") {
+    return runtimeToolReason("spotdl", options.downloadReadiness?.spotifyStatus ?? "unknown");
+  }
+  return undefined;
 }
 
 export function deriveSearchResultActions(result: SearchResult, options: SearchResultActionOptions): SearchResultAction[] {

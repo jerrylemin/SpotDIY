@@ -3,6 +3,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
+use chrono::Utc;
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -1242,7 +1244,49 @@ fn restore_audio(
     let Some(destination_root) = destination_root else {
         return Ok(());
     };
-    for mapping in descriptor.manifest.media_mappings.clone() {
+    let mappings = descriptor.manifest.media_mappings.clone();
+    if mappings.is_empty() {
+        return Ok(());
+    }
+    let normalized_destination = normalize_folder_path(destination_root)
+        .map_err(|error| ImportError::InvalidMusicDestination(error.to_string()))?;
+    let destination_folder_id = {
+        let connection = database.connection()?;
+        let existing: Option<String> = connection
+            .query_row(
+                "SELECT id FROM library_folders WHERE normalized_path_key = ?1",
+                [normalized_destination.normalized_path_key.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| ImportError::Database(DatabaseError::Query(error)))?;
+        if let Some(existing) = existing {
+            existing
+        } else {
+            let id = Uuid::new_v4().to_string();
+            let now = Utc::now().to_rfc3339();
+            connection
+                .execute(
+                    "INSERT INTO library_folders (
+                        id, path, normalized_path_key, enabled, scan_status, scan_generation,
+                        created_at, updated_at
+                     ) VALUES (?1, ?2, ?3, 1, 'idle', 0, ?4, ?4)",
+                    rusqlite::params![
+                        id,
+                        normalized_destination
+                            .display_path
+                            .to_string_lossy()
+                            .to_string(),
+                        normalized_destination.normalized_path_key,
+                        now,
+                    ],
+                )
+                .map_err(|error| ImportError::Database(DatabaseError::Query(error)))?;
+            id
+        }
+    };
+
+    for mapping in mappings {
         let source_id = Uuid::parse_str(&mapping.source_id).map_err(|_| {
             ImportError::Restore(format!("invalid source ID {}", mapping.source_id))
         })?;
@@ -1288,12 +1332,23 @@ fn restore_audio(
         let (display_path, normalized_path_key) = normalize_file_path(&audio_destination)
             .map_err(|error| ImportError::InvalidMusicDestination(error.to_string()))?;
         let connection = database.connection()?;
+        let previous_folder_id: Option<String> = connection
+            .query_row(
+                "SELECT library_folder_id FROM local_files WHERE source_id = ?1",
+                [source_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| ImportError::Database(DatabaseError::Query(error)))?;
         let changed = connection
             .execute(
-                "UPDATE local_files SET path = ?1, normalized_path_key = ?2 WHERE source_id = ?3",
+                "UPDATE local_files
+                 SET path = ?1, normalized_path_key = ?2, library_folder_id = ?3
+                 WHERE source_id = ?4",
                 rusqlite::params![
                     display_path.to_string_lossy().to_string(),
                     normalized_path_key,
+                    destination_folder_id.as_str(),
                     source_id.to_string()
                 ],
             )
@@ -1302,6 +1357,18 @@ fn restore_audio(
             return Err(ImportError::Restore(format!(
                 "staged database has no local file for source {source_id}"
             )));
+        }
+        if let Some(previous_folder_id) = previous_folder_id {
+            connection
+                .execute(
+                    "DELETE FROM library_folders
+                     WHERE id = ?1
+                       AND NOT EXISTS (
+                           SELECT 1 FROM local_files WHERE library_folder_id = library_folders.id
+                       )",
+                    [previous_folder_id],
+                )
+                .map_err(|error| ImportError::Database(DatabaseError::Query(error)))?;
         }
     }
     Ok(())
@@ -2437,12 +2504,12 @@ mod tests {
         assert!(report.rollback_path.is_some());
 
         let restored = Database::open(&layout.database_path).unwrap();
-        let restored_path: String = restored
+        let (restored_path, restored_folder_id): (String, String) = restored
             .with_connection(|connection| {
                 connection.query_row(
-                    "SELECT path FROM local_files WHERE source_id = ?1",
+                    "SELECT path, library_folder_id FROM local_files WHERE source_id = ?1",
                     [source_id.to_string()],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
             })
             .unwrap();
@@ -2463,6 +2530,29 @@ mod tests {
             fs::read(restored_path.with_extension("lrc")).unwrap(),
             b"[00:00.00] fixture\n"
         );
+        let restored_folder_path: String = restored
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT path FROM library_folders WHERE id = ?1",
+                    [restored_folder_id.clone()],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            fs::canonicalize(restored_folder_path).unwrap(),
+            fs::canonicalize(&restore_root).unwrap()
+        );
+        let old_folder_count: i64 = restored
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT COUNT(*) FROM library_folders WHERE id = ?1",
+                    [folder_id.to_string()],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(old_folder_count, 0);
         assert!(!layout.restore_root.join(PENDING_RESTORE_FILE_NAME).exists());
     }
 

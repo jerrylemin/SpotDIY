@@ -25,7 +25,9 @@ impl Default for ProviderTimeouts {
             local: Duration::from_secs(2),
             youtube: Duration::from_secs(15),
             soundcloud: Duration::from_secs(15),
-            spotify: Duration::from_secs(120),
+            // spotdl owns a 30s process deadline; keep the search service
+            // close behind it so one slow Spotify request cannot hold the UI.
+            spotify: Duration::from_secs(35),
         }
     }
 }
@@ -622,7 +624,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn artists_and_albums_query_local_only() {
+    async fn artist_queries_use_all_track_providers_but_albums_stay_local() {
         for lens in [SearchLens::Artists, SearchLens::Albums] {
             let (local, local_spy) = ready_adapter(ProviderKind::Local, 0, Vec::new());
             let (youtube, youtube_spy) = ready_adapter(ProviderKind::Youtube, 0, Vec::new());
@@ -635,8 +637,17 @@ mod tests {
             wait_for_completions(&events, 1).await;
 
             assert_eq!(local_spy.calls.load(Ordering::SeqCst), 1, "{lens:?}");
-            assert_eq!(youtube_spy.calls.load(Ordering::SeqCst), 0, "{lens:?}");
-            assert_eq!(soundcloud_spy.calls.load(Ordering::SeqCst), 0, "{lens:?}");
+            let expected_online_calls = if lens == SearchLens::Artists { 1 } else { 0 };
+            assert_eq!(
+                youtube_spy.calls.load(Ordering::SeqCst),
+                expected_online_calls,
+                "{lens:?}"
+            );
+            assert_eq!(
+                soundcloud_spy.calls.load(Ordering::SeqCst),
+                expected_online_calls,
+                "{lens:?}"
+            );
         }
     }
 

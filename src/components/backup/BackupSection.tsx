@@ -20,21 +20,9 @@ function modeLabel(mode: StorageMode | undefined): string {
 export function BackupSection() {
   const backup = useBackup();
   const [options, setOptions] = useState(initialOptions);
-  const [modeMessage, setModeMessage] = useState<string | null>(null);
 
   async function exportBackup() {
     await backup.exportBackup(options);
-  }
-
-  async function switchMode() {
-    const target: StorageMode = backup.storage?.mode === "portable" ? "standard" : "portable";
-    setModeMessage(null);
-    try {
-      await backup.switchMode(target);
-      setModeMessage(`${modeLabel(target)} mode is prepared. Restart SpotDIY to activate it.`);
-    } catch {
-      // The hook exposes the actionable native error.
-    }
   }
 
   return (
@@ -48,8 +36,7 @@ export function BackupSection() {
           <span><small>Database</small><code>{backup.storage?.databasePath ?? "Loading…"}</code></span>
           <span><small>Cache</small><code>{backup.storage?.cacheRoot ?? "Loading…"}</code></span>
         </div>
-        <div className="backup-mode-actions"><Button disabled={backup.busy || backup.loading} onClick={() => { void switchMode(); }} size="sm" type="button" variant="quiet">Prepare {backup.storage?.mode === "portable" ? "Standard" : "Portable"} Mode</Button><span>Database is copied safely; the mode marker changes last. Restart is explicit.</span></div>
-        {modeMessage ? <p className="settings-muted-note">{modeMessage}</p> : null}
+        <p className="settings-muted-note">Export the archive from this installation. During import, included audio is restored into the app-managed Music folder in Portable mode, or into one music folder you choose in Standard mode.</p>
       </div>
       <div className="backup-storage-card">
         <div className="backup-card-heading"><div><strong>SpotDIY backup archive</strong><span>Deterministic .spotdiy ZIP · metadata first</span></div><SpotIcon name="download" size={18} /></div>

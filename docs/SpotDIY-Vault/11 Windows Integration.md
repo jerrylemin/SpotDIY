@@ -23,18 +23,25 @@ asset protocol is enabled only for the application artwork cache under
 `%LOCALAPPDATA%\SpotDIY\cache\artwork`; selected music roots are outside its
 scope.
 
+`delete_local_file` accepts only a typed source ID and repeats the same managed
+folder, canonical-path, regular-file, and containment checks before deleting
+the file. After a successful deletion it marks the local row missing and the
+source unavailable while preserving track metadata and collection identity.
+
 ## Plan 04 playback process
 
 Playback uses one external `mpv.exe` child per `PlaybackService`, discovered by
 `SPOTDIY_MPV_PATH` and then PATH. SpotDIY creates a fresh random Windows named
 pipe and starts mpv with `--no-config --idle=yes --terminal=no
---input-terminal=no --audio-display=no --input-ipc-server=<fresh pipe>`. The
-pipe is backend-only; the webview never sees the executable, pipe, request
-IDs, local audio paths, or raw JSON. Frames are bounded and the child is
-monitored for disconnect/exit; shutdown attempts quit and then bounded
-kill/reap. Discovery uses a bounded `mpv.exe --no-config --version` probe with
-finite process and output budgets; timeout cleanup targets only that probe
-child.
+--input-terminal=no --no-video --audio-display=no
+--input-ipc-server=<fresh pipe>`. The pipe is backend-only; the webview never
+sees the executable, pipe, request IDs, local audio paths, or raw JSON. For
+YouTube/SoundCloud, yt-dlp resolves a direct `bestaudio` URL before mpv is
+loaded, so mpv never receives the provider page URL or a video stream. Frames
+are bounded and the child is monitored for disconnect/exit; shutdown attempts
+quit and then bounded kill/reap. Discovery uses a bounded `mpv.exe
+--no-config --version` probe with finite process and output budgets; timeout
+cleanup targets only that probe child.
 
 The packaged playback smoke uses a temporary profile and the smoke-only
 `SPOTDIY_PACKAGED_DATA_ROOT` environment variable. This is necessary because

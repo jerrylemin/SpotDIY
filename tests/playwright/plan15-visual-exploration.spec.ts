@@ -45,9 +45,9 @@ test("Plan 15 visual routes work at the targeted ultrawide viewport", async ({ p
   await expect(page.getByRole("heading", { name: "Make a place to listen." })).toBeVisible();
   await expect(page.getByText("Schema v1 · 15 tokens", { exact: true })).toBeVisible();
   await expect(page.locator(".theme-token-field")).toHaveCount(15);
-  await page.getByRole("button", { name: "Preview on App", exact: true }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "custom");
-  await page.getByRole("button", { name: "Stop App Preview", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Preview on App", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Stop App Preview", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save & Activate", exact: true })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.getByRole("button", { name: /Dense/ }).click();
   await expect(page.locator("html")).toHaveAttribute("data-layout", "dense");

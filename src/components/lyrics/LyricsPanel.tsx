@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { activeCueIndex, activeWordIndex, cueProgress } from "../../hooks/useLyrics";
 import type { LyricsDocument } from "../../types/domain";
@@ -25,21 +25,31 @@ export function LyricsPanel({ document, durationMs = null, lyricOffsetMs = 0, po
     ? activeWordIndex(document.cues[activeIndex].words ?? [], effectivePositionMs)
     : -1;
   const cueRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [following, setFollowing] = useState(true);
+
+  useEffect(() => { setFollowing(true); }, [document.trackId, document.source]);
 
   useEffect(() => {
-    if (activeIndex < 0) {
+    if (activeIndex < 0 || !following) {
       return;
     }
     const activeCue = cueRefs.current[activeIndex];
     if (!activeCue || typeof window === "undefined") {
       return;
     }
-    if (typeof activeCue.scrollIntoView !== "function") {
+    const viewport = viewportRef.current;
+    if (!viewport || typeof viewport.scrollTo !== "function") {
       return;
     }
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    activeCue.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
-  }, [activeIndex, document.source, document.trackId]);
+    // Scroll only the lyric viewport, never the page or the player shell.
+    viewport.scrollTo({
+      top: viewport.scrollTop + activeCue.getBoundingClientRect().top - viewport.getBoundingClientRect().top
+        - viewport.clientHeight * 0.42 + activeCue.clientHeight / 2,
+      behavior: reducedMotion ? "auto" : "smooth",
+    });
+  }, [activeIndex, document.cues, document.source, document.trackId, following]);
 
   if (document.syncKind === "instrumental") {
     return <div className="lyrics-instrumental">Instrumental track · no lyric text is available.</div>;
@@ -50,7 +60,12 @@ export function LyricsPanel({ document, durationMs = null, lyricOffsetMs = 0, po
   }
 
   return (
-    <div aria-label="Timed lyrics" className="lyrics-cue-list">
+    <div className="lyrics-stage">
+    <div aria-label="Timed lyrics" className="lyrics-cue-list" ref={viewportRef}
+      onWheel={() => setFollowing(false)} onTouchMove={() => setFollowing(false)}
+      onKeyDown={(event) => {
+        if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End"].includes(event.key)) setFollowing(false);
+      }}>
       {document.cues.map((cue, index) => {
         const active = index === activeIndex;
         const words = cue.words ?? [];
@@ -58,9 +73,9 @@ export function LyricsPanel({ document, durationMs = null, lyricOffsetMs = 0, po
         return (
           <button
             aria-current={active ? "true" : undefined}
-            className={`lyrics-cue${active ? " lyrics-cue-active" : ""}`}
+            className={`lyrics-cue${active ? " lyrics-cue-active" : index < activeIndex ? " lyrics-cue-past" : " lyrics-cue-upcoming"}`}
             key={`${cue.startMs}-${index}`}
-            onClick={() => onSeek(Math.max(0, cue.startMs - lyricOffsetMs))}
+            onClick={() => { setFollowing(true); onSeek(Math.max(0, cue.startMs - lyricOffsetMs)); }}
             ref={(element) => { cueRefs.current[index] = element; }}
             type="button"
           >
@@ -78,6 +93,8 @@ export function LyricsPanel({ document, durationMs = null, lyricOffsetMs = 0, po
           </button>
         );
       })}
+    </div>
+    {!following && <button className="lyrics-resume" onClick={() => setFollowing(true)} type="button">Back to current line ↓</button>}
     </div>
   );
 }

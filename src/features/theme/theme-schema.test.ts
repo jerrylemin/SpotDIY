@@ -13,7 +13,7 @@ describe("SpotDIY theme definition", () => {
     expect(parseThemeDefinition(LIGHT_THEME)).toEqual(LIGHT_THEME);
   });
 
-  it("rejects an unsupported schema version, malformed color, unknown token, and low contrast", () => {
+  it("rejects an unsupported schema version and malformed shape while allowing low contrast", () => {
     expect(() => parseThemeDefinition({ ...DARK_THEME, schemaVersion: 2 })).toThrow(/schemaVersion/);
     expect(() => parseThemeDefinition({
       ...DARK_THEME,
@@ -26,7 +26,7 @@ describe("SpotDIY theme definition", () => {
     expect(() => parseThemeDefinition({
       ...DARK_THEME,
       tokens: { ...DARK_THEME.tokens, text: "#111111", textMuted: "#121212" },
-    })).toThrow(/contrast/);
+    })).not.toThrow();
   });
 
   it("trims the name and round trips validated JSON", () => {

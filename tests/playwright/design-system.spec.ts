@@ -81,8 +81,8 @@ test.describe("design system browser contract", () => {
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify(invalidTheme)),
     });
-    await expect(page.getByRole("alert").filter({ hasText: "Theme validation failed" })).toBeVisible();
-    await expect(root).toHaveAttribute("data-theme", "dark");
+    await expect(page.getByRole("alert").filter({ hasText: "Theme validation failed" })).toHaveCount(0);
+    await expect(root).toHaveAttribute("data-theme", "custom");
 
     await importInput.setInputFiles({
       name: "aurora.json",

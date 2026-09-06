@@ -74,7 +74,7 @@ describe("advanced visual exploration pure contracts", () => {
   it("maps only completed valid drops to mutations", () => {
     expect(resolveVisualDrop("track-1", "play-next")).toEqual({ trackId: "track-1", action: "play-next" });
     expect(resolveVisualDrop("track-1", "queue")).toEqual({ trackId: "track-1", action: "queue" });
-    expect(resolveVisualDrop("track-1", "inbox")).toEqual({ trackId: "track-1", action: "inbox" });
+    expect(resolveVisualDrop("track-1", "inbox")).toBeNull();
     expect(resolveVisualDrop("track-1", null)).toBeNull();
   });
 

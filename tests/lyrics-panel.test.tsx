@@ -1,8 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LyricsPanel } from "../src/components/lyrics/LyricsPanel";
 import type { LyricsDocument, TrackId } from "../src/types/domain";
+
+afterEach(cleanup);
 
 const lyrics: LyricsDocument = {
   trackId: "track-panel" as TrackId,
@@ -26,6 +28,20 @@ const lyrics: LyricsDocument = {
 };
 
 describe("LyricsPanel", () => {
+  it("pauses follow on manual scrolling and resumes without scrolling the page", () => {
+    const scrollTo = vi.fn();
+    const { container, rerender } = render(<LyricsPanel document={lyrics} onSeek={vi.fn()} positionMs={1_000} />);
+    const viewport = screen.getByLabelText("Timed lyrics");
+    Object.defineProperty(viewport, "scrollTo", { value: scrollTo, configurable: true });
+    fireEvent.wheel(viewport);
+    rerender(<LyricsPanel document={lyrics} onSeek={vi.fn()} positionMs={2_100} />);
+    expect(scrollTo).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Back to current line ↓" }));
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".lyrics-cue-past")).toHaveTextContent("hello");
+    expect(screen.queryByRole("button", { name: "Back to current line ↓" })).not.toBeInTheDocument();
+  });
+
   it("highlights the active word, renders cue progress, and seeks from a cue click", () => {
     const onSeek = vi.fn();
     const { container } = render(<LyricsPanel document={lyrics} durationMs={5_000} onSeek={onSeek} positionMs={1_750} />);

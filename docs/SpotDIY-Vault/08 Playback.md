@@ -79,11 +79,13 @@ when available, playback-capable, and successfully resolved through
 `wavpack`, `ape`) rank ahead of lossy sources, followed by bit depth, sample
 rate, bitrate, and stable `SourceId`.
 
-YouTube and SoundCloud return `ProviderPlaybackNotImplemented`; Spotify
-returns `MetadataOnly`. No online URL is sent to mpv and yt-dlp is not invoked
-for playback. `PlaybackSourceOption` carries `availabilityDetail` so the
-existing source selector/player surface can explain unavailable sources
-without a UI redesign.
+Validated YouTube and SoundCloud sources are playable when their provider URL
+and native yt-dlp runtime are available; Spotify returns `MetadataOnly`.
+Playback resolves the provider page once with bounded yt-dlp using
+`--format bestaudio --get-url --no-playlist`, then sends only the validated
+direct audio stream URL to mpv. `PlaybackSourceOption` carries
+`availabilityDetail` so the existing source selector/player surface can
+explain unavailable sources without a UI redesign.
 
 ## Plan 08 persistent queue delivery
 
@@ -130,10 +132,12 @@ in-shell footer; Expanded Now Playing adds larger artwork, source context,
 quality/provenance facts, queue/Lyrics shortcuts, and Track Inspector access.
 
 `SourceSwitcher` displays every snapshot source and disables unavailable or
-non-playback options with their availability detail. Online playback remains
-unimplemented, Spotify remains metadata-only, and Plan 11 does not resolve
-online media URLs or add native overlays/global media controls. Mode changes
-are presentation-only and do not autoplay, seek, switch sources, or mutate the
+non-playback options with their availability detail. Persisted Spotify sources
+remain metadata-only. A transient Spotify search result is source-matched
+through public embed metadata and bounded yt-dlp title/artist/duration checks;
+the validated YouTube URL then follows the normal online playback path. Plan
+11 does not add native overlays/global media controls. Mode changes are
+presentation-only and do not autoplay, seek, switch sources, or mutate the
 persistent queue. Plan 12 adds the separate Windows integration boundary
 without changing this playback ownership.
 
@@ -195,14 +199,17 @@ failures do not start retry or file-loaded recovery cycles, while genuine
 backend crashes/disconnects retain recovery behavior. Local real-MPV and
 packaged playback/search smokes pass.
 
-## Current online playback boundary — 2026-09-04
+## Current online playback boundary — 2026-09-06
 
 Validated YouTube and SoundCloud sources are playable through the same MPV
 backend as local files. The resolver accepts only HTTPS URLs on the provider
-allowlist, the backend accepts only those remote targets, and MPV receives the
-configured yt-dlp directory through its child environment. Search-result
-playback first persists the validated source, which makes queue/restart
-behavior deterministic; Spotify remains metadata-only.
+allowlist, the backend resolves each provider page with the bounded native
+yt-dlp runner using `--format bestaudio --get-url --no-playlist`, and MPV
+receives only the returned direct audio URL with `--no-video`. The provider
+page never reaches MPV, so online playback does not create a video surface or
+select a video stream. Search-result playback first persists the validated
+YouTube source, which makes queue/restart behavior deterministic; the original
+Spotify catalog source remains metadata-only.
 
 ## Timed lyric presentation boundary — 2026-09-04
 

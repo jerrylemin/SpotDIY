@@ -22,13 +22,13 @@ pub fn all_provider_kinds_for_lens(lens: SearchLens) -> &'static [ProviderKind] 
         SearchLens::Soundcloud => SOUNDCLOUD,
         SearchLens::Spotify => SPOTIFY,
         SearchLens::All | SearchLens::Tracks | SearchLens::Playlists => TRACK_PROVIDERS,
-        SearchLens::Artists | SearchLens::Albums => LOCAL,
+        SearchLens::Artists => TRACK_PROVIDERS,
+        SearchLens::Albums => LOCAL,
     }
 }
 
 pub fn entities_for_lens(lens: SearchLens) -> &'static [SearchEntityKind] {
     const TRACKS: &[SearchEntityKind] = &[SearchEntityKind::Track];
-    const ARTISTS: &[SearchEntityKind] = &[SearchEntityKind::Artist];
     const ALBUMS: &[SearchEntityKind] = &[SearchEntityKind::Album];
     const PLAYLISTS: &[SearchEntityKind] = &[SearchEntityKind::Playlist];
     const ALL: &[SearchEntityKind] = &[
@@ -46,7 +46,9 @@ pub fn entities_for_lens(lens: SearchLens) -> &'static [SearchEntityKind] {
             SearchEntityKind::Artist,
             SearchEntityKind::Album,
         ],
-        SearchLens::Artists => ARTISTS,
+        // The UI presents artist search as a way to find tracks by an artist.
+        // Provider adapters can then use their normal track result shape.
+        SearchLens::Artists => TRACKS,
         SearchLens::Albums => ALBUMS,
         SearchLens::Playlists => PLAYLISTS,
         SearchLens::All => ALL,
@@ -171,10 +173,20 @@ mod tests {
     }
 
     #[test]
-    fn artists_and_albums_lenses_use_local_only() {
-        for lens in [SearchLens::Artists, SearchLens::Albums] {
-            assert_eq!(all_provider_kinds_for_lens(lens), &[ProviderKind::Local]);
-        }
+    fn artist_lens_uses_all_track_providers_and_albums_stay_local() {
+        assert_eq!(
+            all_provider_kinds_for_lens(SearchLens::Artists),
+            &[
+                ProviderKind::Local,
+                ProviderKind::Youtube,
+                ProviderKind::Soundcloud,
+                ProviderKind::Spotify,
+            ]
+        );
+        assert_eq!(
+            all_provider_kinds_for_lens(SearchLens::Albums),
+            &[ProviderKind::Local]
+        );
     }
 
     #[test]

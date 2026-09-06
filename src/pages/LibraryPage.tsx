@@ -12,6 +12,7 @@ import {
 } from "../services/ipc";
 import {
   useAddLibraryFolders,
+  useDeleteLocalFile,
   useLibraryPage,
   useLibraryProgress,
   useLibraryStatus,
@@ -28,12 +29,28 @@ import type {
   LibrarySort,
   LibraryTrack,
   Playlist,
-  Tag,
-  TrackCollectionState,
 } from "../types/domain";
 
 const PAGE_SIZE = 50;
 const EMPTY_FOLDERS: LibraryFolder[] = [];
+const PINNED_LIBRARY_TRACKS_KEY = "spotdiy.library.pinnedTracks";
+
+function readPinnedTracks(): Set<string> {
+  try {
+    const value = JSON.parse(localStorage.getItem(PINNED_LIBRARY_TRACKS_KEY) ?? "[]") as unknown;
+    return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writePinnedTracks(value: Set<string>): void {
+  try {
+    localStorage.setItem(PINNED_LIBRARY_TRACKS_KEY, JSON.stringify([...value]));
+  } catch {
+    // Pinning is still useful for the current session when storage is unavailable.
+  }
+}
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof IpcError && error.message) {
@@ -65,10 +82,9 @@ export function LibraryPage() {
   const [descending, setDescending] = useState(false);
   const [pageNumber, setPageNumber] = useState(0);
   const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
-  const [collectionStates, setCollectionStates] = useState<Record<string, TrackCollectionState>>({});
-  const [collectionPlaylists, setCollectionPlaylists] = useState<Playlist[]>([]);
-  const [collectionTags, setCollectionTags] = useState<Tag[]>([]);
-  const [collectionPendingTrackId, setCollectionPendingTrackId] = useState<string | null>(null);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [playlistPendingTrackId, setPlaylistPendingTrackId] = useState<string | null>(null);
+  const [pinnedTrackIds, setPinnedTrackIds] = useState<Set<string>>(readPinnedTracks);
 
   const folders = status.data?.folders ?? EMPTY_FOLDERS;
   const request = {
@@ -85,6 +101,7 @@ export function LibraryPage() {
   const rescanAll = useRescanAllLibraryFolders();
   const revealFile = useRevealLocalFile();
   const renameFile = useRenameLocalFile();
+  const deleteFile = useDeleteLocalFile();
 
   useEffect(() => {
     if (folderFilter && !folders.some((folder) => folder.id === folderFilter)) {
@@ -97,14 +114,19 @@ export function LibraryPage() {
     setPageNumber(0);
   }, [descending, folderFilter, sort]);
 
-  const busy = addFolders.isPending || removeFolder.isPending || rescanFolder.isPending || rescanAll.isPending || renameFile.isPending;
+  const busy = addFolders.isPending || removeFolder.isPending || rescanFolder.isPending || rescanAll.isPending || renameFile.isPending || deleteFile.isPending;
   const scanActive = status.data?.isScanning || progress?.status === "queued" || progress?.status === "scanning";
   const pageData = libraryPage.data;
-  const pageHasItems = Boolean(pageData && pageData.items.length > 0);
+  const pageItems = pageData
+    ? pageData.items
+      .filter((track) => track.indexStatus !== "missing")
+      .sort((left, right) => Number(pinnedTrackIds.has(right.trackId)) - Number(pinnedTrackIds.has(left.trackId)))
+    : [];
+  const pageHasItems = pageItems.length > 0;
   const pageHasNoItems = pageData?.total === 0;
-  const pageIsEmpty = pageData !== undefined && pageData.total > 0 && pageData.items.length === 0;
+  const pageIsEmpty = pageData !== undefined && pageData.total > 0 && pageItems.length === 0;
   const hasIssues = folders.some((folder) => folder.status === "failed" || Boolean(folder.lastScanError))
-    || Boolean(pageData?.items.some((track) => track.indexStatus === "error" || !track.available));
+    || Boolean(pageData?.items.some((track) => track.indexStatus === "error"));
   const visibleActionError = actionErrorMessage ?? actionError(
     addFolders.error,
     removeFolder.error,
@@ -112,43 +134,34 @@ export function LibraryPage() {
     rescanAll.error,
     revealFile.error,
     renameFile.error,
+    deleteFile.error,
   );
   const playbackEnabled = nativeRuntime || e2ePlaybackPreview;
   const playbackErrorMessage = playback.bridgeError ?? playback.snapshot.error?.summary ?? null;
 
   useEffect(() => {
-    const items = pageData?.items ?? [];
-    if (!nativeRuntime || items.length === 0) {
-      setCollectionStates({});
-      setCollectionPlaylists([]);
-      setCollectionTags([]);
+    if (!nativeRuntime) {
+      setPlaylists([]);
       return;
     }
     let active = true;
-    const trackIds = items.map((track) => track.trackId);
-    const stateRequest = hasIpcExport("getTrackCollectionStates")
-      ? ipc.getTrackCollectionStates(trackIds)
-      : Promise.resolve([] as TrackCollectionState[]);
     const playlistRequest = hasIpcExport("listPlaylists") ? ipc.listPlaylists() : Promise.resolve([] as Playlist[]);
-    const tagRequest = hasIpcExport("listTags") ? ipc.listTags() : Promise.resolve([] as Tag[]);
-    void Promise.all([stateRequest, playlistRequest, tagRequest])
-      .then(([states, playlists, tags]) => {
+    void playlistRequest
+      .then((nextPlaylists) => {
         if (!active) {
           return;
         }
-        setCollectionStates(Object.fromEntries(states.map((state) => [state.trackId, state])));
-        setCollectionPlaylists(playlists.filter((playlist) => playlist.kind !== "inbox" && playlist.branchStatus !== "merged"));
-        setCollectionTags(tags);
+        setPlaylists(nextPlaylists.filter((playlist) => playlist.kind === "normal"));
       })
-      .catch((collectionError) => {
+      .catch((playlistError) => {
         if (active) {
-          setActionErrorMessage(errorMessage(collectionError, "SpotDIY could not read collection state."));
+          setActionErrorMessage(errorMessage(playlistError, "SpotDIY could not read playlists."));
         }
       });
     return () => {
       active = false;
     };
-  }, [nativeRuntime, pageData]);
+  }, [nativeRuntime, pageData?.items.length]);
 
   const addFolder = async () => {
     if (!nativeRuntime || busy) {
@@ -196,73 +209,37 @@ export function LibraryPage() {
     renameFile.mutate({ sourceId: track.sourceId, name });
   };
 
-  const refreshCollectionState = async (track: LibraryTrack) => {
-    if (!hasIpcExport("getTrackCollectionStates")) {
+  const deleteTrack = (track: LibraryTrack) => {
+    if (!nativeRuntime || deleteFile.isPending) {
       return;
     }
-    const states = await ipc.getTrackCollectionStates([track.trackId]);
-    const next = states[0];
-    if (next) {
-      setCollectionStates((current) => ({ ...current, [track.trackId]: next }));
+    const confirmed = window.confirm(`Delete “${track.title}” from its local folder? This permanently deletes the file.`);
+    if (!confirmed) {
+      return;
     }
-  };
-
-  const runCollectionAction = async (track: LibraryTrack, action: () => Promise<unknown>, fallback: string) => {
     setActionErrorMessage(null);
-    setCollectionPendingTrackId(track.trackId);
-    try {
-      await action();
-      await refreshCollectionState(track);
-    } catch (collectionError) {
-      setActionErrorMessage(errorMessage(collectionError, fallback));
-    } finally {
-      setCollectionPendingTrackId(null);
-    }
+    deleteFile.mutate(track.sourceId);
   };
 
-  const toggleLike = (track: LibraryTrack) => {
-    const liked = collectionStates[track.trackId]?.liked ?? false;
-    if (!hasIpcExport("setTrackLiked")) {
-      return;
-    }
-    void runCollectionAction(track, () => ipc.setTrackLiked(track.trackId, !liked), "SpotDIY could not update that like.");
-  };
-
-  const updateRating = (track: LibraryTrack, rating: number | null) => {
-    if (!hasIpcExport("setTrackRating")) {
-      return;
-    }
-    void runCollectionAction(track, () => ipc.setTrackRating(track.trackId, rating), "SpotDIY could not update that rating.");
-  };
-
-  const addToInbox = (track: LibraryTrack) => {
-    if (!hasIpcExport("addTrackToInbox")) {
-      return;
-    }
-    void runCollectionAction(track, () => ipc.addTrackToInbox(track.trackId), "SpotDIY could not add that track to the Inbox.");
+  const togglePin = (track: LibraryTrack) => {
+    setPinnedTrackIds((current) => {
+      const next = new Set(current);
+      if (next.has(track.trackId)) next.delete(track.trackId);
+      else next.add(track.trackId);
+      writePinnedTracks(next);
+      return next;
+    });
   };
 
   const addToPlaylist = (track: LibraryTrack, playlistId: Playlist["id"]) => {
     if (!hasIpcExport("addPlaylistItem")) {
       return;
     }
-    void runCollectionAction(track, () => ipc.addPlaylistItem(playlistId, track.trackId, track.sourceId), "SpotDIY could not add that track to the playlist.");
-  };
-
-  const tagTrack = (track: LibraryTrack, tag: Tag | null, requestedName?: string) => {
-    if (!hasIpcExport("addTrackTag")) {
-      return;
-    }
-    void runCollectionAction(track, async () => {
-      let selectedTag = tag;
-      if (!selectedTag && requestedName && hasIpcExport("createTag")) {
-        selectedTag = await ipc.createTag(requestedName);
-        setCollectionTags((current) => [...current, selectedTag!]);
-      }
-      if (selectedTag) {
-        await ipc.addTrackTag(track.trackId, selectedTag.id);
-      }
-    }, "SpotDIY could not apply that tag.");
+    setActionErrorMessage(null);
+    setPlaylistPendingTrackId(track.trackId);
+    void ipc.addPlaylistItem(playlistId, track.trackId, track.sourceId)
+      .catch((playlistError) => setActionErrorMessage(errorMessage(playlistError, "SpotDIY could not add that track to the playlist.")))
+      .finally(() => setPlaylistPendingTrackId(null));
   };
 
   const addFolderButton = (label: string) => (
@@ -366,7 +343,7 @@ export function LibraryPage() {
           {hasIssues ? (
             <div className="library-alert library-alert-warning" role="status">
               <SpotIcon name="alert" size={16} />
-              <span>Some files or folders need attention. They remain visible with their measured status and error details.</span>
+              <span>Some files or folders need attention. Their measured status and error details are shown here.</span>
             </div>
           ) : null}
 
@@ -374,7 +351,7 @@ export function LibraryPage() {
             <div className="section-heading library-track-heading">
               <div>
                 <span className="eyebrow">INDEXED TRACKS</span>
-                <h2 id="indexed-tracks-heading">Your local collection</h2>
+                <h2 id="indexed-tracks-heading">Your local library</h2>
               </div>
               <span className="section-note">
                 {nativeRuntime
@@ -428,11 +405,13 @@ export function LibraryPage() {
             ) : pageHasItems ? (
               <>
                 <div className="library-track-list">
-                  {pageData?.items.map((track) => (
+                  {pageItems.map((track) => (
                     <LibraryTrackRow
                       current={playback.snapshot.currentTrackId === track.trackId}
+                      deletePending={deleteFile.isPending}
                       key={track.sourceId}
                       onAddToQueue={(row) => { void playback.addToQueue(row.trackId, row.sourceId); }}
+                      onDelete={deleteTrack}
                       onPlayNext={(row) => { void playback.playNext(row.trackId, row.sourceId); }}
                       onPlayNow={(row) => { void playback.playNow(row.trackId, row.sourceId); }}
                       onReveal={reveal}
@@ -441,22 +420,18 @@ export function LibraryPage() {
                       playbackPending={playback.pending}
                       revealPending={revealFile.isPending}
                       track={track}
-                      collectionPending={collectionPendingTrackId === track.trackId}
-                      collectionPlaylists={collectionPlaylists}
-                      collectionState={collectionStates[track.trackId]}
-                      collectionTags={collectionTags}
-                      onInbox={addToInbox}
-                      onLike={toggleLike}
+                      pinned={pinnedTrackIds.has(track.trackId)}
+                      playlists={playlists}
+                      playlistPending={playlistPendingTrackId === track.trackId}
+                      onPin={togglePin}
                       onPlaylist={addToPlaylist}
-                      onRating={updateRating}
-                      onTag={tagTrack}
                     />
                   ))}
                 </div>
                 {libraryPage.isFetching ? <span className="library-refreshing" role="status">Updating library results…</span> : null}
               </>
             ) : pageIsEmpty ? (
-              <EmptyState icon="library" eyebrow="EMPTY PAGE" title="This library page is empty" description="The collection changed while this page was open. Go back one page or refresh the library." action={<button aria-label="Previous page" className="button button-quiet icon-only-button" disabled={pageNumber === 0} onClick={() => setPageNumber((value) => Math.max(0, value - 1))} title="Previous page" type="button"><SpotIcon name="previous" size={14} /></button>} />
+              <EmptyState icon="library" eyebrow="EMPTY PAGE" title="This library page is empty" description="The library changed while this page was open. Go back one page or refresh the library." action={<button aria-label="Previous page" className="button button-quiet icon-only-button" disabled={pageNumber === 0} onClick={() => setPageNumber((value) => Math.max(0, value - 1))} title="Previous page" type="button"><SpotIcon name="previous" size={14} /></button>} />
             ) : pageHasNoItems && scanActive ? (
               <EmptyState icon="spark" eyebrow="SCAN IN PROGRESS" title="Your tracks are being indexed" description="SpotDIY will keep the folder status and scan progress visible while it reads supported files." />
             ) : (
@@ -465,7 +440,7 @@ export function LibraryPage() {
 
             {pageData && pageData.total > 0 ? (
               <div className="library-pagination">
-                <span>Showing {pageData.items.length === 0 ? 0 : pageNumber * PAGE_SIZE + 1}–{Math.min((pageNumber * PAGE_SIZE) + pageData.items.length, pageData.total)} of {pageData.total}</span>
+                <span>Showing {pageItems.length === 0 ? 0 : pageNumber * PAGE_SIZE + 1}–{Math.min((pageNumber * PAGE_SIZE) + pageItems.length, pageData.total)} of {pageData.total}</span>
                 <div>
                   <button aria-label="Previous" className="button button-quiet button-small icon-only-button" disabled={pageNumber === 0 || libraryPage.isFetching} onClick={() => setPageNumber((value) => Math.max(0, value - 1))} title="Previous page" type="button"><SpotIcon name="previous" size={14} /></button>
                   <button aria-label="Next" className="button button-quiet button-small icon-only-button" disabled={!pageData.hasNext || libraryPage.isFetching} onClick={() => setPageNumber((value) => value + 1)} title="Next page" type="button"><SpotIcon name="next" size={14} /></button>

@@ -5,7 +5,11 @@ use std::time::{Duration, Instant as StdInstant};
 
 use serde_json::{json, Value};
 
+#[cfg(windows)]
+use crate::media_tools::yt_dlp::{TokioYtDlpProcessRunner, YtDlpProcessError, YtDlpProcessRunner};
 use crate::media_tools::{MediaToolManager, MediaToolStatus};
+#[cfg(windows)]
+use crate::search::types::SearchCancellation;
 
 use super::backend::{
     AudioDevice, BackendCommand, BackendError, BackendEvent, BackendHealth, EndFileReason,
@@ -46,6 +50,36 @@ fn is_remote_media_target(path: &Path) -> bool {
                     | "www.soundcloud.com"
             )
         )
+}
+
+#[cfg(windows)]
+fn audio_resolution_args(source_url: &str) -> Vec<String> {
+    vec![
+        "--no-config".to_owned(),
+        "--no-warnings".to_owned(),
+        "--no-playlist".to_owned(),
+        "--format".to_owned(),
+        "bestaudio".to_owned(),
+        "--get-url".to_owned(),
+        source_url.to_owned(),
+    ]
+}
+
+#[cfg(windows)]
+fn audio_resolution_error(error: YtDlpProcessError) -> BackendError {
+    let detail = match error {
+        YtDlpProcessError::Spawn => "yt-dlp could not be started",
+        YtDlpProcessError::Read => "yt-dlp output could not be read",
+        YtDlpProcessError::StdoutTooLarge | YtDlpProcessError::StderrTooLarge => {
+            "yt-dlp returned too much output"
+        }
+        YtDlpProcessError::Timeout => "yt-dlp audio resolution timed out",
+        YtDlpProcessError::Cancelled => "yt-dlp audio resolution was cancelled",
+        YtDlpProcessError::NonZeroExit { .. } => "yt-dlp could not resolve the provider audio URL",
+    };
+    BackendError::Operation {
+        detail: format!("online audio load failed: {detail}"),
+    }
 }
 
 const OBSERVED_PROPERTIES: &[(i64, &str)] = &[
@@ -299,7 +333,6 @@ impl MpvWorker {
                 .ok_or_else(|| BackendError::Unavailable {
                     detail: "mpv is not available".to_owned(),
                 })?;
-            let yt_dlp_path = self.manager.yt_dlp_path();
             let runtime = self
                 .runtime
                 .as_ref()
@@ -310,7 +343,6 @@ impl MpvWorker {
                 &executable,
                 generation,
                 self.config.clone(),
-                yt_dlp_path.as_deref(),
                 &mut self.shutdown_rx,
             )) {
                 Ok(session) => {
@@ -345,20 +377,28 @@ impl MpvWorker {
             if self.session.is_none() {
                 return Err(BackendError::NotStarted);
             }
-            if !is_remote_media_target(path) && (!path.is_absolute() || !path.is_file()) {
-                return Err(BackendError::Operation {
-                    detail:
-                        "the media target is not an existing local file or an allowed provider URL"
+            let media_target = if is_remote_media_target(path) {
+                let source_url = path.to_str().ok_or_else(|| BackendError::Operation {
+                    detail: "the online media URL is not valid Unicode".to_owned(),
+                })?;
+                self.resolve_remote_audio_target(source_url)?
+            } else {
+                if !path.is_absolute() || !path.is_file() {
+                    return Err(BackendError::Operation {
+                        detail: "the media target is not an existing local file or an allowed provider URL"
                             .to_owned(),
-                });
-            }
-            let path = path.to_str().ok_or_else(|| BackendError::Operation {
-                detail: "the local media path is not valid Unicode".to_owned(),
-            })?;
+                    });
+                }
+                path.to_str()
+                    .ok_or_else(|| BackendError::Operation {
+                        detail: "the local media path is not valid Unicode".to_owned(),
+                    })?
+                    .to_owned()
+            };
 
             self.request(
                 "load",
-                vec![json!("loadfile"), json!(path), json!("replace")],
+                vec![json!("loadfile"), json!(media_target), json!("replace")],
             )?;
 
             Ok(())
@@ -580,6 +620,61 @@ impl MpvWorker {
         return self.drain_session_events();
         #[cfg(not(windows))]
         Vec::new()
+    }
+
+    #[cfg(windows)]
+    fn resolve_remote_audio_target(&mut self, source_url: &str) -> Result<String, BackendError> {
+        let executable = self
+            .manager
+            .yt_dlp_path()
+            .ok_or_else(|| BackendError::Unavailable {
+                detail: "yt-dlp is not available for online audio playback".to_owned(),
+            })?;
+        let executable = executable.to_string_lossy().into_owned();
+        let args = audio_resolution_args(source_url);
+        let cancellation = SearchCancellation::new();
+        let mut shutdown_rx = self.shutdown_rx.clone();
+        if *shutdown_rx.borrow() {
+            return Err(BackendError::Timeout {
+                operation: "shutdown".to_owned(),
+            });
+        }
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| BackendError::Unavailable {
+                detail: "the mpv async runtime could not be initialized".to_owned(),
+            })?;
+        let output = runtime.block_on(async {
+            let runner = TokioYtDlpProcessRunner::default();
+            tokio::select! {
+                result = runner.run(&executable, &args, cancellation.clone()) => {
+                    result.map_err(audio_resolution_error)
+                }
+                changed = shutdown_rx.changed() => {
+                    cancellation.cancel();
+                    let _ = changed;
+                    Err(BackendError::Timeout { operation: "shutdown".to_owned() })
+                }
+            }
+        })?;
+
+        output
+            .stdout
+            .lines()
+            .find_map(|line| {
+                let candidate = line.trim();
+                let url = url::Url::parse(candidate).ok()?;
+                if matches!(url.scheme(), "http" | "https") && url.host_str().is_some() {
+                    Some(url.to_string())
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| BackendError::Operation {
+                detail: "online audio load failed: yt-dlp did not return a valid audio stream URL"
+                    .to_owned(),
+            })
     }
 }
 
@@ -1174,7 +1269,6 @@ mod windows_session {
         executable: &Path,
         generation: u64,
         config: SessionConfig,
-        yt_dlp_path: Option<&Path>,
         shutdown_rx: &mut watch::Receiver<bool>,
     ) -> Result<Session, BackendError> {
         let pipe_name = fresh_pipe_name();
@@ -1185,15 +1279,6 @@ mod windows_session {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        if let Some(parent) = yt_dlp_path.and_then(Path::parent) {
-            let mut path_entries = vec![parent.to_path_buf()];
-            if let Some(existing) = std::env::var_os("PATH") {
-                path_entries.extend(std::env::split_paths(&existing));
-            }
-            if let Ok(path) = std::env::join_paths(path_entries) {
-                command.env("PATH", path);
-            }
-        }
         command.as_std_mut().creation_flags(CREATE_NO_WINDOW);
         let child = command.spawn().map_err(|_| BackendError::Unavailable {
             detail: "mpv could not be started".to_owned(),
@@ -2019,14 +2104,13 @@ mod windows_session {
     }
 
     fn mpv_args(pipe_name: &str) -> Vec<OsString> {
-        // ponytail: keep one native mpv process and force yt-dlp to resolve audio only.
+        // Provider pages are resolved to direct audio URLs before mpv receives a load command.
         vec![
             "--no-config".into(),
             "--idle=yes".into(),
             "--terminal=no".into(),
             "--input-terminal=no".into(),
             "--no-video".into(),
-            "--ytdl-format=bestaudio".into(),
             "--audio-display=no".into(),
             format!("--input-ipc-server={pipe_name}").into(),
         ]
@@ -2310,9 +2394,24 @@ mod tests {
                     OsString::from("--terminal=no"),
                     OsString::from("--input-terminal=no"),
                     OsString::from("--no-video"),
-                    OsString::from("--ytdl-format=bestaudio"),
                     OsString::from("--audio-display=no"),
                     OsString::from(format!("--input-ipc-server={pipe_name}")),
+                ]
+            );
+        }
+
+        #[test]
+        fn audio_resolution_args_select_only_a_direct_audio_stream() {
+            assert_eq!(
+                audio_resolution_args("https://www.youtube.com/watch?v=opaque"),
+                vec![
+                    "--no-config".to_owned(),
+                    "--no-warnings".to_owned(),
+                    "--no-playlist".to_owned(),
+                    "--format".to_owned(),
+                    "bestaudio".to_owned(),
+                    "--get-url".to_owned(),
+                    "https://www.youtube.com/watch?v=opaque".to_owned(),
                 ]
             );
         }

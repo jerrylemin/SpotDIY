@@ -109,6 +109,7 @@ export function SearchResultCard({ capabilities, downloadReadiness, result }: Se
       }))}
       className="search-result-context-menu"
       label={`Actions for ${result.title}`}
+      showMoreButton={false}
     >
       <article className="search-result-card">
         <div className="search-result-main">
@@ -129,7 +130,7 @@ export function SearchResultCard({ capabilities, downloadReadiness, result }: Se
             </>
           ) : (
             <>
-              {result.provider !== "spotify" ? <button aria-label="Play online" className="button button-small icon-only-button search-result-play" disabled={busy || !playAction?.enabled} onClick={() => void runAction(() => playSearchResult(result))} title={playAction?.enabled ? `Play ${result.title}` : playAction?.reason} type="button"><SpotIcon name="play" size={13} /></button> : null}
+              <button aria-label="Play online" className="button button-small icon-only-button search-result-play" disabled={busy || !playAction?.enabled} onClick={() => void runAction(() => playSearchResult(result))} title={playAction?.enabled ? `Play ${result.title}` : playAction?.reason} type="button"><SpotIcon name="play" size={13} /></button>
               <button aria-label={result.provider === "spotify" ? "Open on Spotify" : "Open source"} className="button button-small icon-only-button" disabled={busy || !openSourceAction?.enabled} onClick={() => { if (result.canonicalUrl) void runAction(() => openProviderResult(result.provider, result.canonicalUrl!)); }} title={openSourceAction?.enabled ? (result.provider === "spotify" ? "Open on Spotify" : `Open ${result.title} source`) : openSourceAction?.reason} type="button"><SpotIcon name="arrow" size={13} /></button>
               <button aria-label="Inspect" className="button button-small icon-only-button" disabled={busy} onClick={inspect} title={`Inspect ${result.title}`} type="button"><SpotIcon name="info" size={13} /></button>
               {downloadAction?.enabled || downloadAction?.reason ? <div className="search-result-download">{downloadModes.length > 1 ? <select aria-label={`Download mode for ${result.title}`} disabled={busy || !downloadAction.enabled} onChange={(event) => setDownloadMode(event.target.value as DownloadMode)} title={selectedDownloadReason ?? downloadAction.reason} value={downloadMode}>{downloadModes.map((mode) => { const modeReason = downloadReadinessReason(result.provider, mode, { canonicalUrl: result.canonicalUrl, nativeRuntime, downloadsAvailable: capabilities?.downloads, downloadReadiness }); return <option disabled={Boolean(modeReason && !isDownloadFolderReadinessReason(modeReason))} key={mode} value={mode}>{mode === "audio" ? "Audio" : "Video"}</option>; })}</select> : null}<button aria-label={downloadModes.length === 1 ? "Download audio" : "Download"} className="button button-small icon-only-button" disabled={busy || !downloadEnabled} onClick={() => void runAction(() => queueDownload(downloadMode))} title={downloadEnabled ? (isDownloadFolderReadinessReason(selectedDownloadReason) ? "Choose a download folder, then queue this download" : `Download ${result.title}`) : selectedDownloadReason ?? downloadAction.reason} type="button"><SpotIcon name="download" size={13} /></button></div> : null}

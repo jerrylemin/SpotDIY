@@ -15,6 +15,7 @@ vi.mock("../src/services/ipc", () => ({
 }));
 
 import { useSearch } from "../src/hooks/useSearch";
+import { useUiStore } from "../src/stores/ui-store";
 
 const requestOptions = {
   lens: "all" as const,
@@ -41,6 +42,15 @@ afterEach(() => {
   cancelSearchMock.mockReset();
   subscribeProviderMock.mockReset();
   subscribeCompletedMock.mockReset();
+  useUiStore.getState().setSearchWorkspace({
+    query: "",
+    lens: "all",
+    sortField: "relevance",
+    sortDirection: "descending",
+    sections: {},
+    searchKey: "",
+    completed: false,
+  });
 });
 
 describe("useSearch", () => {

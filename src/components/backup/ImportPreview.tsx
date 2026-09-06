@@ -47,7 +47,7 @@ export function ImportPreview({
           </ul>
         </details>
       ) : null}
-      <div className="backup-warning"><SpotIcon name="info" size={16} /><span>Import replaces SpotDIY durable application state after restart. Secure provider credentials are not included or changed.</span></div>
+      <div className="backup-warning"><SpotIcon name="info" size={16} /><span>After restart, SpotDIY restores the durable library state. Included audio is placed in the app-managed Music folder for Portable mode, or the music folder you selected for Standard mode; imported files are linked to that folder automatically.</span></div>
       <div className="backup-preview-actions">
         <Button disabled={busy || !preview.checksumValid} onClick={onConfirm} size="sm" type="button" variant="primary">Confirm import after restart</Button>
         <Button disabled={busy} onClick={onCancel} size="sm" type="button" variant="quiet">Cancel import</Button>

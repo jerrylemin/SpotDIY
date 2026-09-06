@@ -367,10 +367,46 @@ fn append_lookup(url: &mut Url, lookup: &LyricsLookup, include_duration: bool) {
 
 fn append_search_lookup(url: &mut Url, lookup: &LyricsLookup, include_artist: bool) {
     let mut query = url.query_pairs_mut();
-    query.append_pair("q", &lookup.track_name);
-    query.append_pair("track_name", &lookup.track_name);
+    // LRCLIB ignores all structured filters when q is present.
+    query.append_pair("track_name", &search_title(&lookup.track_name));
     if include_artist && !is_placeholder_artist(&lookup.artist_name) {
         query.append_pair("artist_name", &lookup.artist_name);
+    }
+}
+
+fn search_title(title: &str) -> String {
+    let mut cleaned = title.to_owned();
+    for (open, close) in [('(', ')'), ('[', ']')] {
+        let mut offset = 0;
+        while let Some(start) = cleaned[offset..].find(open).map(|index| index + offset) {
+            let Some(end) = cleaned[start..].find(close).map(|index| index + start + 1) else {
+                break;
+            };
+            let annotation = cleaned[start + 1..end - 1].trim().to_lowercase();
+            if matches!(
+                annotation.as_str(),
+                "official video"
+                    | "official music video"
+                    | "official audio"
+                    | "lyrics"
+                    | "lyric video"
+                    | "official lyric video"
+                    | "audio"
+                    | "hd"
+                    | "4k"
+            ) {
+                cleaned.replace_range(start..end, "");
+                offset = start;
+            } else {
+                offset = end;
+            }
+        }
+    }
+    let result = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if result.is_empty() {
+        title.to_owned()
+    } else {
+        result
     }
 }
 
@@ -378,6 +414,23 @@ fn append_search_lookup(url: &mut Url, lookup: &LyricsLookup, include_artist: bo
 mod tests {
     use super::*;
     use std::sync::Mutex as StdMutex;
+
+    #[test]
+    fn search_removes_video_annotations_but_preserves_performance_versions() {
+        assert_eq!(
+            search_title("Synthetic Song (Official Music Video) [4K]"),
+            "Synthetic Song"
+        );
+        assert_eq!(
+            search_title("Synthetic Song (Live) [Remix]"),
+            "Synthetic Song (Live) [Remix]"
+        );
+        assert_eq!(
+            search_title("Synthetic Song (feat. Guest)"),
+            "Synthetic Song (feat. Guest)"
+        );
+        assert_eq!(search_title("[Lyrics]"), "[Lyrics]");
+    }
 
     #[derive(Default)]
     struct MockTransport {
@@ -463,9 +516,17 @@ mod tests {
         assert!(candidates[0].has_plain);
         let request = &transport.requests.lock().unwrap()[0].0;
         assert_eq!(
-            request.query_pairs().find(|(key, _)| key == "q").unwrap().1,
+            request
+                .query_pairs()
+                .find(|(key, _)| key == "track_name")
+                .unwrap()
+                .1,
             "Synthetic Track"
         );
+        assert!(!request.query_pairs().any(|(key, _)| key == "q"));
+        assert!(request
+            .query_pairs()
+            .any(|(key, value)| key == "artist_name" && value == "Synthetic Artist"));
         assert!(!request.query_pairs().any(|(key, _)| key == "album_name"));
 
         let transport = Arc::new(MockTransport::default());
@@ -503,7 +564,7 @@ mod tests {
         assert!(requests[0]
             .0
             .query_pairs()
-            .any(|(key, value)| key == "q" && value == "Synthetic Track"));
+            .any(|(key, value)| key == "track_name" && value == "Synthetic Track"));
         assert!(!requests[0]
             .0
             .query_pairs()
@@ -538,7 +599,7 @@ mod tests {
         let request = &transport.requests.lock().unwrap()[0].0;
         assert!(request
             .query_pairs()
-            .any(|(key, value)| key == "q" && value == "Synthetic Track"));
+            .any(|(key, value)| key == "track_name" && value == "Synthetic Track"));
         assert!(!request
             .query_pairs()
             .any(|(key, _)| key == "artist_name" || key == "album_name"));

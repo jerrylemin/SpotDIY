@@ -3,9 +3,7 @@ import type { SearchLens, SearchSortDirection, SearchSortField } from "../../typ
 
 const SEARCH_LENSES: Array<{ value: SearchLens; label: string }> = [
   { value: "all", label: "ALL" },
-  { value: "tracks", label: "TRACKS" },
   { value: "artists", label: "ARTISTS" },
-  { value: "albums", label: "ALBUMS" },
   { value: "local", label: "LOCAL" },
   { value: "youtube", label: "YOUTUBE" },
   { value: "soundcloud", label: "SOUNDCLOUD" },

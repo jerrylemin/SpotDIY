@@ -96,28 +96,9 @@ export function contrastRatio(foreground: string, background: string): number | 
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-const contrastRequirements = [
-  ["text", "background", 4.5],
-  ["text", "surface", 4.5],
-  ["textMuted", "background", 4.5],
-  ["textMuted", "surface", 4.5],
-  ["accent", "accentContrast", 4.5],
-  ["accent", "background", 3],
-  ["accent", "surface", 3],
-] as const satisfies ReadonlyArray<readonly [SpotThemeTokenName, SpotThemeTokenName, number]>;
-
-export const spotThemeDefinitionSchema = rawSpotThemeDefinitionSchema.superRefine((theme, context) => {
-  for (const [foregroundName, backgroundName, minimum] of contrastRequirements) {
-    const ratio = contrastRatio(theme.tokens[foregroundName], theme.tokens[backgroundName]);
-    if (ratio !== null && ratio < minimum) {
-      context.addIssue({
-        code: "custom",
-        path: ["tokens", foregroundName],
-        message: `${foregroundName}/${backgroundName} contrast is ${ratio.toFixed(2)}:1; minimum is ${minimum}:1`,
-      });
-    }
-  }
-});
+// Theme colors are user-authored. Keep the token shape and color syntax safe,
+// but do not reject a palette because two colors have low contrast.
+export const spotThemeDefinitionSchema = rawSpotThemeDefinitionSchema;
 
 function utf8ByteLength(value: string): number {
   if (typeof TextEncoder !== "undefined") {

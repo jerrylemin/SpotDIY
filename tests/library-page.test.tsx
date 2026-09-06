@@ -13,6 +13,7 @@ const rescanMutation = vi.hoisted(() => ({ isPending: false, error: null as unkn
 const rescanAllMutation = vi.hoisted(() => ({ isPending: false, error: null as unknown, mutate: vi.fn() }));
 const revealMutation = vi.hoisted(() => ({ isPending: false, error: null as unknown, mutate: vi.fn() }));
 const renameMutation = vi.hoisted(() => ({ isPending: false, error: null as unknown, mutateAsync: vi.fn() }));
+const deleteMutation = vi.hoisted(() => ({ isPending: false, error: null as unknown, mutate: vi.fn() }));
 const playbackResult = vi.hoisted(() => ({
   snapshot: {
     revision: 0,
@@ -83,6 +84,7 @@ vi.mock("../src/hooks/useLibrary", () => ({
   useRescanAllLibraryFolders: () => rescanAllMutation,
   useRevealLocalFile: () => revealMutation,
   useRenameLocalFile: () => renameMutation,
+  useDeleteLocalFile: () => deleteMutation,
 }));
 vi.mock("../src/hooks/usePlayback", () => ({
   usePlayback: () => playbackResult,
@@ -178,11 +180,14 @@ afterEach(() => {
   rescanAllMutation.error = null;
   revealMutation.isPending = false;
   revealMutation.error = null;
+  deleteMutation.isPending = false;
+  deleteMutation.error = null;
   addMutation.mutateAsync.mockReset();
   removeMutation.mutate.mockReset();
   rescanMutation.mutate.mockReset();
   rescanAllMutation.mutate.mockReset();
   revealMutation.mutate.mockReset();
+  deleteMutation.mutate.mockReset();
   playbackResult.refreshSnapshot.mockReset();
   playbackResult.refreshDevices.mockReset();
   playbackResult.playNow.mockReset();
@@ -274,7 +279,19 @@ describe("LibraryPage", () => {
     await waitFor(() => expect(addMutation.mutateAsync).toHaveBeenCalledWith(["D:\\Archive"]));
   });
 
-  it("keeps unavailable files visible and disables their reveal action", () => {
+  it("confirms and deletes the selected local file", async () => {
+    setState({ folders: [folder], indexedTrackCount: 1, availableTrackCount: 1 });
+    pageResult.data = { ...pageResult.data, items: [track], total: 1 };
+    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<LibraryPage />);
+    await userEvent.click(screen.getByRole("button", { name: "Delete Night Drive" }));
+
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringMatching(/permanently deletes the file/i));
+    expect(deleteMutation.mutate).toHaveBeenCalledWith(track.sourceId);
+  });
+
+  it("removes missing files from the visible library", () => {
     setState({ folders: [folder], indexedTrackCount: 1, availableTrackCount: 0 });
     pageResult.data = {
       ...pageResult.data,
@@ -284,10 +301,9 @@ describe("LibraryPage", () => {
 
     render(<LibraryPage />);
 
-    expect(screen.getByText("Unavailable")).toBeInTheDocument();
-    expect(screen.getByText("File was not found during the last scan")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /play now/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /open file location/i })).toBeDisabled();
+    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
+    expect(screen.queryByText("File was not found during the last scan")).not.toBeInTheDocument();
+    expect(screen.getByText("This library page is empty")).toBeInTheDocument();
   });
 
   it("confirms folder removal and leaves the file system action explicit", async () => {

@@ -78,7 +78,8 @@ test.describe("Plan 16 accessibility contract", () => {
     await expect(page.getByText("SELECTED TRACK", { exact: true })).toBeVisible();
 
     await page.goto("/theme-studio");
-    await page.getByRole("button", { name: "Preview on App", exact: true }).focus();
+    await expect(page.getByRole("button", { name: "Preview on App", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Save & Activate", exact: true }).focus();
     await expect.poll(() => page.evaluate(() => document.activeElement?.matches(":focus-visible"))).toBe(true);
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   });

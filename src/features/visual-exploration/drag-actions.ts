@@ -1,4 +1,4 @@
-export type VisualDropAction = "play-next" | "queue" | "inbox";
+export type VisualDropAction = "play-next" | "queue";
 
 export interface VisualDropResult {
   trackId: string;
@@ -6,6 +6,6 @@ export interface VisualDropResult {
 }
 
 export function resolveVisualDrop(trackId: string | null | undefined, action: string | null | undefined): VisualDropResult | null {
-  if (!trackId || action !== "play-next" && action !== "queue" && action !== "inbox") return null;
+  if (!trackId || action !== "play-next" && action !== "queue") return null;
   return { trackId, action };
 }

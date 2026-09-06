@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use serde_json::Value;
 use std::collections::HashSet;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -10,12 +11,16 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
+use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 use url::Url;
 
 use crate::domain::{ProviderKind, SourceCapabilities};
 use crate::search::types::{
     ProviderRuntimeStatus, ProviderSearchErrorCode, ProviderSearchRequest, ProviderSearchSection,
-    SafeUrl, SearchCancellation, SearchEntityKind, SearchResult,
+    SafeUrl, SearchCancellation, SearchEntityKind, SearchLens, SearchResult,
+};
+use crate::sources::yt_dlp::{
+    yt_dlp_search_args, TokioYtDlpProcessRunner, YtDlpProcessError, YtDlpProcessRunner,
 };
 use crate::sources::{
     cancelled_provider_section, failed_provider_section, is_cancelled, ready_provider_section,
@@ -23,14 +28,14 @@ use crate::sources::{
 };
 
 const SUPPORTED_ENTITIES: &[SearchEntityKind] = &[SearchEntityKind::Track];
-const SPOTDL_COMMAND_TIMEOUT: Duration = Duration::from_secs(90);
+const SPOTDL_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const SPOTDL_OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 const SPOTDL_MAX_RETRIES: &str = "1";
 const SPOTDL_PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Spotify results remain metadata records. The actual audio download is
-/// resolved by spotdl to a permitted YouTube/SoundCloud source and then goes
-/// through the existing yt-dlp download worker.
+/// resolved through Spotify's public embed metadata plus a bounded yt-dlp
+/// search, then goes through the existing yt-dlp download worker.
 pub(crate) const SPOTIFY_SOURCE_CAPABILITIES: SourceCapabilities = SourceCapabilities {
     search: true,
     playback: false,
@@ -292,32 +297,307 @@ fn executable_for_adapter(override_path: Option<&Path>) -> Option<PathBuf> {
         .or_else(spotdl_executable)
 }
 
-fn save_args(query: &str) -> Vec<String> {
-    vec![
+fn save_args(query: &str, artist_search: bool) -> Vec<String> {
+    let mut args = vec![
         "save".to_owned(),
         query.to_owned(),
         "--save-file".to_owned(),
         "-".to_owned(),
-        "--no-cache".to_owned(),
         "--headless".to_owned(),
         "--max-retries".to_owned(),
         SPOTDL_MAX_RETRIES.to_owned(),
         "--log-level".to_owned(),
-        "WARNING".to_owned(),
-    ]
+        "ERROR".to_owned(),
+        "--use-cache-file".to_owned(),
+    ];
+    if artist_search {
+        args.push("--fetch-albums".to_owned());
+    }
+    args
 }
 
-fn url_args(query: &str) -> Vec<String> {
-    vec![
-        "url".to_owned(),
-        query.to_owned(),
-        "--no-cache".to_owned(),
-        "--headless".to_owned(),
-        "--max-retries".to_owned(),
-        SPOTDL_MAX_RETRIES.to_owned(),
-        "--log-level".to_owned(),
-        "WARNING".to_owned(),
-    ]
+const SPOTIFY_EMBED_BODY_LIMIT: usize = 2 * 1024 * 1024;
+const YOUTUBE_MATCH_DURATION_TOLERANCE_MS: u64 = 30_000;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SpotifyTrackMetadata {
+    title: String,
+    artists: Vec<String>,
+    duration_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct YoutubeMatchCandidate {
+    id: String,
+    title: String,
+    duration_ms: Option<u64>,
+}
+
+fn string_field(value: &serde_json::Map<String, Value>, names: &[&str]) -> Option<String> {
+    names
+        .iter()
+        .filter_map(|name| value.get(*name).and_then(Value::as_str))
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn parse_spotify_track_object(value: &Value) -> Option<SpotifyTrackMetadata> {
+    let object = value.as_object()?;
+    let title = string_field(object, &["title", "name"])?;
+    let mut artists = string_field(object, &["subtitle"])
+        .map(|artist| vec![artist])
+        .unwrap_or_default();
+    if artists.is_empty() {
+        if let Some(values) = object.get("artists").and_then(Value::as_array) {
+            artists = values
+                .iter()
+                .filter_map(|artist| {
+                    artist
+                        .as_object()
+                        .and_then(|artist| string_field(artist, &["name", "title"]))
+                        .or_else(|| artist.as_str().map(str::to_owned))
+                })
+                .map(|artist| artist.trim().to_owned())
+                .filter(|artist| !artist.is_empty())
+                .collect();
+        }
+    }
+    let duration_ms = object
+        .get("duration")
+        .and_then(Value::as_u64)
+        .or_else(|| object.get("duration_ms").and_then(Value::as_u64));
+    Some(SpotifyTrackMetadata {
+        title,
+        artists,
+        duration_ms,
+    })
+}
+
+fn find_spotify_track_metadata(value: &Value, depth: u8) -> Option<SpotifyTrackMetadata> {
+    if depth == 0 {
+        return None;
+    }
+    if let Some(metadata) = parse_spotify_track_object(value) {
+        return Some(metadata);
+    }
+    match value {
+        Value::Object(object) => object
+            .values()
+            .find_map(|child| find_spotify_track_metadata(child, depth - 1)),
+        Value::Array(values) => values
+            .iter()
+            .find_map(|child| find_spotify_track_metadata(child, depth - 1)),
+        _ => None,
+    }
+}
+
+fn parse_spotify_embed_track_metadata(html: &str) -> Option<SpotifyTrackMetadata> {
+    let marker = r#"<script id="__NEXT_DATA__""#;
+    let marker_start = html.find(marker)?;
+    let content_start = marker_start + html[marker_start..].find('>')? + 1;
+    let content_end = content_start + html[content_start..].find("</script>")?;
+    let data = serde_json::from_str::<Value>(&html[content_start..content_end]).ok()?;
+    find_spotify_track_metadata(&data, 10)
+}
+
+async fn fetch_spotify_embed_track(
+    spotify_id: &str,
+    cancellation: SearchCancellation,
+) -> Result<SpotifyTrackMetadata, SpotifyDownloadError> {
+    let client = reqwest::Client::builder()
+        .user_agent("SpotDIY/0.1 Spotify metadata resolver")
+        .timeout(Duration::from_secs(12))
+        .build()
+        .map_err(|_| SpotifyDownloadError::MetadataUnavailable)?;
+    let url = format!("https://open.spotify.com/embed/track/{spotify_id}");
+    let mut cancellation_rx = cancellation.subscribe();
+    let response = tokio::select! {
+        result = client.get(url).header("accept", "text/html,application/xhtml+xml").send() => {
+            result.map_err(|_| SpotifyDownloadError::MetadataUnavailable)?
+        }
+        changed = cancellation_rx.changed() => {
+            let _ = changed;
+            return Err(SpotifyDownloadError::Cancelled);
+        }
+    };
+    if !response.status().is_success() {
+        return Err(SpotifyDownloadError::MetadataUnavailable);
+    }
+    let body = tokio::select! {
+        result = response.text() => result.map_err(|_| SpotifyDownloadError::MetadataUnavailable)?,
+        changed = cancellation_rx.changed() => {
+            let _ = changed;
+            return Err(SpotifyDownloadError::Cancelled);
+        }
+    };
+    if body.len() > SPOTIFY_EMBED_BODY_LIMIT {
+        return Err(SpotifyDownloadError::MetadataUnavailable);
+    }
+    parse_spotify_embed_track_metadata(&body).ok_or(SpotifyDownloadError::MetadataUnavailable)
+}
+
+fn normalize_match_text(value: &str) -> String {
+    let mut normalized = String::new();
+    for character in value
+        .nfkd()
+        .filter(|character| !is_combining_mark(*character))
+    {
+        let character = match character {
+            'Đ' | 'đ' => 'd',
+            character => character,
+        };
+        if character.is_alphanumeric() {
+            normalized.extend(character.to_lowercase());
+        } else if character.is_whitespace() {
+            normalized.push(' ');
+        } else if character != '\'' && character != '’' {
+            normalized.push(' ');
+        }
+    }
+    normalized.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn spotify_title_core(title: &str) -> &str {
+    title
+        .split_once(" - ")
+        .map(|(core, _)| core)
+        .unwrap_or(title)
+}
+
+fn title_plausibly_matches(candidate: &str, expected: &str) -> bool {
+    let candidate = normalize_match_text(candidate);
+    let expected = normalize_match_text(spotify_title_core(expected));
+    if candidate.is_empty() || expected.is_empty() {
+        return false;
+    }
+    if expected.chars().count() >= 4 {
+        candidate.contains(&expected)
+    } else {
+        candidate.split_whitespace().any(|word| word == expected)
+    }
+}
+
+fn artist_tokens(artists: &[String]) -> Vec<String> {
+    artists
+        .iter()
+        .flat_map(|artist| {
+            artist
+                .replace(" feat. ", ",")
+                .replace(" feat ", ",")
+                .replace(" ft. ", ",")
+                .replace(" ft ", ",")
+                .split(',')
+                .map(str::trim)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .map(|artist| normalize_match_text(&artist))
+        .filter(|artist| !artist.is_empty())
+        .collect()
+}
+
+fn parse_youtube_match_candidates(stdout: &str) -> Option<Vec<YoutubeMatchCandidate>> {
+    let root = serde_json::from_str::<Value>(stdout).ok()?;
+    let entries = root.get("entries")?.as_array()?;
+    Some(
+        entries
+            .iter()
+            .filter_map(|entry| {
+                let object = entry.as_object()?;
+                let id = object.get("id")?.as_str()?.trim();
+                let title = object.get("title")?.as_str()?.trim();
+                if id.is_empty() || title.is_empty() {
+                    return None;
+                }
+                let duration_ms = object
+                    .get("duration")
+                    .and_then(Value::as_f64)
+                    .filter(|duration| duration.is_finite() && *duration >= 0.0)
+                    .map(|duration| (duration * 1000.0).round() as u64);
+                Some(YoutubeMatchCandidate {
+                    id: id.to_owned(),
+                    title: title.to_owned(),
+                    duration_ms,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn choose_sunnify_youtube_match(
+    stdout: &str,
+    metadata: &SpotifyTrackMetadata,
+) -> Result<String, SpotifyDownloadError> {
+    let candidates =
+        parse_youtube_match_candidates(stdout).ok_or(SpotifyDownloadError::InvalidResponse)?;
+    let title_matches = candidates
+        .iter()
+        .filter(|candidate| title_plausibly_matches(&candidate.title, &metadata.title))
+        .collect::<Vec<_>>();
+    if title_matches.is_empty() {
+        return Err(SpotifyDownloadError::NoPlayableMatch);
+    }
+    let tokens = artist_tokens(&metadata.artists);
+    let artist_matches = title_matches
+        .iter()
+        .copied()
+        .filter(|candidate| {
+            let title = normalize_match_text(&candidate.title);
+            tokens.iter().any(|artist| title.contains(artist))
+        })
+        .collect::<Vec<_>>();
+    let pool = if artist_matches.is_empty() {
+        title_matches
+    } else {
+        artist_matches
+    };
+    let chosen = if let Some(expected) = metadata.duration_ms {
+        let candidate = pool
+            .iter()
+            .min_by_key(|candidate| {
+                candidate
+                    .duration_ms
+                    .map(|duration| duration.abs_diff(expected))
+                    .unwrap_or(u64::MAX)
+            })
+            .copied()
+            .ok_or(SpotifyDownloadError::NoPlayableMatch)?;
+        if candidate.duration_ms.is_some_and(|duration| {
+            duration.abs_diff(expected) > YOUTUBE_MATCH_DURATION_TOLERANCE_MS
+        }) {
+            return Err(SpotifyDownloadError::NoPlayableMatch);
+        }
+        candidate
+    } else {
+        pool.first()
+            .copied()
+            .ok_or(SpotifyDownloadError::NoPlayableMatch)?
+    };
+    let candidate_url = format!("https://www.youtube.com/watch?v={}", chosen.id);
+    validate_provider_url(ProviderKind::Youtube, &candidate_url)
+        .map(|url| url.as_url().as_str().to_owned())
+        .map_err(|_| SpotifyDownloadError::InvalidResponse)
+}
+
+async fn resolve_sunnify_audio_url(
+    metadata: SpotifyTrackMetadata,
+    yt_dlp_path: &Path,
+    cancellation: SearchCancellation,
+) -> Result<String, SpotifyDownloadError> {
+    let query = format!("{} {} audio", metadata.title, metadata.artists.join(" "));
+    let args = yt_dlp_search_args(&query);
+    let executable = yt_dlp_path.to_string_lossy().into_owned();
+    let output = TokioYtDlpProcessRunner::default()
+        .run(&executable, &args, cancellation)
+        .await
+        .map_err(|error| match error {
+            YtDlpProcessError::Cancelled => SpotifyDownloadError::Cancelled,
+            YtDlpProcessError::Timeout => SpotifyDownloadError::Timeout,
+            YtDlpProcessError::Spawn => SpotifyDownloadError::YtDlpUnavailable,
+            _ => SpotifyDownloadError::Failed,
+        })?;
+    choose_sunnify_youtube_match(&output.stdout, &metadata)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Error)]
@@ -559,7 +839,18 @@ impl SourceAdapter for SpotifySourceAdapter {
                     Some("spotdl is not installed. Install spotdl to search and download Spotify tracks.".into()),
                 );
             };
-            let args = save_args(request.query.trim());
+            let query = request.query.trim();
+            let artist_search = request.lens == SearchLens::Artists;
+            // The provider lens is also commonly used for plain artist names.
+            // Ask spotdl for the albums behind the matched songs so a Spotify
+            // provider search does not collapse an artist query to one track.
+            let expand_results = artist_search || request.lens == SearchLens::Spotify;
+            let query = if artist_search && !query.to_ascii_lowercase().starts_with("artist:") {
+                format!("artist:{query}")
+            } else {
+                query.to_owned()
+            };
+            let args = save_args(&query, expand_results);
             match self.runner.run(&executable, &args, cancellation).await {
                 Ok(output) => {
                     match parse_spotdl_results(&output.stdout, usize::from(request.limit)) {
@@ -598,71 +889,41 @@ impl SourceAdapter for SpotifySourceAdapter {
 pub(crate) enum SpotifyDownloadError {
     #[error("a Spotify track URL is required")]
     InvalidSpotifyUrl,
-    #[error("spotdl is not installed")]
-    SpotDlUnavailable,
-    #[error("spotdl was cancelled")]
+    #[error("Spotify metadata could not be read from its public page")]
+    MetadataUnavailable,
+    #[error("yt-dlp is not installed")]
+    YtDlpUnavailable,
+    #[error("Spotify audio matching was cancelled")]
     Cancelled,
-    #[error("spotdl timed out")]
+    #[error("Spotify audio matching timed out")]
     Timeout,
-    #[error("spotdl could not resolve a playable source")]
+    #[error("Spotify audio matching failed")]
     Failed,
-    #[error("spotdl returned an invalid playable source")]
+    #[error("Spotify returned no confident YouTube audio match")]
+    NoPlayableMatch,
+    #[error("Spotify audio matching returned an invalid response")]
     InvalidResponse,
 }
 
 pub(crate) async fn resolve_spotify_download_url(
     spotify_url: &str,
+    title: Option<&str>,
+    artists: &[String],
+    duration_ms: Option<u64>,
+    yt_dlp_path: Option<&Path>,
     cancellation: SearchCancellation,
 ) -> Result<String, SpotifyDownloadError> {
     let id = spotify_track_id(spotify_url).map_err(|_| SpotifyDownloadError::InvalidSpotifyUrl)?;
-    let path = spotdl_executable().ok_or(SpotifyDownloadError::SpotDlUnavailable)?;
-    resolve_spotify_download_url_with_runner(
-        &path,
-        &id,
-        Arc::new(ProcessSpotDlRunner),
-        cancellation,
-    )
-    .await
-}
-
-async fn resolve_spotify_download_url_with_runner(
-    executable: &Path,
-    spotify_id: &str,
-    runner: Arc<dyn SpotDlRunner>,
-    cancellation: SearchCancellation,
-) -> Result<String, SpotifyDownloadError> {
-    let spotify_url =
-        canonical_spotify_url(spotify_id).map_err(|_| SpotifyDownloadError::InvalidSpotifyUrl)?;
-    let output = runner
-        .run(
-            executable,
-            &url_args(spotify_url.as_url().as_str()),
-            cancellation,
-        )
-        .await
-        .map_err(|error| match error {
-            SpotDlProcessError::Cancelled => SpotifyDownloadError::Cancelled,
-            SpotDlProcessError::Timeout => SpotifyDownloadError::Timeout,
-            SpotDlProcessError::Spawn => SpotifyDownloadError::SpotDlUnavailable,
-            _ => SpotifyDownloadError::Failed,
-        })?;
-    for line in output
-        .stdout
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        let Ok(url) = Url::parse(line) else {
-            continue;
-        };
-        let value = url.as_str();
-        for provider in [ProviderKind::Youtube, ProviderKind::Soundcloud] {
-            if let Ok(safe) = validate_provider_url(provider, value) {
-                return Ok(safe.as_url().as_str().to_owned());
-            }
-        }
-    }
-    Err(SpotifyDownloadError::InvalidResponse)
+    let metadata = match title.filter(|title| !title.trim().is_empty()) {
+        Some(title) => SpotifyTrackMetadata {
+            title: title.trim().to_owned(),
+            artists: artists.to_vec(),
+            duration_ms,
+        },
+        None => fetch_spotify_embed_track(&id, cancellation.clone()).await?,
+    };
+    let yt_dlp_path = yt_dlp_path.ok_or(SpotifyDownloadError::YtDlpUnavailable)?;
+    resolve_sunnify_audio_url(metadata, yt_dlp_path, cancellation).await
 }
 
 #[cfg(test)]
@@ -808,25 +1069,81 @@ mod tests {
         assert!(calls[0]
             .windows(2)
             .any(|window| window == ["--save-file", "-"]));
-        assert!(calls[0].contains(&"--no-cache".to_owned()));
+        assert!(calls[0].contains(&"--fetch-albums".to_owned()));
+        assert!(!calls[0].contains(&"--no-cache".to_owned()));
         assert!(!calls[0]
             .iter()
             .any(|arg| arg.contains("client-secret") || arg.contains("client-id")));
     }
 
     #[tokio::test]
-    async fn download_resolution_accepts_only_youtube_or_soundcloud_urls() {
+    async fn artist_search_uses_spotdl_artist_query_and_fetches_more_results() {
         let runner = Arc::new(FakeSpotDlRunner::json(
-            "https://www.youtube.com/watch?v=3fNbfdACbzE\n",
+            r#"[{"name":"Hello","artists":["Adele"],"song_id":"1Yk0cQdMLx5RzzFTYwmuld","url":"https://open.spotify.com/track/1Yk0cQdMLx5RzzFTYwmuld"}]"#,
         ));
-        let url = resolve_spotify_download_url_with_runner(
-            Path::new("spotdl"),
-            "1Yk0cQdMLx5RzzFTYwmuld",
-            runner,
-            SearchCancellation::new(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(url, "https://www.youtube.com/watch?v=3fNbfdACbzE");
+        let adapter = SpotifySourceAdapter::with_runner_for_tests(runner.clone());
+        let mut artist_request = request("Adele");
+        artist_request.lens = SearchLens::Artists;
+        let section = adapter
+            .search(artist_request, SearchCancellation::new())
+            .await;
+
+        assert_eq!(section.results.len(), 1);
+        let calls = runner.calls();
+        assert!(calls[0].contains(&"artist:Adele".to_owned()));
+        assert!(calls[0].contains(&"--fetch-albums".to_owned()));
+    }
+
+    #[test]
+    fn spotify_public_embed_metadata_is_extracted_without_credentials() {
+        let html = r#"<script id="__NEXT_DATA__" type="application/json">{
+          "props":{"pageProps":{"state":{"data":{"entity":{
+            "title":"Hello",
+            "subtitle":"Adele",
+            "duration":295000
+          }}}}}
+        }</script>"#;
+        assert_eq!(
+            parse_spotify_embed_track_metadata(html),
+            Some(SpotifyTrackMetadata {
+                title: "Hello".to_owned(),
+                artists: vec!["Adele".to_owned()],
+                duration_ms: Some(295_000),
+            })
+        );
+    }
+
+    #[test]
+    fn sunnify_matching_prefers_title_artist_and_duration() {
+        let metadata = SpotifyTrackMetadata {
+            title: "Hello".to_owned(),
+            artists: vec!["Adele".to_owned()],
+            duration_ms: Some(295_000),
+        };
+        let stdout = r#"{
+          "entries":[
+            {"id":"wrong","title":"Adele - Hello (Live)","duration":120},
+            {"id":"right","title":"Adele - Hello (Official Audio)","duration":295},
+            {"id":"other","title":"Hello - Another Artist","duration":295}
+          ]
+        }"#;
+        assert_eq!(
+            choose_sunnify_youtube_match(stdout, &metadata).unwrap(),
+            "https://www.youtube.com/watch?v=right"
+        );
+    }
+
+    #[test]
+    fn sunnify_matching_rejects_a_wrong_recording() {
+        let metadata = SpotifyTrackMetadata {
+            title: "Hello".to_owned(),
+            artists: vec!["Adele".to_owned()],
+            duration_ms: Some(295_000),
+        };
+        let stdout = r#"{"entries":[{"id":"live","title":"Adele - Hello Live","duration":420}]}"#;
+        assert_eq!(
+            choose_sunnify_youtube_match(stdout, &metadata),
+            Err(SpotifyDownloadError::NoPlayableMatch)
+        );
     }
 }

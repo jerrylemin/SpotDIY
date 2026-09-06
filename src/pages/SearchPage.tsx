@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import type { DownloadReadiness } from "../features/actions/track-actions";
 import { ProviderSearchSection } from "../components/search/ProviderSearchSection";
@@ -7,6 +7,7 @@ import { SpotIcon } from "../components/icons/SpotIcon";
 import { useAppStatus } from "../hooks/useAppStatus";
 import { searchProviderOrder, useSearch } from "../hooks/useSearch";
 import { providerLabel } from "../services/ipc";
+import { useUiStore } from "../stores/ui-store";
 import type { ProviderKind, ProviderSearchSection as ProviderSearchSectionDto, ProviderStatus, SearchLens, SearchSortDirection, SearchSortField } from "../types/domain";
 
 function fallbackSection(provider: ProviderKind, status: ProviderStatus | undefined, busy: boolean): ProviderSearchSectionDto {
@@ -40,10 +41,9 @@ function providerName(kind: ProviderKind): string {
 }
 
 export function SearchPage() {
-  const [query, setQuery] = useState("");
-  const [lens, setLens] = useState<SearchLens>("all");
-  const [sortField, setSortField] = useState<SearchSortField>("relevance");
-  const [sortDirection, setSortDirection] = useState<SearchSortDirection>("descending");
+  const searchWorkspace = useUiStore((state) => state.searchWorkspace);
+  const setSearchWorkspace = useUiStore((state) => state.setSearchWorkspace);
+  const { query, lens, sortField, sortDirection } = searchWorkspace;
   const status = useAppStatus();
   const search = useSearch({ query, lens, sortField, sortDirection });
   const providerStatuses = useMemo(() => new Map((status.data?.providers ?? []).map((provider) => [provider.kind, provider])), [status.data?.providers]);
@@ -64,13 +64,13 @@ export function SearchPage() {
         lens={lens}
         onCancel={() => void search.cancel()}
         onClear={() => {
-          setQuery("");
+          setSearchWorkspace({ query: "", sections: {}, searchKey: "", completed: false });
           void search.clear();
         }}
-        onLensChange={setLens}
-        onQueryChange={setQuery}
-        onSortDirectionChange={setSortDirection}
-        onSortFieldChange={setSortField}
+        onLensChange={(nextLens: SearchLens) => setSearchWorkspace({ lens: nextLens, sections: {}, searchKey: "", completed: false })}
+        onQueryChange={(nextQuery: string) => setSearchWorkspace({ query: nextQuery, sections: {}, searchKey: "", completed: false })}
+        onSortDirectionChange={(nextDirection: SearchSortDirection) => setSearchWorkspace({ sortDirection: nextDirection, sections: {}, searchKey: "", completed: false })}
+        onSortFieldChange={(nextField: SearchSortField) => setSearchWorkspace({ sortField: nextField, sections: {}, searchKey: "", completed: false })}
         query={query}
         sortDirection={sortDirection}
         sortField={sortField}

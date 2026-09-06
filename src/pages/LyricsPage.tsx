@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 
 import { EmptyState } from "../components/common/EmptyState";
 import { LyricsPanel } from "../components/lyrics/LyricsPanel";
+import "../components/lyrics/lyrics.css";
 import { SpotIcon } from "../components/icons/SpotIcon";
 import { formatLyricsOffset, MAX_LYRICS_OFFSET_MS, LYRICS_OFFSET_STEP_MS, useAbLoopPresets, useBookmarks, useLyrics, useLyricsOffset } from "../hooks/useLyrics";
 import { usePlayback } from "../hooks/usePlayback";
@@ -201,8 +202,8 @@ export function LyricsPage() {
   return (
     <div className="page-stack lyrics-page">
       <section className="page-intro">
-        <div><span className="eyebrow">LYRICS & NOTES</span><h1>{playback.snapshot.title ?? "Current track"} <em>in context.</em></h1><p>{playback.snapshot.artists.join(" · ") || "Unknown artist"}{playback.snapshot.album ? ` · ${playback.snapshot.album}` : ""} · position {formatClock(visualPositionMs)}</p></div>
-        <div className="page-intro-stat"><strong>{bookmarks.data?.length ?? 0}</strong><span>Bookmarks</span></div>
+        <div><span className="eyebrow">NOW PLAYING · LYRICS</span><h1>{playback.snapshot.title ?? "Current track"}</h1><p>{playback.snapshot.artists.join(" · ") || "Unknown artist"}{playback.snapshot.album ? ` · ${playback.snapshot.album}` : ""}</p></div>
+        <div className="page-intro-stat"><strong>{formatClock(visualPositionMs)}</strong><span>{document?.syncKind === "timed" ? "Synced to your music" : "Now playing"}</span></div>
       </section>
 
       <div className="lyrics-layout">

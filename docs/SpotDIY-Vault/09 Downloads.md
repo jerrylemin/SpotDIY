@@ -11,7 +11,8 @@ Only these narrow commands create tasks:
 
 - `queue_search_result_download(SearchResult, DownloadMode)` for a YouTube,
   SoundCloud, or Spotify track with a validated canonical URL and non-empty
-  provider ID. Spotify is audio-only and is source-matched through `spotdl`.
+  provider ID. Spotify is audio-only and is source-matched through public
+  Spotify embed metadata plus bounded yt-dlp matching.
 - `queue_source_download(TrackId, SourceId, DownloadMode)` for a persisted
   YouTube/SoundCloud source belonging to the requested track and carrying a
   validated source URI.
@@ -39,9 +40,9 @@ history remains visible with `outputMissing` when its recorded file is gone.
 
 ## Tools and provenance
 
-Spotify search-result tasks first use `spotdl` to resolve the canonical track
-URL to a validated YouTube/SoundCloud source. yt-dlp then runs through separate
-structured arguments with `--no-config`, `--no-playlist`, `--newline`,
+Spotify search-result tasks first read public Spotify embed metadata and use
+bounded yt-dlp matching to resolve the result to a validated YouTube source.
+yt-dlp then runs through separate structured arguments with `--no-config`, `--no-playlist`, `--newline`,
 `--no-warnings`, and a machine progress template. Normal audio uses the best
 provider audio; Spotify audio is explicitly extracted as MP3 with FFmpeg and
 embeds the provider metadata when FFmpeg is available.

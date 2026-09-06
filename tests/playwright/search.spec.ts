@@ -100,7 +100,9 @@ test.describe("provider search browser contract", () => {
 
     await page.getByRole("tab", { name: "ARTISTS" }).click();
     await expect(page.locator('[data-provider="local"]')).toHaveCount(1);
-    await expect(page.locator('[data-provider="youtube"]')).toHaveCount(0);
+    await expect(page.locator('[data-provider="youtube"]')).toHaveCount(1);
+    await expect(page.locator('[data-provider="soundcloud"]')).toHaveCount(1);
+    await expect(page.locator('[data-provider="spotify"]')).toHaveCount(1);
     await expect(page.getByRole("tab", { name: "ARTISTS" })).toHaveAttribute("aria-selected", "true");
 
     await page.getByRole("tab", { name: "YOUTUBE" }).click();
@@ -128,8 +130,9 @@ test.describe("provider search browser contract", () => {
     await expect(spotify).toHaveClass(/provider-result-state-ready/);
     await expect(spotify.locator(".search-result-card").first()).toBeVisible();
     await expect(spotify.getByRole("button", { name: "Open on Spotify" })).toBeVisible();
+    await expect(spotify.getByRole("button", { name: "Play online" })).toBeVisible();
+    await expect(spotify.getByRole("button", { name: "Play online" })).toBeDisabled();
     await expect(spotify.getByRole("button", { name: "Download audio" })).toBeDisabled();
-    await expect(spotify.getByRole("button", { name: /Play/ })).toHaveCount(0);
   });
 
   test("long_title_overflow", async ({ page }) => {

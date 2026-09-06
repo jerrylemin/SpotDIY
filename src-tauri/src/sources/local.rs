@@ -442,7 +442,12 @@ fn normalize_search_text(value: &str) -> String {
     value
         .nfkd()
         .filter(|character| !is_combining_mark(*character))
-        .flat_map(char::to_lowercase)
+        .flat_map(|character| match character {
+            // Vietnamese Đ/đ does not decompose under NFKD, so fold it
+            // explicitly to make ASCII queries match titles such as "đây".
+            'Đ' | 'đ' => 'd'.to_lowercase(),
+            character => character.to_lowercase(),
+        })
         .collect()
 }
 
@@ -500,7 +505,7 @@ mod tests {
     use crate::sources::SourceAdapter;
     use rusqlite::params;
 
-    use super::LocalSourceAdapter;
+    use super::{normalize_search_text, LocalSourceAdapter};
 
     #[tokio::test]
     async fn local_exact_title_ranks_first() {
@@ -568,6 +573,28 @@ mod tests {
         assert_eq!(section.results.len(), 1);
         assert_eq!(section.results[0].title, "Là Anh");
         assert_eq!(section.results[0].artists, vec!["Sơn Tùng M-TP"]);
+    }
+
+    #[tokio::test]
+    async fn local_search_matches_ascii_query_inside_diacritic_lyrics_title() {
+        let fixture = LocalFixture::new("diacritic-lyrics-title");
+        fixture.add_track(
+            "Sơn Tùng M-TP - 'Có chắc yêu là đây' Lyrics (Color Coded Lyrics)",
+            &["Sơn Tùng M-TP"],
+            None,
+            true,
+        );
+
+        assert_eq!(
+            normalize_search_text("Có chắc yêu là đây"),
+            "co chac yeu la day"
+        );
+        let section = fixture
+            .search("co chac yeu la day", SearchLens::Local)
+            .await;
+
+        assert_eq!(section.results.len(), 1);
+        assert!(section.results[0].title.contains("Có chắc yêu là đây"));
     }
 
     #[tokio::test]

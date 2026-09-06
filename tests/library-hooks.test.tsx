@@ -18,6 +18,7 @@ vi.mock("../src/services/ipc", () => ({
   removeLibraryFolder: vi.fn(),
   rescanLibraryFolder: vi.fn(),
   rescanAllLibraryFolders: vi.fn(),
+  deleteLocalFile: vi.fn(),
   revealLocalFile: vi.fn(),
 }));
 

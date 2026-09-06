@@ -7,6 +7,7 @@ import {
   subscribeToSearchCompleted,
   subscribeToSearchProviderUpdates,
 } from "../services/ipc";
+import { useUiStore } from "../stores/ui-store";
 import type {
   ProviderKind,
   ProviderSearchSection,
@@ -28,6 +29,16 @@ export interface UseSearchOptions {
 }
 
 export type SearchSections = Partial<Record<ProviderKind, ProviderSearchSection>>;
+
+export function searchWorkspaceKey({
+  query,
+  lens,
+  sortField,
+  sortDirection,
+  limit,
+}: Pick<UseSearchOptions, "query" | "lens" | "sortField" | "sortDirection" | "limit">): string {
+  return JSON.stringify([query.trim(), lens, sortField, sortDirection, limit ?? 25]);
+}
 
 interface PendingSearchStart {
   sections: Map<SearchId, SearchSections>;
@@ -56,6 +67,7 @@ function providersForLens(lens: SearchLens): ProviderKind[] {
     case "spotify":
       return ["spotify"];
     case "artists":
+      return SEARCH_PROVIDER_ORDER;
     case "albums":
       return ["local"];
     default:
@@ -113,7 +125,12 @@ function errorMessage(error: unknown): string {
 }
 
 export function useSearch({ query, lens, sortField, sortDirection, limit = 25 }: UseSearchOptions): UseSearchResult {
-  const [sections, setSections] = useState<SearchSections>({});
+  const workspaceKey = searchWorkspaceKey({ query, lens, sortField, sortDirection, limit });
+  const cachedWorkspace = useUiStore.getState().searchWorkspace;
+  const cachedSections = cachedWorkspace.completed && cachedWorkspace.searchKey === workspaceKey
+    ? cachedWorkspace.sections as SearchSections
+    : {};
+  const [sections, setSections] = useState<SearchSections>(cachedSections);
   const [activeSearchId, setActiveSearchId] = useState<SearchId | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [isDebouncing, setIsDebouncing] = useState(false);
@@ -190,6 +207,18 @@ export function useSearch({ query, lens, sortField, sortDirection, limit = 25 }:
   }, []);
 
   useEffect(() => {
+    const persistedWorkspace = useUiStore.getState().searchWorkspace;
+    if (persistedWorkspace.searchKey !== workspaceKey) {
+      return;
+    }
+    useUiStore.getState().setSearchWorkspace({
+      sections,
+      searchKey: workspaceKey,
+      completed: Boolean(query.trim()) && !isSearching && !isDebouncing && activeSearchId === null,
+    });
+  }, [activeSearchId, isDebouncing, isSearching, query, sections, workspaceKey]);
+
+  useEffect(() => {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     const normalizedQuery = query.trim();
@@ -200,6 +229,17 @@ export function useSearch({ query, lens, sortField, sortDirection, limit = 25 }:
     setSections({});
     setError(null);
     setIsDebouncing(false);
+
+    const persistedWorkspace = useUiStore.getState().searchWorkspace;
+    if (normalizedQuery && retryNonce === 0 && persistedWorkspace.completed && persistedWorkspace.searchKey === workspaceKey) {
+      setSections(persistedWorkspace.sections as SearchSections);
+      setIsSearching(false);
+      return undefined;
+    }
+
+    if (normalizedQuery) {
+      useUiStore.getState().setSearchWorkspace({ searchKey: workspaceKey, sections: {}, completed: false });
+    }
 
     if (debounceTimerRef.current !== null) {
       window.clearTimeout(debounceTimerRef.current);
@@ -280,7 +320,7 @@ export function useSearch({ query, lens, sortField, sortDirection, limit = 25 }:
         void Promise.resolve(cancelSearch()).catch(() => undefined);
       }
     };
-  }, [lens, limit, query, retryNonce, sortDirection, sortField]);
+  }, [lens, limit, query, retryNonce, sortDirection, sortField, workspaceKey]);
 
   const cancel = useCallback(async () => {
     generationRef.current += 1;

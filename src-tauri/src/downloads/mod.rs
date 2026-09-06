@@ -755,9 +755,16 @@ impl DownloadService {
                 None
             };
         let source_url = if task.provider_kind == ProviderKind::Spotify {
-            resolve_spotify_download_url(&task.canonical_url, cancellation.clone())
-                .await
-                .map_err(spotify_resolution_error)?
+            resolve_spotify_download_url(
+                &task.canonical_url,
+                Some(&task.title),
+                &task.artists,
+                None,
+                Some(ytdlp_path.as_path()),
+                cancellation.clone(),
+            )
+            .await
+            .map_err(spotify_resolution_error)?
         } else {
             task.canonical_url.clone()
         };
@@ -805,10 +812,10 @@ impl DownloadService {
             finalize_download_output(&source, &task.destination_directory, task)
                 .map_err(|error| (DownloadErrorCode::FinalizationFailed, error.to_string()))?,
         );
-        self.transition_and_publish(task, DownloadState::Completed)
-            .map_err(|error| (error.code(), error.to_string()))?;
         cleanup_owned_task_temp(&self.inner.task_temp_root, task.id)
             .map_err(|error| (DownloadErrorCode::FinalizationFailed, error.to_string()))?;
+        self.transition_and_publish(task, DownloadState::Completed)
+            .map_err(|error| (error.code(), error.to_string()))?;
         Ok(())
     }
 
@@ -869,10 +876,10 @@ impl DownloadService {
         task.error_detail = bounded_detail(detail.to_owned());
         task.speed_bytes_per_second = None;
         task.eta_seconds = None;
+        let _ = cleanup_owned_task_temp(&self.inner.task_temp_root, task.id);
         self.save_task(task)?;
         self.clear_runtime_progress(task.id);
         self.publish_snapshot();
-        let _ = cleanup_owned_task_temp(&self.inner.task_temp_root, task.id);
         Ok(())
     }
 
@@ -884,9 +891,9 @@ impl DownloadService {
         task.error_detail = Some("download cancelled".to_owned());
         task.speed_bytes_per_second = None;
         task.eta_seconds = None;
+        let _ = cleanup_owned_task_temp(&self.inner.task_temp_root, task.id);
         self.save_task(task)?;
         self.clear_runtime_progress(task.id);
-        let _ = cleanup_owned_task_temp(&self.inner.task_temp_root, task.id);
         self.publish_snapshot();
         Ok(())
     }
@@ -1584,21 +1591,29 @@ fn spotify_resolution_error(error: SpotifyDownloadError) -> (DownloadErrorCode, 
             DownloadErrorCode::Cancelled,
             "Spotify source matching was cancelled".to_owned(),
         ),
-        SpotifyDownloadError::SpotDlUnavailable => (
+        SpotifyDownloadError::YtDlpUnavailable => (
             DownloadErrorCode::ToolMissing,
-            "spotdl is not installed; install it to download Spotify results".to_owned(),
+            "yt-dlp is not installed; install it to download Spotify results".to_owned(),
         ),
         SpotifyDownloadError::Timeout => (
             DownloadErrorCode::ProcessFailed,
-            "spotdl took too long to find a playable source".to_owned(),
+            "yt-dlp took too long to find a matching Spotify audio source".to_owned(),
         ),
         SpotifyDownloadError::InvalidSpotifyUrl => (
             DownloadErrorCode::InvalidProviderUrl,
             "the Spotify result URL is invalid".to_owned(),
         ),
+        SpotifyDownloadError::MetadataUnavailable => (
+            DownloadErrorCode::ProcessFailed,
+            "Spotify public metadata could not be read".to_owned(),
+        ),
+        SpotifyDownloadError::NoPlayableMatch => (
+            DownloadErrorCode::ProcessFailed,
+            "no confident YouTube audio match was found for this Spotify track".to_owned(),
+        ),
         SpotifyDownloadError::Failed | SpotifyDownloadError::InvalidResponse => (
             DownloadErrorCode::ProcessFailed,
-            "spotdl could not find a playable source for this Spotify result".to_owned(),
+            "yt-dlp could not find a playable source for this Spotify result".to_owned(),
         ),
     }
 }

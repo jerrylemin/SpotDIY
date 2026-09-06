@@ -19,9 +19,10 @@ See the dated reports in `Research/` for current API constraints and primary-sou
   metadata search and managed downloads, with no raw stderr or subprocess
   paths crossing IPC.
 - The former Spotify PKCE/catalog boundary is historical. The active boundary
-  invokes `spotdl save` for transient metadata/search results and `spotdl url`
-  to resolve a canonical Spotify track to a validated YouTube or SoundCloud
-  source before an audio-only MP3 download.
+  invokes `spotdl save` for transient metadata/search results. Spotify play
+  and download then use public Spotify embed metadata plus bounded `yt-dlp`
+  `ytsearch25` matching, accepting only a title/artist match within the
+  duration tolerance before the audio-only pipeline runs.
 - Search results are transient. Provider payloads, tokens, credentials, and
   raw tool output are not stored in SQLite.
 
@@ -66,9 +67,10 @@ overwriting an existing file.
 YouTube advertises downloads and canonicalizes a validated `webpage_url`,
 falling back only from a strict 11-character video ID. SoundCloud accepts only
 validated full URLs from its alternate URL fields; it advertises audio
-downloads only. Spotify is ready when `spotdl` is installed, searches through
-that bounded local CLI, and advertises audio-only search-result downloads;
-`spotdl` resolves each canonical track to a validated YouTube/SoundCloud URL.
+downloads only. Spotify is ready when `spotdl` and `yt-dlp` are installed,
+searches through the bounded local CLI, and advertises audio-only search-result
+downloads. The public Spotify embed plus bounded yt-dlp matcher resolves each
+result to a validated YouTube URL.
 No client ID, market, login, token, or credential is required. Provider
 search/download failures cross the native boundary as structured code/detail
 values without raw commands or credentials.

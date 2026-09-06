@@ -4108,6 +4108,17 @@ export async function renameLocalFile(sourceId: SourceId, name: string): Promise
   }
 }
 
+export async function deleteLocalFile(sourceId: SourceId): Promise<void> {
+  if (!isTauriRuntime()) {
+    throw new IpcError("Deleting local files requires the native SpotDIY runtime.");
+  }
+  try {
+    await invoke("delete_local_file", { sourceId: sourceIdSchema.parse(sourceId) });
+  } catch (error) {
+    throw new IpcError("SpotDIY could not delete that local file.", error);
+  }
+}
+
 export function parseScanProgress(value: unknown): ScanProgress {
   return scanProgressSchema.parse(value) as ScanProgress;
 }

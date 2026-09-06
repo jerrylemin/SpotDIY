@@ -207,19 +207,6 @@ function Overview({ inspector }: { inspector: TrackInspectorDto }) {
   );
 }
 
-function CollectionState({ inspector }: { inspector: TrackInspectorDto }) {
-  const state = inspector.collectionState;
-  return (
-    <div className="inspector-collection-state">
-      <div className="inspector-state-row"><span>Liked</span><strong>{state.liked ? "Yes" : "No"}</strong></div>
-      <div className="inspector-state-row"><span>Rating</span><strong>{state.rating === null ? "Not rated" : `${state.rating}/5`}</strong></div>
-      <div className="inspector-state-row"><span>Inbox</span><strong>{state.inInbox ? "In Inbox" : "Not in Inbox"}</strong></div>
-      <div className="inspector-state-row"><span>Tags</span><strong>{state.tags.length > 0 ? state.tags.map((tag) => tag.name).join(" · ") : "No tags"}</strong></div>
-      <div className="inspector-state-row"><span>Playlists</span><strong>{state.playlistMemberships.length > 0 ? state.playlistMemberships.map((playlist) => playlist.name).join(" · ") : "No playlist memberships"}</strong></div>
-    </div>
-  );
-}
-
 function QualityState({ inspector, currentSourceId }: { inspector: TrackInspectorDto; currentSourceId: string | null }) {
   const current = inspector.sources.find((source) => source.sourceId === currentSourceId) ?? inspector.sources.find((source) => source.sourceId === inspector.preferredSourceId) ?? null;
   return (
@@ -239,7 +226,6 @@ function inspectorSections(inspector: TrackInspectorDto, currentSourceId: string
     { id: "overview", title: "OVERVIEW", content: <Overview inspector={inspector} /> },
     { id: "sources", title: "SOURCES", content: <div className="inspector-source-list">{hasVideoDownload ? <label className="inspector-download-control">Provider download format<select aria-label="Download mode" onChange={(event) => onDownloadModeChange(event.target.value as DownloadMode)} value={downloadMode}><option value="audio">Audio</option><option value="video">Video</option></select></label> : null}{inspector.sources.map((source) => <SourceCard current={source.sourceId === currentSourceId} downloadMode={downloadMode} downloadReadiness={downloadReadiness} key={source.sourceId} onAction={sourceAction} source={source} />)}</div> },
     { id: "quality", title: "QUALITY", content: <QualityState currentSourceId={currentSourceId} inspector={inspector} /> },
-    { id: "collection", title: "COLLECTION", content: <CollectionState inspector={inspector} /> },
     { id: "capabilities", title: "CAPABILITIES", content: <div className="inspector-capability-source-list">{inspector.sources.map((source) => <div className="inspector-capability-source" key={source.sourceId}><div><ProviderBadge kind={source.provider} /><strong>{providerName(source.provider)}</strong></div><CapabilityList source={source} /></div>)}</div> },
   ];
 }
@@ -410,12 +396,12 @@ export function SearchResultInspector({ manageEscape = false, onClose, result }:
           {error ? <div className="inspector-error" role="alert"><SpotIcon name="alert" size={15} /><span>{error}</span></div> : null}
           <p className="inspector-muted">Online results stay ephemeral until playback starts. Playing a result saves its validated provider source so the native player can load it and the queue can restore it.</p>
           <div className="inspector-source-actions">
-            {result.provider !== "spotify" ? <button aria-label="Play online" className="button button-primary button-small icon-only-button" disabled={!playAction?.enabled || busy} onClick={() => void run(() => playSearchResult(result))} title={playAction?.enabled ? "Play this provider result" : playAction?.reason} type="button"><SpotIcon name="play" size={13} /> Play online</button> : null}
+            <button aria-label="Play online" className="button button-primary button-small icon-only-button" disabled={!playAction?.enabled || busy} onClick={() => void run(() => playSearchResult(result))} title={playAction?.enabled ? "Play this provider result" : playAction?.reason} type="button"><SpotIcon name="play" size={13} /> Play online</button>
             <button aria-label={result.provider === "spotify" ? "Open on Spotify" : "Open source"} className="button button-primary button-small icon-only-button" disabled={!result.canonicalUrl || busy} onClick={() => { if (result.canonicalUrl) void run(() => openProviderResult(result.provider, result.canonicalUrl!)); }} title={result.canonicalUrl ? "Open the validated provider source" : "No validated provider URL is available."} type="button"><SpotIcon name="arrow" size={13} /> {result.provider === "spotify" ? "Open on Spotify" : "Open source"}</button>
             {downloadModes.length > 1 ? <select aria-label="Download mode" disabled={busy || !downloadModes.length} onChange={(event) => setDownloadMode(event.target.value as DownloadMode)} title={downloadReason ?? "Choose the managed download format"} value={downloadMode}>{downloadModes.map((mode) => { const modeReason = downloadReadinessReason(result.provider, mode, { canonicalUrl: result.canonicalUrl, nativeRuntime: isTauriRuntime(), downloadsAvailable: true, downloadReadiness }); return <option disabled={Boolean(modeReason && !isDownloadFolderReadinessReason(modeReason))} key={mode} value={mode}>{mode === "audio" ? "Audio" : "Video"}</option>; })}</select> : null}
             {downloadModes.length > 0 ? <button aria-label={downloadModes.length === 1 ? "Download audio" : "Download"} className="button button-quiet button-small icon-only-button" disabled={!nativeDownload || busy} onClick={() => void run(() => queueDownload(downloadModes.includes(downloadMode) ? downloadMode : "audio"))} title={nativeDownload ? (isDownloadFolderReadinessReason(downloadReason) ? "Choose a download folder, then queue this download" : "Queue a managed provider download") : downloadReason} type="button"><SpotIcon name="download" size={13} /> {downloadModes.length === 1 ? "Download audio" : "Download"}</button> : null}
           </div>
-          <div className="inspector-disabled-explanation">{result.provider === "spotify" ? "Spotify audio is source-matched through spotdl; playback still opens Spotify." : playAction?.enabled ? "Online playback uses the validated provider URL." : playAction?.reason}</div>
+            <div className="inspector-disabled-explanation">{result.provider === "spotify" ? "Spotify audio is matched through spotdl, then played from the validated audio source." : playAction?.enabled ? "Online playback uses the validated provider URL." : playAction?.reason}</div>
         </div>
       ),
     },

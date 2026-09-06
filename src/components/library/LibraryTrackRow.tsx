@@ -6,11 +6,13 @@ import { ContextActionMenu } from "../common/ContextActionMenu";
 import { SpotIcon } from "../icons/SpotIcon";
 import { isTauriRuntime } from "../../services/ipc";
 import { useUiStore } from "../../stores/ui-store";
-import type { LibraryTrack, Playlist, SourceId, Tag, TrackCollectionState } from "../../types/domain";
+import type { LibraryTrack, Playlist, SourceId } from "../../types/domain";
 
 interface LibraryTrackRowProps {
   track: LibraryTrack;
+  deletePending: boolean;
   revealPending: boolean;
+  onDelete: (track: LibraryTrack) => void;
   onReveal: (sourceId: SourceId) => void;
   onRename: (track: LibraryTrack, name: string) => void;
   onPlayNow: (track: LibraryTrack) => void;
@@ -19,15 +21,11 @@ interface LibraryTrackRowProps {
   playbackPending: boolean;
   playbackEnabled: boolean;
   current: boolean;
-  collectionState?: TrackCollectionState;
-  collectionPlaylists: Playlist[];
-  collectionTags: Tag[];
-  collectionPending: boolean;
-  onLike: (track: LibraryTrack) => void;
-  onRating: (track: LibraryTrack, rating: number | null) => void;
-  onInbox: (track: LibraryTrack) => void;
+  pinned: boolean;
+  playlists: Playlist[];
+  playlistPending: boolean;
+  onPin: (track: LibraryTrack) => void;
   onPlaylist: (track: LibraryTrack, playlistId: Playlist["id"]) => void;
-  onTag: (track: LibraryTrack, tag: Tag | null, requestedName?: string) => void;
 }
 
 function formatDuration(durationMs: number | null): string | null {
@@ -74,7 +72,9 @@ function statusLabel(track: LibraryTrack): string {
 
 export function LibraryTrackRow({
   track,
+  deletePending,
   revealPending,
+  onDelete,
   onReveal,
   onRename,
   onPlayNow,
@@ -83,20 +83,17 @@ export function LibraryTrackRow({
   playbackPending,
   playbackEnabled,
   current,
-  collectionState,
-  collectionPlaylists,
-  collectionTags,
-  collectionPending,
-  onLike,
-  onRating,
-  onInbox,
+  pinned,
+  playlists,
+  playlistPending,
+  onPin,
   onPlaylist,
-  onTag,
 }: LibraryTrackRowProps) {
   const artworkSource = isTauriRuntime() && track.artworkPath
     ? convertFileSrc(track.artworkPath, "asset")
     : null;
   const [artworkFailed, setArtworkFailed] = useState(false);
+  const [playlistMenuOpen, setPlaylistMenuOpen] = useState(false);
   const openTrackInspector = useUiStore((state) => state.openTrackInspector);
 
   useEffect(() => {
@@ -105,6 +102,7 @@ export function LibraryTrackRow({
 
   const detail = track.availabilityDetail ?? track.statusDetail;
   const canReveal = isTauriRuntime() && track.available && track.indexStatus !== "missing";
+  const canDelete = canReveal;
   const canPlay = playbackEnabled && track.available && track.indexStatus === "indexed";
   const facts = qualityFacts(track);
   const rename = () => {
@@ -149,7 +147,7 @@ export function LibraryTrackRow({
           { id: "inspect", label: "Inspect", onSelect: () => openTrackInspector(track.trackId) },
           { id: "reveal", label: "Open location", onSelect: () => onReveal(track.sourceId), disabled: !canReveal || revealPending, disabledReason: "File unavailable" },
           { id: "rename", label: "Rename file", onSelect: rename, disabled: !canReveal || revealPending, disabledReason: "File unavailable" },
-          { id: "like", label: collectionState?.liked ? "Unlike" : "Like", onSelect: () => onLike(track), disabled: !isTauriRuntime() || collectionPending, disabledReason: "Native app only" },
+          { id: "delete", label: "Delete file", onSelect: () => onDelete(track), danger: true, disabled: !canDelete || deletePending, disabledReason: "File unavailable" },
         ]}
         className="library-track-context-menu"
         label={`Actions for ${track.title}`}
@@ -171,6 +169,7 @@ export function LibraryTrackRow({
           className="button button-quiet button-small icon-only-button"
           disabled={!canPlay || playbackPending}
           onClick={() => onPlayNext(track)}
+          title={canPlay ? "Insert this track immediately after the current track" : "This track cannot be played right now"}
           type="button"
         >
           <SpotIcon name="next" size={14} />
@@ -181,6 +180,7 @@ export function LibraryTrackRow({
           className="button button-quiet button-small icon-only-button"
           disabled={!canPlay || playbackPending}
           onClick={() => onAddToQueue(track)}
+          title={canPlay ? "Append this track to the persistent queue" : "This track cannot be played right now"}
           type="button"
         >
           <SpotIcon name="queue" size={14} />
@@ -203,7 +203,7 @@ export function LibraryTrackRow({
           title={canReveal ? "Reveal this file in Explorer" : "The local file is unavailable"}
           type="button"
         >
-          <SpotIcon name="arrow" size={14} />
+          <SpotIcon name="folder" size={14} />
           Open location
         </button>
         <button
@@ -216,52 +216,51 @@ export function LibraryTrackRow({
         >
           <SpotIcon name="edit" size={14} />
         </button>
-        <div className="library-collection-actions" aria-label={`Collection actions for ${track.title}`}>
+        <button
+          aria-label={`Delete ${track.title}`}
+          className="button button-quiet button-small playlist-danger"
+          disabled={!canDelete || deletePending}
+          onClick={() => onDelete(track)}
+          title={canDelete ? "Permanently delete this local file" : "The local file is unavailable"}
+          type="button"
+        >
+          <SpotIcon name="trash" size={14} />
+          Delete
+        </button>
+        <div className="library-track-library-actions" aria-label={`Library actions for ${track.title}`}>
           <button
-            aria-pressed={collectionState?.liked ?? false}
-            aria-label={collectionState?.liked ? "Unlike" : "Like"}
-            className={`button button-quiet button-small icon-only-button${collectionState?.liked ? " library-collection-active" : ""}`}
-            disabled={!isTauriRuntime() || collectionPending}
-            onClick={() => onLike(track)}
-            title={collectionState?.liked ? "Unlike" : "Like"}
-            type="button"
-          >
-            <SpotIcon name="bookmark" size={14} />
-            {collectionState?.liked ? "Liked" : "Like"}
-          </button>
-          <select
-            aria-label={`Rate ${track.title}`}
-            className="library-rating-select"
-            disabled={!isTauriRuntime() || collectionPending}
-            onChange={(event) => onRating(track, event.target.value ? Number(event.target.value) : null)}
-            value={collectionState?.rating ?? ""}
-          >
-            <option value="">Rate</option>
-            {[1, 2, 3, 4, 5].map((rating) => <option key={rating} value={rating}>{rating}/5</option>)}
-          </select>
-          <button
-            aria-label={collectionState?.inInbox ? "In Inbox" : "Add to Inbox"}
-            className={`button button-quiet button-small icon-only-button${collectionState?.inInbox ? " library-collection-active" : ""}`}
-            disabled={!isTauriRuntime() || collectionPending || collectionState?.inInbox === true}
-            onClick={() => onInbox(track)}
-            title={collectionState?.inInbox ? "Already in Inbox" : "Add this track to Inbox"}
+            aria-pressed={pinned}
+            aria-label={pinned ? `Unpin ${track.title}` : `Pin ${track.title} to top`}
+            className={`button button-quiet button-small icon-only-button${pinned ? " library-pin-active" : ""}`}
+            onClick={() => onPin(track)}
+            title={pinned ? "Unpin from the top of the library" : "Pin to the top of the library"}
             type="button"
           >
             <SpotIcon name="pin" size={14} />
-            {collectionState?.inInbox ? "In Inbox" : "Add Inbox"}
+            {pinned ? "Pinned" : "Pin to top"}
           </button>
-          <select
-            aria-label={`Add ${track.title} to playlist`}
-            className="library-playlist-select"
-            disabled={!isTauriRuntime() || collectionPending || collectionPlaylists.length === 0}
-            onChange={(event) => { if (event.target.value) onPlaylist(track, event.target.value as Playlist["id"]); event.currentTarget.value = ""; }}
-            value=""
+          <button
+            aria-expanded={playlistMenuOpen}
+            aria-label={`Add ${track.title} to a playlist`}
+            className="button button-quiet button-small icon-only-button"
+            disabled={!isTauriRuntime() || playlistPending || playlists.length === 0}
+            onClick={() => setPlaylistMenuOpen((open) => !open)}
+            title={playlists.length > 0 ? "Add to playlist" : "Create a playlist first"}
+            type="button"
           >
-            <option value="">Add playlist</option>
-            {collectionPlaylists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
-          </select>
-          <button aria-label="Tag" className="button button-quiet button-small icon-only-button" disabled={!isTauriRuntime() || collectionPending} onClick={() => { const name = window.prompt("Tag this track:", collectionTags[0]?.name ?? "favorite"); if (name) { const existing = collectionTags.find((tag) => tag.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase()); onTag(track, existing ?? null, existing ? undefined : name); } }} title="Tag" type="button"><SpotIcon name="bookmark" size={14} />Tag</button>
-          {collectionState?.tags.length ? <span className="library-tag-list">{collectionState.tags.map((tag) => <span key={tag.id}>{tag.name}</span>)}</span> : null}
+            <SpotIcon name="playlist" size={14} />
+            Add playlist
+          </button>
+          {playlistMenuOpen ? (
+            <div aria-label={`Choose a playlist for ${track.title}`} className="library-playlist-menu" role="dialog">
+              {playlists.map((playlist) => (
+                <button key={playlist.id} disabled={playlistPending} onClick={() => { onPlaylist(track, playlist.id); setPlaylistMenuOpen(false); }} type="button">
+                  <SpotIcon name="playlist" size={13} />
+                  <span>{playlist.name}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
       </ContextActionMenu>

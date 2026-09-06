@@ -61,9 +61,13 @@ path before invoking the scoped opener.
 Provider adapters report capability sets and normalize provider results into
 shared DTOs. `SourceFusionService` will match sources into `UnifiedTrack`
 records, while `SourceResolver` will select playable sources according to the
-user's ordered preferences. Persisted Spotify sources remain metadata-only;
-transient Spotify search results can use `spotdl` for source-matched audio
-downloads but never become in-app playback sources.
+user's ordered preferences. Persisted Spotify sources remain metadata-only.
+Transient Spotify search results use `spotdl` only for bounded catalog
+metadata search. When a result is played or downloaded, SpotDIY follows the
+Sunnify-style source-matching path: public Spotify embed metadata, bounded
+`ytsearch25`, title/artist filtering, and a maximum 30-second duration
+mismatch. Only the validated YouTube source is handed to the existing yt-dlp
+audio pipeline, and it never becomes a persisted Spotify playback source.
 
 Standard storage targets `%LOCALAPPDATA%\SpotDIY\spotdiy.sqlite3`; managed
 download task temp storage is `%LOCALAPPDATA%\SpotDIY\cache\downloads\<DownloadTaskId>`
@@ -135,8 +139,10 @@ provider payload, raw subprocess output, token, or credential is persisted.
 Spotify search invokes the locally installed `spotdl` executable with bounded
 output, timeout, cancellation, and no shell. No Spotify developer app, client
 ID, market, login, token, or credential is required. Search results are
-transient; when a result is downloaded, spotdl returns a YouTube/SoundCloud
-match transiently and the existing yt-dlp worker performs the MP3 download.
+transient. Playback and download resolve a result through public Spotify
+embed metadata and a bounded `ytsearch25` lookup, accepting only a
+title/artist match within the duration tolerance before the existing yt-dlp
+worker handles the audio.
 
 ## Plan 06 source fusion and resolver boundary
 
@@ -171,10 +177,12 @@ local-file row or change track metadata/preferred source.
 the validated provider preference order. Local candidates require availability,
 playback capability, and a successful managed `LibraryService` path check;
 local quality ranks known lossless codecs, then bit depth, sample rate,
-bitrate, and stable `SourceId`. YouTube and SoundCloud remain
-`ProviderPlaybackNotImplemented`, Spotify remains `MetadataOnly`, and no
-online URL or yt-dlp playback path reaches mpv. Its narrow readiness probe is
-the test seam for future provider playback.
+bitrate, and stable `SourceId`. Validated YouTube and SoundCloud sources are
+resolved by the native yt-dlp runner with `--format bestaudio --get-url
+--no-playlist`; only the returned direct audio URL reaches mpv, which runs
+with `--no-video`. Spotify remains `MetadataOnly` when persisted, while a
+transient Spotify search result is resolved through the bounded
+public-embed/YouTube matching path described in Plan 05.
 
 ## Plan 07 download boundary
 
@@ -192,10 +200,11 @@ typed queue command -> DownloadService -> downloads repository (schema 4)
 `DownloadService` is the sole owner of persistent download lifecycle. It
 validates YouTube/SoundCloud provider identity and canonical URLs, accepts
 Spotify only on transient search-result tasks, and reads the existing
-`downloads_directory` setting. Spotify tasks resolve through `spotdl` to a
-validated YouTube/SoundCloud source before yt-dlp; the service creates UUID
-task roots and never passes provider-derived filenames directly to the
-filesystem. It supports audio provider encoding, Spotify MP3 extraction, and
+`downloads_directory` setting. Spotify tasks resolve through the public-embed
+plus bounded yt-dlp matching path to a validated YouTube source before yt-dlp;
+the service creates UUID task roots and never passes provider-derived
+filenames directly to the filesystem. It supports audio provider encoding,
+Spotify MP3 extraction, and
 video best-video-plus-best-audio with FFmpeg when available; missing required
 tooling fails truthfully. Progress is machine-readable and throttled for
 SQLite persistence while snapshots remain revisioned and bounded for the UI.

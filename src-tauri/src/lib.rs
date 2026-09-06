@@ -75,7 +75,9 @@ use crate::domain::{
     Album, AlbumId, Artist, ArtistId, ProviderKind, SourceId, TrackId, TrackSource, UnifiedTrack,
     VersionInfo,
 };
-use crate::search::{SearchEvent, SearchEventSink, SearchRequest, SearchResult, SearchStarted};
+use crate::search::{
+    SearchCancellation, SearchEvent, SearchEventSink, SearchRequest, SearchResult, SearchStarted,
+};
 use crate::sources::{
     validate_provider_url, LocalSourceAdapter, SoundcloudSourceAdapter, SourceAdapter,
     SourceResolution, SourceResolver, SpotifySourceAdapter, YoutubeSourceAdapter,
@@ -1283,6 +1285,17 @@ fn rename_local_file(
 }
 
 #[tauri::command]
+fn delete_local_file(
+    source_id: crate::domain::SourceId,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .library
+        .delete_path(source_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_playback_snapshot(state: State<'_, AppState>) -> PlaybackSnapshot {
     state.playback.snapshot()
 }
@@ -1308,9 +1321,10 @@ fn cancel_preview(state: State<'_, AppState>) -> PreviewState {
     state.preview.cancel_preview()
 }
 
-fn ensure_online_search_result(
+async fn ensure_online_search_result(
     database: &Database,
     result: &SearchResult,
+    yt_dlp_path: Option<PathBuf>,
 ) -> Result<TrackPlaybackRequest, PlaybackError> {
     if result.entity_kind != search::types::SearchEntityKind::Track {
         return Err(PlaybackError::new(
@@ -1319,8 +1333,25 @@ fn ensure_online_search_result(
             false,
         ));
     }
-    let provider = match result.provider {
-        ProviderKind::Youtube | ProviderKind::Soundcloud => result.provider,
+    let (provider, source_url, provider_item_id) = match result.provider {
+        ProviderKind::Youtube | ProviderKind::Soundcloud => {
+            let source_url = result.canonical_url.as_ref().ok_or_else(|| {
+                PlaybackError::new(
+                    playback::PlaybackErrorCode::SourceUnavailable,
+                    "the search result has no validated provider URL",
+                    false,
+                )
+            })?;
+            let source_url = validate_provider_url(result.provider, source_url.as_url().as_str())
+                .map_err(|_| {
+                PlaybackError::new(
+                    playback::PlaybackErrorCode::SourceUnavailable,
+                    "the search result provider URL is invalid",
+                    false,
+                )
+            })?;
+            (result.provider, source_url, result.provider_item_id.clone())
+        }
         ProviderKind::Local => {
             return Err(PlaybackError::new(
                 playback::PlaybackErrorCode::SourceNotPlayable,
@@ -1329,29 +1360,57 @@ fn ensure_online_search_result(
             ));
         }
         ProviderKind::Spotify => {
-            return Err(PlaybackError::new(
-                playback::PlaybackErrorCode::SourceNotPlayable,
-                "Spotify search results do not support in-app playback; open Spotify or download audio",
-                false,
-            ));
+            let spotify_url = result.canonical_url.as_ref().ok_or_else(|| {
+                PlaybackError::new(
+                    playback::PlaybackErrorCode::SourceUnavailable,
+                    "the Spotify result has no validated URL",
+                    false,
+                )
+            })?;
+            validate_provider_url(ProviderKind::Spotify, spotify_url.as_url().as_str()).map_err(
+                |_| {
+                    PlaybackError::new(
+                        playback::PlaybackErrorCode::SourceUnavailable,
+                        "the Spotify result URL is invalid",
+                        false,
+                    )
+                },
+            )?;
+            let resolved_url = crate::sources::spotify::resolve_spotify_download_url(
+                spotify_url.as_url().as_str(),
+                Some(&result.title),
+                &result.artists,
+                result.duration_ms,
+                yt_dlp_path.as_deref(),
+                SearchCancellation::new(),
+            )
+            .await
+            .map_err(|error| {
+                PlaybackError::new(
+                    playback::PlaybackErrorCode::SourceUnavailable,
+                    format!("could not find a playable match for this Spotify track: {error}"),
+                    true,
+                )
+            })?;
+            let (provider, source_url) = [ProviderKind::Youtube, ProviderKind::Soundcloud]
+                .into_iter()
+                .find_map(|provider| {
+                    validate_provider_url(provider, &resolved_url)
+                        .ok()
+                        .map(|safe_url| (provider, safe_url))
+                })
+                .ok_or_else(|| {
+                    PlaybackError::new(
+                        playback::PlaybackErrorCode::SourceUnavailable,
+                        "spotdl returned an unsupported playable URL",
+                        false,
+                    )
+                })?;
+            let provider_item_id = source_url.as_url().as_str().to_owned();
+            (provider, source_url, provider_item_id)
         }
     };
-    let source_url = result.canonical_url.as_ref().ok_or_else(|| {
-        PlaybackError::new(
-            playback::PlaybackErrorCode::SourceUnavailable,
-            "the search result has no validated provider URL",
-            false,
-        )
-    })?;
-    let source_url =
-        validate_provider_url(provider, source_url.as_url().as_str()).map_err(|_| {
-            PlaybackError::new(
-                playback::PlaybackErrorCode::SourceUnavailable,
-                "the search result provider URL is invalid",
-                false,
-            )
-        })?;
-    if result.provider_item_id.trim().is_empty() {
+    if provider_item_id.trim().is_empty() {
         return Err(PlaybackError::new(
             playback::PlaybackErrorCode::SourceUnavailable,
             "the search result has no provider item ID",
@@ -1361,7 +1420,7 @@ fn ensure_online_search_result(
 
     let sources = SourceRepository::new(database);
     if let Some(source) = sources
-        .find_by_provider_identity(provider, &result.provider_item_id)
+        .find_by_provider_identity(provider, &provider_item_id)
         .map_err(|error| {
             PlaybackError::new(
                 playback::PlaybackErrorCode::PersistenceFailed,
@@ -1420,7 +1479,7 @@ fn ensure_online_search_result(
         source_id,
         track_id,
         provider,
-        result.provider_item_id.clone(),
+        provider_item_id.clone(),
         ipc::provider_capabilities(provider),
     )
     .map_err(|error| {
@@ -1450,7 +1509,7 @@ fn ensure_online_search_result(
     })?;
     if let Err(error) = TrackRepository::new(database).create(&track) {
         if let Some(source) = SourceRepository::new(database)
-            .find_by_provider_identity(provider, &result.provider_item_id)
+            .find_by_provider_identity(provider, &provider_item_id)
             .map_err(|lookup_error| {
                 PlaybackError::new(
                     playback::PlaybackErrorCode::PersistenceFailed,
@@ -1495,13 +1554,15 @@ fn play_track(
 }
 
 #[tauri::command]
-fn play_search_result(
+async fn play_search_result(
     result: SearchResult,
     state: State<'_, AppState>,
 ) -> Result<PlaybackSnapshot, PlaybackErrorDto> {
+    let request =
+        ensure_online_search_result(&state.database, &result, state.media_tools.yt_dlp_path())
+            .await
+            .map_err(|error| error.dto())?;
     state.preview.with_preview_stopped(|| {
-        let request =
-            ensure_online_search_result(&state.database, &result).map_err(|error| error.dto())?;
         state
             .playback
             .play_track(request)
@@ -2327,6 +2388,7 @@ pub fn run() {
             get_visual_library_dataset,
             reveal_local_file,
             rename_local_file,
+            delete_local_file,
             list_playlists,
             get_playlist,
             create_playlist,

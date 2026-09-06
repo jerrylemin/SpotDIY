@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import {
   LIBRARY_PROGRESS_EVENT,
   addLibraryFolders,
+  deleteLocalFile,
   getLibraryPage,
   getLibraryStatus,
   isTauriRuntime,
@@ -97,6 +98,14 @@ export function useRenameLocalFile() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ sourceId, name }: { sourceId: SourceId; name: string }) => renameLocalFile(sourceId, name),
+    onSuccess: () => invalidateLibraryQueries(queryClient),
+  });
+}
+
+export function useDeleteLocalFile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sourceId: SourceId) => deleteLocalFile(sourceId),
     onSuccess: () => invalidateLibraryQueries(queryClient),
   });
 }

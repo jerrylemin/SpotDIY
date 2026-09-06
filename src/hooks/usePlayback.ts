@@ -174,16 +174,17 @@ export function usePlayback() {
   }, []);
 
   const cycleRepeatMode = useCallback(async () => {
-    const nextRepeatMode: RepeatMode = snapshot.repeatMode === "off"
+    const currentRepeatMode = usePlayerStore.getState().snapshot.repeatMode;
+    const nextRepeatMode: RepeatMode = currentRepeatMode === "off"
       ? "one"
-      : snapshot.repeatMode === "one"
+      : currentRepeatMode === "one"
         ? "all"
         : "off";
     return runSnapshotAction(
       () => setRepeatMode(nextRepeatMode),
       "SpotDIY could not update repeat mode.",
     );
-  }, [runSnapshotAction, snapshot.repeatMode]);
+  }, [runSnapshotAction]);
 
   const playNow = useCallback((trackId: TrackId, sourceId: SourceId | null) => runSnapshotAction(
     () => playTrack({ trackId, sourceId }),
@@ -201,14 +202,14 @@ export function usePlayback() {
   ), [runSnapshotAction]);
 
   const toggleMuted = useCallback(() => runSnapshotAction(
-    () => setPlaybackMuted(!snapshot.muted),
+    () => setPlaybackMuted(!usePlayerStore.getState().snapshot.muted),
     "SpotDIY could not update the mute state.",
-  ), [runSnapshotAction, snapshot.muted]);
+  ), [runSnapshotAction]);
 
   const toggleShuffle = useCallback(() => runSnapshotAction(
-    () => setShuffleEnabled(!snapshot.shuffleEnabled),
+    () => setShuffleEnabled(!usePlayerStore.getState().snapshot.shuffleEnabled),
     "SpotDIY could not update shuffle mode.",
-  ), [runSnapshotAction, snapshot.shuffleEnabled]);
+  ), [runSnapshotAction]);
 
   const switchSource = useCallback((trackId: TrackId, sourceId: SourceId) => runSnapshotAction(
     () => switchPlaybackSource({ trackId, sourceId }),

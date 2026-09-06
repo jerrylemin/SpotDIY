@@ -528,7 +528,8 @@ fn yt_dlp_command(executable: &str, args: &[String]) -> Command {
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     command
 }
 

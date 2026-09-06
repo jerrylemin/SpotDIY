@@ -82,6 +82,8 @@ pub enum LibraryError {
     RenameConflict,
     #[error("file rename failed: {0}")]
     RenameFailed(String),
+    #[error("file deletion failed: {0}")]
+    DeleteFailed(String),
 }
 
 #[derive(Clone, Debug)]
@@ -648,6 +650,71 @@ impl LibraryService {
         Ok(())
     }
 
+    pub fn delete_path(&self, source_id: SourceId) -> Result<(), LibraryError> {
+        let record: Option<(String, String, String, String)> =
+            self.database.with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT lf.path, lf.normalized_path_key, f.path, f.normalized_path_key
+                         FROM local_files lf
+                         INNER JOIN track_sources ts ON ts.id = lf.source_id
+                         INNER JOIN library_folders f ON f.id = lf.library_folder_id
+                         WHERE lf.source_id = ?1
+                           AND ts.provider_kind = 'local'
+                           AND f.enabled = 1",
+                        params![source_id.to_string()],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                    )
+                    .optional()
+            })?;
+        let Some((stored_path, stored_path_key, folder_path, folder_path_key)) = record else {
+            return Err(LibraryError::SourceNotFound { source_id });
+        };
+
+        let folder = normalize_folder_path(&folder_path)?;
+        if folder.normalized_path_key != folder_path_key {
+            return Err(LibraryError::InvalidStoredValue {
+                field: "library_folders.normalized_path_key",
+                value: folder_path_key,
+            });
+        }
+        let (current_path, current_path_key) = normalize_file_path(&stored_path)?;
+        if current_path_key != stored_path_key
+            || !is_path_within(&folder_path_key, &current_path_key)
+        {
+            return Err(LibraryError::InvalidStoredValue {
+                field: "local_files.normalized_path_key",
+                value: stored_path_key,
+            });
+        }
+
+        fs::remove_file(&current_path)
+            .map_err(|error| LibraryError::DeleteFailed(error.to_string()))?;
+
+        let mut connection = self.database.connection()?;
+        let transaction = connection.transaction()?;
+        let source_changed = transaction.execute(
+            "DELETE FROM track_sources
+             WHERE id = ?1
+               AND provider_kind = 'local'
+               AND EXISTS (
+                   SELECT 1 FROM local_files
+                   WHERE source_id = track_sources.id
+                     AND normalized_path_key = ?2
+               )",
+            params![source_id.to_string(), stored_path_key],
+        )?;
+        if source_changed != 1 {
+            return Err(LibraryError::Sqlite(rusqlite::Error::QueryReturnedNoRows));
+        }
+        transaction.execute(
+            "DELETE FROM tracks WHERE id NOT IN (SELECT track_id FROM track_sources)",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn resolve_playback_path(
         &self,
         track_id: TrackId,
@@ -932,6 +999,23 @@ impl LibraryService {
             )?;
             missing += 1;
         }
+        // A completed scan has already had a chance to match a renamed file
+        // by fingerprint. Any remaining missing local source is a real delete
+        // (or an explicit removal) rather than a recoverable rename, so remove
+        // it from the library instead of leaving an Unavailable row behind.
+        transaction.execute(
+            "DELETE FROM track_sources
+             WHERE provider_kind = 'local'
+               AND id IN (
+                   SELECT source_id FROM local_files
+                   WHERE library_folder_id = ?1 AND index_status = 'missing'
+               )",
+            params![folder_id.to_string()],
+        )?;
+        transaction.execute(
+            "DELETE FROM tracks WHERE id NOT IN (SELECT track_id FROM track_sources)",
+            [],
+        )?;
         transaction.commit()?;
         Ok(missing)
     }
@@ -1287,9 +1371,6 @@ fn emit_progress(sink: &Option<ProgressSink>, progress: ScanProgress) {
 
 fn scan_summary_error(summary: &ScanSummary) -> Option<String> {
     let mut issues = Vec::new();
-    if summary.missing_files > 0 {
-        issues.push(format!("{} missing file(s)", summary.missing_files));
-    }
     if summary.metadata_failures > 0 {
         issues.push(format!(
             "{} metadata/I/O failure(s)",
@@ -1324,8 +1405,8 @@ fn list_folders(database: &Database) -> Result<Vec<LibraryFolder>, LibraryError>
         "SELECT f.id, f.path, f.normalized_path_key, f.enabled, f.scan_status,
                 f.scan_generation, f.last_scan_started_at, f.last_scan_finished_at,
                 f.last_scan_error, f.created_at, f.updated_at,
-                COUNT(lf.source_id),
-                SUM(CASE WHEN lf.index_status = 'indexed' THEN 1 ELSE 0 END)
+                SUM(CASE WHEN lf.source_id IS NOT NULL AND lf.index_status <> 'missing' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN lf.source_id IS NOT NULL AND lf.index_status = 'indexed' THEN 1 ELSE 0 END)
          FROM library_folders f
          LEFT JOIN local_files lf ON lf.library_folder_id = f.id
          GROUP BY f.id
@@ -1777,7 +1858,7 @@ fn load_library_page(
         "SELECT COUNT(*) FROM local_files lf
          INNER JOIN track_sources ts ON ts.id = lf.source_id
          WHERE lf.library_folder_id IS NOT NULL
-           AND lf.index_status <> 'pending' {where_clause}"
+           AND lf.index_status NOT IN ('pending', 'missing') {where_clause}"
     );
     let total: i64 = match folder_param.as_deref() {
         Some(folder_id) => {
@@ -1812,7 +1893,7 @@ fn load_library_page(
          INNER JOIN tracks t ON t.id = ts.track_id
          LEFT JOIN albums al ON al.id = t.album_id
          WHERE lf.library_folder_id IS NOT NULL
-           AND lf.index_status <> 'pending' {where_clause}
+           AND lf.index_status NOT IN ('pending', 'missing') {where_clause}
          ORDER BY {sort_column} {direction}, lf.normalized_path_key COLLATE NOCASE ASC, ts.id ASC
          LIMIT ?{limit_index} OFFSET ?{offset_index}",
         limit_index = if folder_param.is_some() { 2 } else { 1 },
@@ -2378,17 +2459,15 @@ mod tests {
         let missing_scan = service.scan_folder_now(folder.id, false, None).unwrap();
         assert_eq!(missing_scan.missing_files, 1);
         let missing_page = service.page(LibraryPageRequest::default()).unwrap();
-        let missing = missing_page
+        assert_eq!(missing_page.total, 1);
+        assert!(missing_page
             .items
             .iter()
-            .find(|item| item.path == second_display_path)
-            .unwrap();
-        assert!(!missing.available);
-        assert_eq!(missing.index_status, LocalFileIndexStatus::Missing);
+            .all(|item| item.path != second_display_path));
 
         fs::write(&second_path, minimal_wav()).unwrap();
         let restore_scan = service.scan_folder_now(folder.id, false, None).unwrap();
-        assert_eq!(restore_scan.changed_files, 1);
+        assert_eq!(restore_scan.new_files, 1);
         let restored = service
             .page(LibraryPageRequest::default())
             .unwrap()
@@ -2547,6 +2626,40 @@ mod tests {
     }
 
     #[test]
+    fn deletes_a_managed_file_and_removes_it_from_the_library() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("delete-me.wav");
+        fs::write(&path, minimal_wav()).unwrap();
+
+        let database = Database::open(TempDatabasePath::new("library-delete-file").path()).unwrap();
+        let artwork = tempfile::tempdir().unwrap();
+        let service = LibraryService::new(database, artwork.path()).unwrap();
+        let folder = service
+            .add_folders(vec![directory.path().to_path_buf()])
+            .unwrap()
+            .remove(0);
+        service.scan_folder_now(folder.id, false, None).unwrap();
+        let item = service.page(LibraryPageRequest::default()).unwrap().items[0].clone();
+
+        service.delete_path(item.source_id).unwrap();
+
+        assert!(!path.exists());
+        let page = service.page(LibraryPageRequest::default()).unwrap();
+        assert_eq!(page.total, 0);
+        let remaining_sources: i64 = service
+            .database
+            .with_connection(|connection| {
+                connection.query_row(
+                    "SELECT COUNT(*) FROM track_sources WHERE id = ?1",
+                    params![item.source_id.to_string()],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(remaining_sources, 0);
+    }
+
+    #[test]
     fn rejects_unsafe_or_colliding_file_renames() {
         let directory = tempfile::tempdir().unwrap();
         let original_path = directory.path().join("original.wav");
@@ -2614,20 +2727,17 @@ mod tests {
         assert_eq!(summary.renamed_files, 0);
         assert_eq!(summary.missing_files, 2);
         let page = service.page(LibraryPageRequest::default()).unwrap();
-        assert_eq!(page.total, 3);
+        assert_eq!(page.total, 1);
         let replacement = page
             .items
             .iter()
             .find(|item| item.path.ends_with("replacement.wav"))
             .unwrap();
         assert!(!original_ids.contains(&replacement.source_id));
-        assert_eq!(
-            page.items
-                .iter()
-                .filter(|item| item.index_status == LocalFileIndexStatus::Missing)
-                .count(),
-            2
-        );
+        assert!(page
+            .items
+            .iter()
+            .all(|item| item.index_status != LocalFileIndexStatus::Missing));
     }
 
     #[test]
